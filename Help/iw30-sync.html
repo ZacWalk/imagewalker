@@ -1,0 +1,18 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=Windows-1252">
+<title>3.0 Synchronize</title><link rel="stylesheet" type="text/css" href="iw.css"></head>
+<body><h1>Synchronize</h1>
+<p>Choose a local folder or collection-folder list and a remote tree, then
+Analyze. A collection maps each root into Remote\root-name; a single-folder
+scope maps directly to Remote. Missing roots and overlapping or reparse-point
+trees are refused rather than silently omitted.</p>
+<p>Review the four-column comparison and each copy/delete direction. Analyze
+does not write. Run revalidates every row before acting, and a destination
+created or changed after Review is not silently replaced.</p>
+<p class="note">Deletion does not use the Recycle Bin. A plan containing
+deletions requires a counted confirmation. Cancel stops future rows and leaves
+completed work in place; inspect all results after a partial run.</p>
+<p>Recovery copies are secured before deletion or replacement. After closing
+Sync, Edit &gt; Undo can restore completed changes in the current session.
+Files changed outside ImageWalker are refused, not overwritten.</p>
+<p><a href="iw30.html">ImageWalker 3.0 help</a></p></body></html>

@@ -1,2 +1,0 @@
-C:\Development\Diffractor\tools\nasm -fwin32 -o C:\Development\Diffractor\Libraries\LibJpeg\simd\x.obj -i C:\Development\Diffractor\Libraries\LibJpeg\simd\ C:\Development\Diffractor\Libraries\LibJpeg\simd\jsimdcpu.asm
-pause

@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "dd": {
+      "type": "stdio",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-NonInteractive", "-File", "${workspaceFolder}/dd.ps1", "mcp"]
+    }
+  }
+}

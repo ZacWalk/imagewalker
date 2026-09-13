@@ -1,0 +1,5 @@
+/build/
+/.vs/
+/tmp/
+/.dd/state/
+*.dd-backup-*

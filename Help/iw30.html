@@ -1,0 +1,38 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=Windows-1252">
+<title>ImageWalker 3.0</title><link rel="stylesheet" type="text/css" href="iw.css"></head>
+<body><h1>ImageWalker 3.0</h1>
+<p>Choose Browse to view the current folder. The mode strip opens Convert,
+Rename, Edit and Sync; pressing an active mode returns to Browse. Folders
+toggles the folder tree, and Full screen hides the browsing chrome.</p>
+<h2>File workflows</h2><ul>
+<li><a href="iw30-openwith.html">Open with an application or configured tool</a></li>
+<li><a href="iw30-transfer.html">Copy or move files and sidecars</a></li>
+<li><a href="iw30-convert.html">Convert or resize images</a></li>
+<li><a href="iw30-rename.html">Batch rename</a></li>
+<li><a href="iw30-edit.html">Photo Edit</a></li>
+<li><a href="iw30-sync.html">Synchronize folders</a></li></ul>
+<p>Convert, Rename and Sync require a reviewed plan. Analyze reads the sources,
+Review lists every proposed action, and Run performs that snapshot. Changing
+targets or destinations discards the old plan. A destination appearing after
+Review is never silently overwritten.</p>
+<p class="note">Cancel stops future rows, not completed work. Inspect the
+Success, Failed, Skipped and Not run outcomes before repeating a batch.
+Closing a busy task asks whether to cancel; Close returns to Browse, not Exit.</p>
+<p>Settings and the latest-run diagnostic log are kept beside the executable.
+The Debug executable has separate settings and log files.</p>
+<p>Double-click a video or audio file, or press Enter, to open its playback
+task. A single selection previews its poster and properties. Play/Pause, Stop,
+seek and volume use the installed Windows media components; unavailable
+components are reported without disabling image browsing.</p>
+<h2>Undo and recovery</h2>
+<p>Edit &gt; Undo (Ctrl+Z) undoes a Photo Edit draft, or the latest completed
+file task after the task view is closed. File Undo asks for confirmation and
+refuses externally changed files. It covers Convert, Rename, Sync, the
+Copy/Move dialog and Photo Edit saves; Windows shell clipboard/drop and Recycle
+Bin actions use Windows recovery instead.</p>
+<p class="note">Automatic Undo lasts for the current session. Original bytes
+and recovery manifests remain in imagewalker30.undo beside the executable after
+exit or a crash, but are not replayed automatically or removed automatically.
+Keep these copies until you no longer need recovery.</p>
+<p><a href="index.html">Help for earlier versions</a></p></body></html>

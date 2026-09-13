@@ -1,0 +1,57 @@
+name: Windows validation
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-validation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check declared toolchain
+        run: .\dd.ps1 doctor --json
+
+      - name: Build, test and smoke-test Debug and Release
+        run: |
+          $env:TEMP = $env:RUNNER_TEMP
+          $env:TMP = $env:RUNNER_TEMP
+          Start-Transcript -Path "$env:RUNNER_TEMP\imagewalker-test.log"
+          try {
+            & .\dd.ps1 test
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          finally {
+            Stop-Transcript
+          }
+
+      - name: Validate help links and strict CHM build
+        run: .\dd.ps1 check-help --yes
+
+      - name: Preserve validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-validation
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/imagewalker-test.log
+            ${{ runner.temp }}/dd-logs/*.log
+            ${{ runner.temp }}/dd-ctest-*.xml
+            build/*/Testing/Temporary/LastTest.log

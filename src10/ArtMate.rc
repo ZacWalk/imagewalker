@@ -1,0 +1,195 @@
+// ArtMate 1.0 resources.
+
+#include "resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+#include "winres.h"
+#include "atlres.h"
+#undef APSTUDIO_READONLY_SYMBOLS
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+#ifdef _WIN32
+LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+#pragma code_page(1252)
+#endif //_WIN32
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first: the shell picks the numerically first
+// icon group in the executable, whatever the frame's own SetIcon says.
+IDR_MAINFRAME           ICON    DISCARDABLE     "res\\imagewalker.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Bitmap
+//
+
+IDB_BAR_HOT             BITMAP  DISCARDABLE     "res\\hottoolb.bmp"
+IDB_BAR_COLD            BITMAP  DISCARDABLE     "res\\coldtool.bmp"
+IDB_VIEWS               BITMAP  DISCARDABLE     "res\\views.bmp"
+IDB_PREVIEW_MODE        BITMAP  DISCARDABLE     "res\\previewmode.bmp"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Accelerator
+//
+
+IDR_MAINFRAME ACCELERATORS PRELOAD MOVEABLE PURE
+BEGIN
+    "A",            ID_EDIT_SELECT_ALL,     VIRTKEY, CONTROL, NOINVERT
+    "C",            ID_EDIT_COPY,           VIRTKEY, CONTROL, NOINVERT
+    "P",            ID_BROWSE_PARENT,       VIRTKEY, CONTROL, NOINVERT
+    VK_BACK,        ID_BROWSE_BACK,         VIRTKEY, ALT, NOINVERT
+    VK_F1,          ID_HELP_FINDER,         VIRTKEY, NOINVERT
+    VK_F5,          ID_VIEW_REFRESH,        VIRTKEY, NOINVERT
+    VK_INSERT,      ID_EDIT_COPY,           VIRTKEY, CONTROL, NOINVERT
+END
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Menu
+//
+
+IDR_MAINFRAME MENU PRELOAD DISCARDABLE
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "Browse &Parent\tCtrl+P",      ID_BROWSE_PARENT
+        MENUITEM "&Back\tAlt+Left",             ID_BROWSE_BACK
+        MENUITEM "&Forward",                    ID_BROWSE_FORWARD
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit",                       ID_APP_EXIT
+    END
+    POPUP "&Edit"
+    BEGIN
+        MENUITEM "&Copy\tCtrl+C",               ID_EDIT_COPY
+        MENUITEM SEPARATOR
+        MENUITEM "Select &All\tCtrl+A",         ID_EDIT_SELECT_ALL
+        MENUITEM "&Invert Selection",           ID_EDIT_INVERTSELECTION
+    END
+    POPUP "&Image"
+    BEGIN
+        MENUITEM "&Fit to Window",              ID_MODE_FITTOWINDOW
+        MENUITEM "&Actual Size",                ID_MODE_ACTUALSIZE
+        MENUITEM "Resize &Down to Fit",         ID_MODE_SCALEDOWNTOFIT
+        MENUITEM "Resize &Up to Fit",           ID_MODE_SCALEUPTOFIT
+        MENUITEM SEPARATOR
+        MENUITEM "&25%",                        ID_MODE_25
+        MENUITEM "&50%",                        ID_MODE_50
+        MENUITEM "&75%",                        ID_MODE_75
+        MENUITEM "&100%",                       ID_MODE_100
+        MENUITEM "1&50%",                       ID_MODE_150
+        MENUITEM "&200%",                       ID_MODE_200
+        MENUITEM SEPARATOR
+        MENUITEM "Na&vigate",                   ID_NAVIGATE
+        MENUITEM SEPARATOR
+        MENUITEM "&Previous Image",             ID_VIEW_PREVIOUSIMAGE
+        MENUITEM "&Next Image",                 ID_VIEW_NEXTIMAGE
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "&Thumbnails",                 ID_ITEMS_THUMBNAILS
+        MENUITEM "&Details",                    ID_ITEMS_DETAILS
+        MENUITEM SEPARATOR
+        POPUP "&Arrange Icons"
+        BEGIN
+            MENUITEM "by &Name",                    ID_VIEW_SORT_NAME
+            MENUITEM "by &Type",                    ID_VIEW_SORT_TYPE
+            MENUITEM "by &Size",                    ID_VIEW_SORT_SIZE
+            MENUITEM "by &Date",                    ID_VIEW_SORT_DATE
+        END
+        MENUITEM SEPARATOR
+        MENUITEM "&Toolbar",                    ID_VIEW_TOOLBAR
+        MENUITEM "&Address Bar",                ID_VIEW_ADDRESSBAR
+        MENUITEM "&Status Bar",                 ID_VIEW_STATUS_BAR
+        MENUITEM SEPARATOR
+        MENUITEM "&Refresh\tF5",                ID_VIEW_REFRESH
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&Help Topics\tF1",            ID_HELP_FINDER
+        MENUITEM SEPARATOR
+        MENUITEM "&About ArtMate...",           ID_APP_ABOUT
+    END
+END
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+IDD_ABOUTBOX DIALOG DISCARDABLE  0, 0, 235, 136
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "About ArtMate"
+FONT 8, "MS Sans Serif"
+BEGIN
+    ICON            IDR_MAINFRAME,IDC_STATIC,11,17,20,20
+    LTEXT           "ArtMate Version 1.0 - released 1998",IDC_STATIC,40,10,160,8,SS_NOPREFIX
+    LTEXT           "Copyright (C) Zac Walker",IDC_STATIC,40,25,119,8
+    DEFPUSHBUTTON   "OK",IDOK,178,7,50,14,WS_GROUP
+    LTEXT           "The first version, and the one released before the ImageWalker name: a thumbnail browser and image viewer, with no editing, batch tools, printing or searching.",
+                    IDC_STATIC,11,45,213,28
+    LTEXT           "Free software. No registration, no reminders, no limits.",
+                    IDC_STATIC,11,80,213,8
+    LTEXT           "",IDC_ABOUT_DETAILS,11,92,213,8
+    CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,11,107,213,1
+    LTEXT           "Theme song",IDC_STATIC,11,114,44,8
+    CONTROL         "",IDC_THEME_SONG,"Static",SS_LEFT | SS_NOTIFY |
+                    WS_GROUP,58,114,166,8
+END
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// PNG - read by the image loaders rather than by the resource loader.
+//
+
+IDR_ICONMATE8           IMAGE   DISCARDABLE     "res\\iconmate8.png"
+IDR_BACKGROUND          IMAGE   DISCARDABLE     "res\\background.png"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// String Table
+//
+
+STRINGTABLE PRELOAD DISCARDABLE
+BEGIN
+    IDR_MAINFRAME           "ArtMate 1.0"
+    IDS_APP_TITLE           "ArtMate"
+    IDS_ADDRESS             "Address"
+    IDS_STATUS_IMAGE        "                                             "
+    ATL_IDS_IDLEMESSAGE     "For Help, press F1"
+END
+
+STRINGTABLE DISCARDABLE
+BEGIN
+    ID_APP_ABOUT            "Display program information, version number and copyright\nAbout"
+    ID_APP_EXIT             "Quit the application\nExit"
+    ID_HELP_FINDER          "List Help topics\nHelp Topics"
+    ID_EDIT_COPY            "Copy the selection and put it on the Clipboard\nCopy"
+    ID_EDIT_SELECT_ALL      "Select every item\nSelect All"
+    ID_VIEW_TOOLBAR         "Show or hide the toolbar\nToggle ToolBar"
+    ID_VIEW_STATUS_BAR      "Show or hide the status bar\nToggle StatusBar"
+    ID_VIEW_ADDRESSBAR      "Show or hide the address bar\nToggle Address Bar"
+    ID_BROWSE_PARENT        "Browse the parent folder\nParent"
+    ID_BROWSE_BACK          "Go back\nBack"
+    ID_BROWSE_FORWARD       "Go forward\nForward"
+    ID_MODE_FITTOWINDOW     "Fit the image to the window\nFit to Window"
+    ID_MODE_ACTUALSIZE      "Show the image at its actual size\nActual Size"
+    ID_MODE_SCALEDOWNTOFIT  "Shrink an image too big for the window, leave the rest alone\nResize Down to Fit"
+    ID_MODE_SCALEUPTOFIT    "Enlarge an image smaller than the window, leave the rest alone\nResize Up to Fit"
+    ID_NAVIGATE             "Drag a thumbnail of the whole picture to scroll it\nNavigate"
+    ID_ITEMS_THUMBNAILS     "Show items as thumbnails\nThumbnails"
+    ID_ITEMS_DETAILS        "Show item details\nDetails"
+END
+
+#endif    // English (U.S.) resources
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// The manifest. Every app embeds its own as resource 1 and links /MANIFEST:NO.
+//
+
+1 24 "app.manifest"

@@ -1,0 +1,52 @@
+// ImageWalker by Zac Walker
+// Defines icons, bitmaps, cursors, and accelerators used by the ImageWalker 3.0 application.
+
+#include <windows.h>
+#include "Resource.h"
+
+IDI_APP ICON "Res\\ImageWalker.ico"
+IDC_ZOOM_CURSOR CURSOR "Res\\zoom.cur"
+IDB_TOOLBAR_SYMBOLS BITMAP "Res\\ToolbarSymbols.bmp"
+IDB_FILE_FOLDER BITMAP "Res\\FileTypes\\folder.bmp"
+IDB_FILE_PHOTO BITMAP "Res\\FileTypes\\photo.bmp"
+IDB_FILE_DOCUMENT BITMAP "Res\\FileTypes\\document.bmp"
+IDB_FILE_VIDEO BITMAP "Res\\FileTypes\\video.bmp"
+IDB_FILE_AUDIO BITMAP "Res\\FileTypes\\audio.bmp"
+IDB_FILE_OTHER BITMAP "Res\\FileTypes\\other.bmp"
+IDB_STATUS_SYMBOLS BITMAP "Res\\FileTypes\\status-symbols.bmp"
+
+1                       24      "app.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 3,0,0,0
+ PRODUCTVERSION 3,0,0,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS 0x1L
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "Zac Walker"
+            VALUE "FileDescription", "ImageWalker 3.0"
+            VALUE "FileVersion", "3.0.0.0"
+            VALUE "InternalName", "ImageWalker"
+            VALUE "LegalCopyright", "Copyright (C) Zac Walker"
+            VALUE "OriginalFilename", "imagewalker30.exe"
+            VALUE "ProductName", "ImageWalker"
+            VALUE "ProductVersion", "3.0.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
+
