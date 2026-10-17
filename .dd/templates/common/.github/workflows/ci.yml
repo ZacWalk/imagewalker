@@ -1,0 +1,30 @@
+name: Build and test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: @CI_RUNNERS@
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Linux native tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y g++ cmake ninja-build
+      - name: Validate pinned CMake dependency declarations
+        shell: pwsh
+        run: ./dd.ps1 dep install --non-interactive
+      - name: Check native toolchain and dependencies
+        shell: pwsh
+        run: ./dd.ps1 doctor --non-interactive
+      - name: Build and test Debug and Release
+        shell: pwsh
+        run: ./dd.ps1 test --non-interactive

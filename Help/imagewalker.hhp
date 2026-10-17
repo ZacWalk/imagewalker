@@ -1,0 +1,94 @@
+[OPTIONS]
+Compatibility=1.1 or later
+Compiled file=..\exe\ImageWalker.chm
+Contents file=contents.hhc
+Default Window=main
+Default topic=index.html
+Display compile progress=No
+Index file=index.hhk
+Language=0x809 English (United Kingdom)
+Title=ImageWalker Help
+
+[WINDOWS]
+main="ImageWalker Help","contents.hhc","index.hhk","index.html",,,,,,0x62120,220,0x3006,[80,40,940,700],,,,0,,,0
+
+[FILES]
+index.html
+versions.html
+artmate.html
+userinterface.html
+search.html
+descriptions.html
+metadata.html
+iw30.html
+iw30-openwith.html
+iw30-transfer.html
+iw30-convert.html
+iw30-rename.html
+iw30-edit.html
+iw30-sync.html
+filter.html
+tool.html
+toolconvert.html
+toolresize.html
+tooljpeg.html
+toolrename.html
+printing.html
+toolcontactsheet.html
+options.html
+formats.html
+imageloader.html
+support.html
+iw.css
+images\normal.jpg
+images\print.jpg
+
+[ALIAS]
+HELP_ARTMATE=artmate.html
+HELP_VERSIONS=versions.html
+HELP_VIEW_OPTIONS=options.html
+HELP_USER_INTERFACE=userinterface.html
+HELP_PROCESSCATALOGUE=toolcontactsheet.html
+HELP_CONTACT_SUPPORT=support.html
+HELP_DESCRIPTIONS=descriptions.html
+HELP_PRINTING=printing.html
+HELP_ACTION=filter.html
+HELP_IMAGE_LOADER=imageloader.html
+HELP_FILTER=filter.html
+HELP_TOOL=tool.html
+HELP_SEARCH=search.html
+HELP_FORMATS=formats.html
+HELP_MAINFRAME=index.html
+HELP_FILTER_BLUR=filter.html
+HELP_FILTER_COLOR_ADJUST=filter.html
+HELP_FILTER_CONTRAST_STRETCH=filter.html
+HELP_FILTER_CROP=filter.html
+HELP_FILTER_CROP_NOLOSS=tooljpeg.html
+HELP_FILTER_EDGE=filter.html
+HELP_FILTER_EMBOS=filter.html
+HELP_FILTER_FRAME=filter.html
+HELP_FILTER_GRAY_SCALE=filter.html
+HELP_FILTER_HISTOGRAM_EQUALIZATION=filter.html
+HELP_FILTER_RED_EYE=filter.html
+HELP_FILTER_ROTATE=filter.html
+HELP_FILTER_ROTATE_NOLOSS=tooljpeg.html
+HELP_FILTER_RESIZE=toolresize.html
+HELP_FILTER_SHADOW=filter.html
+HELP_FILTER_SHARPEN=filter.html
+HELP_FILTER_SOFTEN=filter.html
+HELP_FILTER_DITHER=filter.html
+HELP_FILTER_QUANTIZE=filter.html
+HELP_FILTER_TEXT_CAPTION=filter.html
+HELP_FILTER_NEGATE=filter.html
+HELP_TOOL_RENAME=toolrename.html
+HELP_TOOL_CONVERT=toolconvert.html
+HELP_TOOL_GIF_SS=tool.html
+HELP_TOOL_FILTER=tool.html
+HELP_TOOL_JPEG=tooljpeg.html
+HELP_TOOL_PROPERTY=descriptions.html
+HELP_TOOL_RESIZE=toolresize.html
+
+[MAP]
+#include ..\include\iw\helpids.h
+
+[INFOTYPES]

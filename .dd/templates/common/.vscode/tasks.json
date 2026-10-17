@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dd: build debug",
+      "type": "process",
+      "command": "pwsh",
+      "args": ["-NoProfile", "-File", "${workspaceFolder}/dd.ps1", "build", "debug", "--project", "${workspaceFolder}", "--non-interactive"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": ["$gcc"],
+      "windows": { "problemMatcher": ["$msCompile"] },
+      "group": { "kind": "build", "isDefault": true }
+    }
+  ]
+}
