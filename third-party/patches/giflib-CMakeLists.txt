@@ -1,0 +1,20 @@
+cmake_minimum_required(VERSION 3.28)
+project(giflib LANGUAGES C)
+
+add_library(giflib STATIC
+    dgif_lib.c
+    egif_lib.c
+    gifalloc.c
+    gif_err.c
+    gif_font.c
+    gif_hash.c
+    openbsd-reallocarray.c
+    quantize.c
+)
+
+target_include_directories(giflib SYSTEM PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_compile_definitions(giflib PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_DEPRECATE)
+
+if(MSVC)
+    target_compile_options(giflib PRIVATE /wd4244 /wd4267 /wd4996)
+endif()

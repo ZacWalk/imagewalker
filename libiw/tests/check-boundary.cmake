@@ -1,0 +1,65 @@
+if(NOT IS_DIRECTORY "${IW_SOURCE_DIR}/libiw")
+    message(FATAL_ERROR "IW_SOURCE_DIR must name the ImageWalker source tree.")
+endif()
+
+file(GLOB_RECURSE sources
+    "${IW_SOURCE_DIR}/libiw/src/*.cpp"
+    "${IW_SOURCE_DIR}/libiw/src/*.h"
+    "${IW_SOURCE_DIR}/libiw/compat/*.h"
+    "${IW_SOURCE_DIR}/libiw/include/*.h")
+foreach(path IN LISTS sources)
+    file(READ "${path}" text)
+    if(text MATCHES "#[ \t]*include[ \t]*[<\"][^\n>\"]*(src(10|20|22|23|30)[/\\\\]|[Ss]td[Aa]fx\\.h|[Aa]pp\\.h|View[A-Za-z]+\\.h|[Rr]esource\\.h|Settings\\.h|Platform\\.h|Files\\.h|iw/logfile\\.h|atlapp\\.h|atlgdi\\.h)")
+        message(FATAL_ERROR "Application, WTL or application-log dependency in ${path}")
+    endif()
+endforeach()
+
+file(GLOB public_headers "${IW_SOURCE_DIR}/libiw/include/libiw/*.h")
+foreach(path IN LISTS public_headers)
+    file(READ "${path}" text)
+    if(text MATCHES "(CString|TCHAR|HWND|HDC|HBITMAP|ATL::|WTL::|IW::)")
+        message(FATAL_ERROR "Platform/legacy type exposed by public header ${path}")
+    endif()
+endforeach()
+
+file(READ "${IW_SOURCE_DIR}/libiw/CMakeLists.txt" library_build)
+if(library_build MATCHES "(iw::flags|imagewalker(10|20|22|23|30)|include/wtl)")
+    message(FATAL_ERROR "libiw must not inherit application compiler settings or link an application.")
+endif()
+
+set(shared_sources FileBmp.cpp FileCompoundDoc.cpp FileFormat.cpp FileGif.cpp
+    FileJpegTran.cpp FileMetaFile.cpp FilePcx.cpp FilePng.cpp FilePsd.cpp FileTiff.cpp
+    FileWpg.cpp ImagingConvert.cpp ImagingEdits.cpp ImagingLock.cpp ImagingQuantize.cpp
+    ImagingRotate.cpp ImagingScale.cpp ImagingSimd.cpp MetadataExif.cpp MetadataIPTC.cpp
+    MetadataXMP.cpp UtilStrings.cpp)
+foreach(version IN ITEMS 10 20 22 23 30)
+    file(READ "${IW_SOURCE_DIR}/src${version}/CMakeLists.txt" app_build)
+    if(NOT app_build MATCHES "iw::libiw")
+        message(FATAL_ERROR "src${version} must link the common imaging library.")
+    endif()
+    file(GLOB app_headers "${IW_SOURCE_DIR}/src${version}/*.h")
+    foreach(path IN LISTS app_headers)
+        file(READ "${path}" text)
+        if(text MATCHES "^[ \t\r\n]*#pragma once[ \t\r\n]*(#[ \t]*include[ \t]*[<\"](iw/imaging|libiw)/[^\r\n]*[ \t\r\n]*)+$")
+            message(FATAL_ERROR "Forwarding header ${path}: include the libiw header directly.")
+        endif()
+    endforeach()
+    if(version MATCHES "^(20|22|23)$")
+        foreach(source IN LISTS shared_sources)
+            if(EXISTS "${IW_SOURCE_DIR}/src${version}/${source}")
+                message(FATAL_ERROR "Duplicated imaging implementation: src${version}/${source}")
+            endif()
+        endforeach()
+    endif()
+endforeach()
+foreach(source IN ITEMS Load.cpp LoadBmp.cpp LoadGif.cpp LoadJpg.cpp LoadPcx.cpp LoadPng.cpp LoadTiff.cpp)
+    if(EXISTS "${IW_SOURCE_DIR}/src10/${source}")
+        message(FATAL_ERROR "Duplicated ArtMate decoder: ${source}")
+    endif()
+endforeach()
+foreach(source IN ITEMS JpegMetadata.cpp PixelOps.cpp PixelOpsAvx2.cpp WebPCodec.cpp)
+    if(EXISTS "${IW_SOURCE_DIR}/src30/${source}")
+        message(FATAL_ERROR "Duplicated ImageWalker 3.0 implementation: ${source}")
+    endif()
+endforeach()
+message(STATUS "libiw ownership and public-header boundaries verified")

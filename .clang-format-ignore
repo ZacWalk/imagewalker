@@ -1,0 +1,6 @@
+.dd/**
+build/**
+exe/**
+include/wtl/**
+res-extra/**
+third-party/**

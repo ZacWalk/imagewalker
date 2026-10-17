@@ -1,0 +1,23 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=Windows-1252">
+<title>3.0 Open with</title><link rel="stylesheet" type="text/css" href="iw.css"></head>
+<body><h1>Open with</h1>
+<p>Select files, then use the Open menu or Ctrl+Enter for the
+searchable chooser. Windows applications are marked (app); configured and
+internal commands are marked (tool). Frequently used entries appear first.</p>
+<p>Registered Windows applications require files of one type. Configured batch
+tools can receive mixed types when their declarations accept every selected
+file.</p>
+<p>Configured tools are read from imagewalker30-tools.json beside the
+executable. The tools object contains absolute search folders and apps with
+exe, invoke, extensions, optional group, and text fields. The executable must
+be discovered within the search folders; arbitrary command paths are not run.</p>
+<p>Begin invoke with {exe-path}. Use {item-path} for one file or {item-paths}
+for all selected files. Paths are quoted individually. A one-file declaration
+retains its old behavior and is explicitly labelled first item only.</p>
+<p>Use Help &gt; Tool configuration to inspect missing files, invalid
+declarations and executables that could not be found. Correct the configuration
+and restart to discover it again.</p>
+<p class="note">Changes made by external applications are outside
+ImageWalker's results and recovery history.</p>
+<p><a href="iw30.html">ImageWalker 3.0 help</a></p></body></html>

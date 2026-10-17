@@ -1,0 +1,5 @@
+add_executable(app src/main.cpp)
+if(BUILD_TESTING)
+    add_test(NAME app_help COMMAND app --help)
+    set_tests_properties(app_help PROPERTIES PASS_REGULAR_EXPRESSION "Usage:" TIMEOUT 30 LABELS app)
+endif()
