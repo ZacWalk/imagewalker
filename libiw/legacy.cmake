@@ -1,0 +1,33 @@
+set(LIBIW_LEGACY_SOURCES
+    src/legacy/FileBmp.cpp
+    src/legacy/FileCompoundDoc.cpp
+    src/legacy/FileFormat.cpp
+    src/legacy/FileFormatAny.cpp
+    src/legacy/FileGif.cpp
+    src/legacy/FileJpeg.cpp
+    src/legacy/FileJpegTran.cpp
+    src/legacy/FileMetaFile.cpp
+    src/legacy/FilePcx.cpp
+    src/legacy/FilePng.cpp
+    src/legacy/FilePsd.cpp
+    src/legacy/FileTiff.cpp
+    src/legacy/FileWpg.cpp
+    src/legacy/Imaging.cpp
+    src/legacy/ImagingConvert.cpp
+    src/legacy/ImagingEdits.cpp
+    src/legacy/ImagingLock.cpp
+    src/legacy/ImagingQuantize.cpp
+    src/legacy/ImagingRotate.cpp
+    src/legacy/ImagingScale.cpp
+    src/legacy/ImagingSimd.cpp
+    src/legacy/Metadata.cpp
+    src/legacy/MetadataExif.cpp
+    src/legacy/MetadataIPTC.cpp
+    src/legacy/MetadataXMP.cpp
+    src/legacy/UtilStrings.cpp
+    src/legacy/Support.cpp
+    src/legacy/NativeCodec.cpp
+    src/legacy/LibfilesDocument.cpp
+    src/legacy/FileModern.cpp
+    src/legacy/JpegTransform.cpp
+)

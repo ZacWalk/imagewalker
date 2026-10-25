@@ -1,0 +1,60 @@
+{
+  "configurations": [
+    {
+      "name": "dd: iw10 (x64-windows) Debug",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/exe/imagewalker10d.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}/exe",
+      "stopAtEntry": false,
+      "preLaunchTask": "dd: build debug",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "dd: iw20 (x64-windows) Debug",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/exe/imagewalker20d.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}/exe",
+      "stopAtEntry": false,
+      "preLaunchTask": "dd: build debug",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "dd: iw22 (x64-windows) Debug",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/exe/imagewalker22d.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}/exe",
+      "stopAtEntry": false,
+      "preLaunchTask": "dd: build debug",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "dd: iw23 (x64-windows) Debug",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/exe/imagewalker23d.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}/exe",
+      "stopAtEntry": false,
+      "preLaunchTask": "dd: build debug",
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "dd: iw30 (x64-windows) Debug",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/exe/imagewalker30d.exe",
+      "args": [],
+      "cwd": "${workspaceFolder}/exe",
+      "stopAtEntry": false,
+      "preLaunchTask": "dd: build debug",
+      "console": "integratedTerminal"
+    }
+  ],
+  "version": "0.2.0"
+}

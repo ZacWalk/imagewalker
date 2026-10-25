@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "comment": "Starting points for dd dep install NAME. URLs only: the default branch head is resolved at declaration time and recorded as a concrete commit in the project's cmake/dd-dependencies.json. Supply --git and --ref to pin something else.",
+  "dependencies": {
+    "libdesktop": { "url": "https://github.com/ZacWalk/libdesktop.git" }
+  }
+}

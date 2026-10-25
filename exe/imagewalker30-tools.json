@@ -1,0 +1,43 @@
+{
+  "tools": {
+    "folders": [
+      "C:\\Program Files",
+      "C:\\Program Files (x86)"
+    ],
+    "apps": [
+      {
+        "exe": "gimp-3.exe",
+        "invoke": "{exe-path} {item-path}",
+        "extensions": "jpg,jpeg,png,tif,tiff,bmp,webp,avif",
+        "group": "photo",
+        "text": "GIMP 3"
+      },
+      {
+        "exe": "gimp-2.10.exe",
+        "invoke": "{exe-path} {item-path}",
+        "extensions": "jpg,jpeg,png,tif,tiff,bmp",
+        "group": "photo",
+        "text": "GIMP"
+      },
+      {
+        "exe": "i_view64.exe",
+        "invoke": "{exe-path} {item-path}",
+        "extensions": "jpg,jpeg,png,gif,tif,tiff,bmp,webp",
+        "group": "photo",
+        "text": "IrfanView"
+      },
+      {
+        "exe": "Inkscape.exe",
+        "invoke": "{exe-path} {item-path}",
+        "extensions": "svg",
+        "text": "Inkscape"
+      },
+      {
+        "exe": "vlc.exe",
+        "invoke": "{exe-path} {item-path}",
+        "group": "video",
+        "text": "VLC"
+      }
+    ]
+  }
+}

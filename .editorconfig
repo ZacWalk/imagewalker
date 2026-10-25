@@ -1,0 +1,34 @@
+root = true
+
+[*.{cpp,c,h,rc}]
+charset = utf-8
+indent_style = tab
+indent_size = 4
+tab_width = 4
+insert_final_newline = true
+
+[{CMakeLists.txt,*.cmake,*.ps1,*.psd1}]
+charset = utf-8
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+
+[*.{json,yml,yaml,md,html,hhc,hhk,hhp,css}]
+charset = utf-8
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+
+[.vscode/*.json]
+indent_size = 4
+
+[{.dd,build,exe,include/wtl,third-party}/**]
+charset = unset
+indent_style = unset
+indent_size = unset
+tab_width = unset
+insert_final_newline = unset
+
+[Help/**]
+# The CHM topics declare Windows-1252; do not silently change their encoding.
+charset = unset
