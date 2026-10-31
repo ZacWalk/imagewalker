@@ -14,7 +14,9 @@ function(dd_dependency_arguments manifest name output)
         if(NOT size EQUAL 64 OR NOT digest MATCHES "^[0-9a-f]+$" OR NOT url MATCHES "^https://")
             message(FATAL_ERROR "Archive ${name} requires HTTPS and SHA-256")
         endif()
-        set(arguments URL "${url}" URL_HASH "SHA256=${digest}" DOWNLOAD_EXTRACT_TIMESTAMP TRUE TLS_VERIFY TRUE)
+        # Extraction time, not the archive's: a recipe that keeps one source directory across
+        # pins must rebuild what it compiled from the old archive, whatever dates the new one has.
+        set(arguments URL "${url}" URL_HASH "SHA256=${digest}" DOWNLOAD_EXTRACT_TIMESTAMP FALSE TLS_VERIFY TRUE)
     else()
         string(JSON commit GET "${declarations}" dependencies "${name}" commit)
         string(LENGTH "${commit}" size)

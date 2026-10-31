@@ -196,23 +196,24 @@ namespace IW
 		}
 
 
-		void ParseExifDate(const char *sz)
+		// A time as a clock in this machine's zone showed it - a camera's, which EXIF and libfiles' date keep
+		// without moving it to another zone. Fields that make no date leave this time as it was:
+		// SystemTimeToFileTime refuses them, which would otherwise leave ftLocal as stack garbage to be
+		// stored as a photo's date taken.
+		void SetLocalClock(const int year, const int month, const int day, const int hour, const int minute, const int second)
 		{
-			// "2006:01:14 15:51:31"
 			SYSTEMTIME st = {0};
+			st.wYear = static_cast<WORD>(year);
+			st.wMonth = static_cast<WORD>(month);
+			st.wDay = static_cast<WORD>(day);
+			st.wHour = static_cast<WORD>(hour);
+			st.wMinute = static_cast<WORD>(minute);
+			st.wSecond = static_cast<WORD>(second);
 
-			if (6 == sscanf_s(sz, "%4hu:%2hu:%2hu %2hu:%2hu:%2hu",
-				&st.wYear, &st.wMonth, &st.wDay,
-				&st.wHour, &st.wMinute, &st.wSecond))
-			{
-				// Cameras write "0000:00:00 00:00:00" for an unset date, which
-				// parses but which SystemTimeToFileTime refuses -- leaving ftLocal
-				// as stack garbage to be stored as the photo's date taken.
-				FILETIME ftLocal;
+			FILETIME ftLocal;
 
-				if (SystemTimeToFileTime(&st, &ftLocal))
-					LocalFileTimeToFileTime(&ftLocal, &_ft);
-			}
+			if (SystemTimeToFileTime(&st, &ftLocal))
+				LocalFileTimeToFileTime(&ftLocal, &_ft);
 		}
 
 		FileTime ToLocalTime() const

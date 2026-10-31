@@ -25,6 +25,9 @@ namespace iw::imaging
 		CarryMetadata carry{CarryMetadata::none};
 	};
 
+	// What a photo states of its taking, through libfiles' properties for every format libfiles scans: its
+	// camera, when it was taken - as EXIF writes a date, by the camera's clock - and its exposure, as a camera
+	// shows them. Empty where the file says nothing.
 	struct PhotoMetadata
 	{
 		std::wstring camera;
@@ -67,6 +70,9 @@ namespace iw::imaging
 	bool supports_extension(std::wstring_view extension);
 	bool is_preview_only(std::wstring_view extension);
 	PhotoMetadata read_photo_metadata(const std::filesystem::path& path);
+	// The colour profile a photo carries, by the name it gives itself - "sRGB IEC61966-2.1", "Display P3" -
+	// or failing that the gamut libfiles recognises in its colorants; empty when it carries none or neither.
+	std::wstring read_colour_profile(const std::filesystem::path& path);
 	bool read_dimensions(const std::filesystem::path& path, int& width, int& height);
 	int read_orientation(const std::filesystem::path& path);
 	bool orient_upright(PixelImage& image, int orientation);

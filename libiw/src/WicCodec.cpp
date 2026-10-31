@@ -156,67 +156,6 @@ namespace
 			return extension == L".webp" || (!extension.empty() && wic_image_extensions().contains(extension));
 		}
 
-		std::wstring metadata_text(IWICMetadataQueryReader* reader, const wchar_t* query)
-		{
-			if (!reader) return {};
-			PROPVARIANT value{};
-			PropVariantInit(&value);
-			std::wstring result;
-			if (SUCCEEDED(reader->GetMetadataByName(query, &value)))
-			{
-				if (value.vt == VT_LPWSTR && value.pwszVal) result = value.pwszVal;
-				else if (value.vt == VT_BSTR && value.bstrVal) result = value.bstrVal;
-				else if (value.vt == VT_LPSTR && value.pszVal)
-				{
-					// EXIF ASCII fields - Make, Model, DateTimeOriginal - arrive as VT_LPSTR. Cameras
-					// write UTF-8 or a local code page, and pad fixed-width fields with spaces.
-					const auto convert = [&value, &result](const UINT codePage, const DWORD flags)
-					{
-						const int length = MultiByteToWideChar(codePage, flags, value.pszVal, -1, nullptr, 0);
-						if (length <= 1) return length == 1;
-						result.resize(static_cast<size_t>(length));
-						if (!MultiByteToWideChar(codePage, flags, value.pszVal, -1, result.data(), length))
-							return false;
-						result.resize(static_cast<size_t>(length) - 1);
-						return true;
-					};
-					if (!convert(CP_UTF8, MB_ERR_INVALID_CHARS) && !convert(CP_ACP, 0)) result.clear();
-					while (!result.empty() && (result.back() == L' ' || result.back() == L'\0')) result.pop_back();
-				}
-				else if (value.vt == VT_UI2) result = std::to_wstring(value.uiVal);
-				else if (value.vt == VT_UI4) result = std::to_wstring(value.ulVal);
-			}
-			PropVariantClear(&value);
-			return result;
-		}
-
-		std::wstring metadata_rational(IWICMetadataQueryReader* reader, const wchar_t* query,
-		                               const wchar_t* suffix, const int precision)
-		{
-			if (!reader) return {};
-			PROPVARIANT value{};
-			PropVariantInit(&value);
-			std::wstring result;
-			if (SUCCEEDED(reader->GetMetadataByName(query, &value)) && value.vt == VT_UI8)
-			{
-				// WIC packs an unsigned rational into VT_UI8 with the numerator in the low 32 bits.
-				const auto numerator = value.uhVal.LowPart;
-				const auto denominator = value.uhVal.HighPart;
-				if (denominator)
-				{
-					const double number = static_cast<double>(numerator) / denominator;
-					if (number > 0.0 && number < 1.0 && std::wstring_view(suffix) == L" s")
-						result = std::format(L"1/{:.0f} s", 1.0 / number);
-					else
-						result = precision
-							         ? std::format(L"{:.1f}{}", number, suffix)
-							         : std::format(L"{}{}", number, suffix);
-				}
-			}
-			PropVariantClear(&value);
-			return result;
-		}
-
 		// System.Photo.Orientation names the right tag for each container. JPEG, TIFF and camera
 		// RAW decoders return the stored pixels and report the orientation for the reader to
 		// apply; the HEIF decoder applies the container's rotation itself and reports 1, so
@@ -519,39 +458,6 @@ namespace
 		if (value.empty()) return path;
 		if (value.starts_with(LR"(\\)")) return LR"(\\?\UNC\)" + value.substr(2);
 		return LR"(\\?\)" + value;
-	}
-
-	PhotoMetadata read_photo_metadata(const std::filesystem::path& path)
-	{
-		ComApartment apartment;
-		PhotoMetadata result;
-		IWICImagingFactory* factory = nullptr;
-		IWICBitmapDecoder* decoder = nullptr;
-		IWICBitmapFrameDecode* frame = nullptr;
-		IWICMetadataQueryReader* reader = nullptr;
-		const auto nativePath = native_path(path);
-		if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-				IID_PPV_ARGS(&factory))) &&
-			SUCCEEDED(factory->CreateDecoderFromFilename(nativePath.c_str(), nullptr, GENERIC_READ,
-				WICDecodeMetadataCacheOnDemand, &decoder)) &&
-			SUCCEEDED(decoder->GetFrame(0, &frame)) && SUCCEEDED(frame->GetMetadataQueryReader(&reader)))
-		{
-			const auto make = metadata_text(reader, L"/app1/ifd/{ushort=271}");
-			const auto model = metadata_text(reader, L"/app1/ifd/{ushort=272}");
-			result.camera = make.empty() ? model : model.empty() ? make : make + L" " + model;
-			result.dateTaken = metadata_text(reader, L"/app1/ifd/exif/{ushort=36867}");
-			result.exposure = metadata_rational(reader, L"/app1/ifd/exif/{ushort=33434}", L" s", 1);
-			result.aperture = metadata_rational(reader, L"/app1/ifd/exif/{ushort=33437}", L"", 1);
-			if (!result.aperture.empty()) result.aperture = L"f/" + result.aperture;
-			result.iso = metadata_text(reader, L"/app1/ifd/exif/{ushort=34855}");
-			if (!result.iso.empty()) result.iso = L"ISO " + result.iso;
-			result.focalLength = metadata_rational(reader, L"/app1/ifd/exif/{ushort=37386}", L" mm", 1);
-		}
-		release(reader);
-		release(frame);
-		release(decoder);
-		release(factory);
-		return result;
 	}
 
 	bool has_webp_signature(const std::span<const std::uint8_t> header)

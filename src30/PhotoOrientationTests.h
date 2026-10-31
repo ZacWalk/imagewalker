@@ -646,6 +646,9 @@ namespace iw::tests
 		scan.cmyk = cmyk;
 		if (!cmyk) scan.profile = srgb;
 		reporter.check(write_photo(tiff, halves, scan), L"a TIFF with orientation, camera fields and a profile is written");
+		const auto tiffMetadata = files::read_metadata(tiff);
+		reporter.check(tiffMetadata.camera == L"TestCam QA-9000" && tiffMetadata.dateTaken == L"2025:07:14 10:20:30",
+			L"a TIFF's camera and capture date are read, as a JPEG's are");
 		const auto tiffCopy = root / L"scan-copy.tif";
 		const auto turnedTiff = files::load_image(tiff);
 		everything.metadataSource = tiff;

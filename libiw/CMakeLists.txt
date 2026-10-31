@@ -5,7 +5,7 @@ target_sources(libiw PRIVATE ${LIBIW_LEGACY_SOURCES})
 set(LIBIW_MODERN_SOURCES
     src/Pixel.cpp src/Cpu.cpp src/Diagnostics.cpp src/PixelOps.cpp src/PixelOpsAvx2.cpp
     src/ImageResampler.cpp src/ImageEditor.cpp src/EditGeometry.cpp
-    src/WebPCodec.cpp src/JpegMetadata.cpp src/WicCodec.cpp)
+    src/WebPCodec.cpp src/JpegMetadata.cpp src/WicCodec.cpp src/PhotoMetadata.cpp)
 target_sources(libiw PRIVATE ${LIBIW_MODERN_SOURCES})
 target_include_directories(libiw PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/include")

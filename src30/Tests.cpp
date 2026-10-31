@@ -1716,6 +1716,23 @@ namespace iw::tests
 				reporter.check(metadata.dateTaken == L"2025:07:14 10:20:30", L"EXIF ASCII DateTimeOriginal is read");
 				reporter.check(files::expand_tokens(L"{camera}-{created}", metadata, photo, 1) ==
 					L"TestCam QA-9000-2025-07-14", L"rename tokens use the camera and capture date");
+				reporter.check(files::read_colour_profile(photo).empty(), L"a photo without a colour profile names none");
+
+				// The same photo with Windows' own sRGB profile as its APP2 ICC_PROFILE segment.
+				if (const auto srgb = orientation_fixtures::system_profile(L"sRGB Color Space Profile.icm"); !srgb.empty())
+				{
+					const auto plain = orientation_fixtures::read_bytes(photo);
+					auto icc = orientation_fixtures::payload({"ICC_PROFILE\0\x01\x01", 14}, {});
+					const auto profile = orientation_fixtures::read_bytes(srgb);
+					icc.insert(icc.end(), profile.begin(), profile.end());
+					std::vector<std::uint8_t> profiled{0xFF, 0xD8};
+					orientation_fixtures::append_segment(profiled, 0xE2, icc);
+					profiled.insert(profiled.end(), plain.begin() + 2, plain.end());
+					const auto withProfile = root / L"profiled.jpg";
+					reporter.check(orientation_fixtures::write_bytes(withProfile, profiled) &&
+					               files::read_colour_profile(withProfile) == L"sRGB IEC61966-2.1",
+					               L"a photo's colour profile is named as the profile names itself");
+				}
 			}
 			std::filesystem::remove_all(root, error);
 		}

@@ -170,7 +170,9 @@ copies can be shared without them.
 ## 5. Batch Rename
 
 `F7`. In the template, a run of `#` is the zero-padded sequence number and
-`{token}` is a metadata substitution. Templates, sequences and the resulting
+`{token}` is a metadata substitution. The camera, date and exposure tokens read
+the photo's metadata in every format ImageWalker reads it from; a photo without
+a capture date takes its modified date. Templates, sequences and the resulting
 names are validated before Run is enabled.
 
 The snapshot covers each file and its sidecars. Renames that form a cycle are

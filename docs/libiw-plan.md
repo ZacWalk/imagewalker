@@ -105,6 +105,10 @@ capability queries, dimensions/orientation, photo properties and encoding.
   orientation it reports. This avoids turning HEIF twice. Native orientation
   handling supports all eight EXIF values and resets the tag only after changing
   the corresponding pixels.
+- Read photo properties - camera, capture date, exposure - through libfiles'
+  properties, in every format libfiles scans, and the 2.x date taken by the same
+  date rule. A capture date is the camera's clock time, whatever offset the file
+  states for it, as Diffractor shows it.
 
 Run operations synchronously on the application's worker. The library owns no
 application work queue. Keep completion payloads, stale generations, UI dispatch

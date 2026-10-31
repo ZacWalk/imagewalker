@@ -1,7 +1,7 @@
 // ImageWalker by Zac Walker
 //
-// Purpose: EXIF through libfiles - the camera settings and orientation a
-//          loader reads, the numbers a lossless turn rewrites, and the
+// Purpose: EXIF through libfiles - the camera settings, date taken and orientation
+//          a loader reads, the numbers a lossless turn rewrites, and the
 //          property reader: every IFD plus maker notes, with each tag name,
 //          title and description, as libfiles lists them.
 //
@@ -14,6 +14,7 @@
 
 #include <libfiles/exif.h>
 #include <libfiles/exif_listing.h>
+#include <libfiles/properties.h>
 #include <libfiles/scan.h>
 
 #include <cmath>
@@ -83,8 +84,10 @@ void Exif::Parse(IW::CameraSettings* pSettings, const unsigned char* d, const un
 	if (exif.focal_length_35mm != 0)
 		pSettings->FocalLength35mmEquivalent = exif.focal_length_35mm;
 
-	if (!exif.original.text.empty())
-		pSettings->DateTaken.ParseExifDate(exif.original.text.c_str());
+	// When it was taken, by libfiles' one date rule, as the camera's clock showed it: an offset the block
+	// states is not applied, so a photo shows the time its camera showed, as Diffractor shows it.
+	if (const auto taken = libfiles::properties_from_exif(exif).created; taken.valid() && taken.has_time)
+		pSettings->DateTaken.SetLocalClock(taken.year, taken.month, taken.day, taken.hour, taken.minute, taken.second);
 }
 
 int Exif::ReadOrientation(const unsigned char* d, const unsigned int size)

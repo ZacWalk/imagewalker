@@ -1120,7 +1120,11 @@ namespace iw
 			for (; job.offset < end; ++job.offset)
 			{
 				files::Metadata value;
-				try { value = files::read_metadata(job.paths[job.offset]); }
+				try
+				{
+					value = files::read_metadata(job.paths[job.offset]);
+					value.colourProfile = files::read_colour_profile(job.paths[job.offset]);
+				}
 				catch (...) {}
 				job.values.push_back(std::move(value));
 			}
@@ -2702,6 +2706,7 @@ namespace iw
 		for (const auto& value : {metadata.exposure, metadata.aperture, metadata.iso, metadata.focalLength})
 			if (!value.empty()) exposure += (exposure.empty() ? L"" : L"  ") + value;
 		if (!exposure.empty()) properties_.push_back({L"Exposure", std::move(exposure)});
+		if (!metadata.colourProfile.empty()) properties_.push_back({L"Colour profile", metadata.colourProfile});
 	}
 
 	void ImageCanvas::paint_properties(const ui::CanvasRenderer& renderer)
@@ -2795,6 +2800,8 @@ namespace iw
 					     })
 						if (!value.empty()) exposure += (exposure.empty() ? L"" : L"  ") + value;
 					if (!exposure.empty()) rows.push_back({L"Exposure", std::move(exposure)});
+					if (!metadata->second.colourProfile.empty())
+						rows.push_back({L"Colour profile", metadata->second.colourProfile});
 				}
 				if (item.kind != files::ItemKind::image)
 					rows.push_back({

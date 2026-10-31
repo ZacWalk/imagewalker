@@ -32,6 +32,8 @@ namespace iw::files
 		std::wstring aperture;
 		std::wstring iso;
 		std::wstring focalLength;
+		// The colour profile's name, which read_metadata leaves to read_colour_profile: only a view shows it.
+		std::wstring colourProfile;
 		bool hasSize{};
 		bool hasModified{};
 		std::int64_t duration{}; // Media Foundation 100-nanosecond units.
@@ -93,6 +95,7 @@ namespace iw::files
 	                                               const std::stop_token& stop,
 	                                               const std::function<void(size_t, size_t)>& progress = {});
 	Metadata read_metadata(const std::filesystem::path& path);
+	std::wstring read_colour_profile(const std::filesystem::path& path);
 	// The upright dimensions: a photo stored on its side reports its height as its width.
 	bool read_dimensions(const std::filesystem::path& path, int& width, int& height);
 	// The EXIF orientation (1 to 8) the decoder leaves to the reader to apply; 1 when there is

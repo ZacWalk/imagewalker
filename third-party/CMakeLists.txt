@@ -13,8 +13,8 @@ set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
 set(BUILD_SHARED_LIBS OFF)
 set(BUILD_TESTING OFF)
 
-set(IW_LIBFILES_REVISION 3a21f6c98ba92664bc5991e1ca80037da93901c9)
-set(IW_HUNSPELL_VERSION 1.7.3)
+set(IW_LIBFILES_REVISION f5cd78fc6807ece846b92e23eab46b565a50c084)
+set(IW_HUNSPELL_VERSION 1.7.6)
 
 # ------------------------------------------------------------------ libfiles
 # libfiles, the file library ImageWalker shares with Diffractor, builds the codecs both use, each
@@ -56,9 +56,9 @@ add_library(iw::tiff ALIAS libfiles-tiff)
 # Replaces the myspell fork 2.31 vendored. It reads the same .aff/.dic files,
 # which is why exe/dic carries over unchanged.
 FetchContent_Declare(hunspell
-    URL      https://github.com/hunspell/hunspell/archive/refs/tags/v${IW_HUNSPELL_VERSION}.tar.gz
-    URL_HASH SHA256=933be3dac6fd55f6e752331a170efb7e33800e40fae1156d8434cc8c85379a1b
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    URL      https://github.com/hunspell/hunspell/releases/download/v${IW_HUNSPELL_VERSION}/hunspell-${IW_HUNSPELL_VERSION}.tar.gz
+    URL_HASH SHA256=9c650ace31d4d8cc1da925a9507c3de1d50f1a54857af2f72429f517d5d53467
+    DOWNLOAD_EXTRACT_TIMESTAMP FALSE
     PATCH_COMMAND ${CMAKE_COMMAND} -E copy_if_different
                   "${CMAKE_CURRENT_SOURCE_DIR}/patches/hunspell-CMakeLists.txt" CMakeLists.txt
     EXCLUDE_FROM_ALL)

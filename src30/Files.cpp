@@ -670,6 +670,10 @@ namespace iw::files
 		result.focalLength = photo.focalLength;
 		return result;
 	}
+	std::wstring read_colour_profile(const std::filesystem::path& path)
+	{
+		return classify(path) == ItemKind::image ? imaging::read_colour_profile(path) : std::wstring{};
+	}
 	bool read_dimensions(const std::filesystem::path& path, int& width, int& height)
 	{
 		if (classify(path) == ItemKind::video)

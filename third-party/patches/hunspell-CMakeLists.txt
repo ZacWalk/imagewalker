@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 project(hunspell LANGUAGES CXX)
 
-# hunspell ships autotools only; this builds just the library, no tools.
+# Build only the static library with ImageWalker's existing target and include paths.
 add_library(hunspell STATIC
     src/hunspell/affentry.cxx
     src/hunspell/affixmgr.cxx
@@ -9,6 +9,7 @@ add_library(hunspell STATIC
     src/hunspell/filemgr.cxx
     src/hunspell/hashmgr.cxx
     src/hunspell/hunspell.cxx
+    src/hunspell/hunspelltrace.cxx
     src/hunspell/hunzip.cxx
     src/hunspell/phonet.cxx
     src/hunspell/replist.cxx

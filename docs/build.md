@@ -158,6 +158,8 @@ in `dd.psd1` leaves acquisition with ImageWalker, and
 option and linking adapter, but for the codecs libfiles builds. There are no
 Git submodules. `dd dep list` and `dd dep install` report ownership and
 inventory; named dependency mutations are rejected.
+Archives use extraction-time timestamps so changing a pin rebuilds dependent
+objects even when upstream files predate the existing build.
 
 WTL 10.01 in `include/wtl` is the deliberate exception: it stays vendored
 for ArtMate 1.0 and ImageWalker 2.0, 2.2 and 2.3. ImageWalker 3.0 does not
@@ -174,7 +176,11 @@ pages list EXIF through its `list_exif`, read XMP through its data model, and
 read IPTC through its `list_iptc`; the property pages, and the TIFF and PSD
 loaders, find the IPTC among Photoshop image resources through its
 `parse_photoshop_resources`; the 2.x loaders read a JPEG's camera settings
-and orientation through its `read_exif`, and the lossless turns and 3.0's saves
+and orientation through its `read_exif`, and its date taken by its one date
+rule through `properties_from_exif`; 3.0 reads the camera, capture date and
+exposure it shows and renames by through its `read_properties`, in every
+format it scans, and names the colour profile it shows through its `list_icc`;
+and the lossless turns and 3.0's saves
 correct EXIF in place through its `set_exif_numbers` and
 `unlink_exif_thumbnail`. Its HEIF, JPEG XL and camera raw codecs
 are not built: ImageWalker decodes those through the Windows codecs installed.
@@ -183,15 +189,15 @@ whatever its HEAD; CI and a fresh clone build the pin.
 
 | Dependency | Version | Acquired by | Primary owner |
 |---|---|---|---|
-| libfiles | `3a21f6c` | FetchContent, git commit; a sibling `..\libfiles` when present | libiw |
+| libfiles | `f5cd78f` | FetchContent, git commit; a sibling `..\libfiles` when present | libiw |
 | zlib-ng, zlib-compatible | 2.3.3 | libfiles' recipe, tag archive with SHA-256 | libiw |
-| libjpeg-turbo | 3.2.0 | libfiles' recipe, release tarball with SHA-256; SIMD and the libjpeg 8 API | libiw |
+| libjpeg-turbo | 3.2.1 | libfiles' recipe, release tarball with SHA-256; SIMD and the libjpeg 8 API | libiw |
 | libpng | 1.6.59 | libfiles' recipe, tag archive with SHA-256 | libiw |
 | libwebp | 1.6.0 | libfiles' recipe, tag archive with SHA-256 | libiw |
 | NASM | 3.02 | libfiles' recipe, release build with SHA-256, when none is on the path | libjpeg-turbo |
-| libtiff | 4.7.0 | libfiles' recipe, tag archive with SHA-256 | libiw |
-| giflib | 5.2.2 | libfiles' recipe, release archive with SHA-256 | libiw |
-| hunspell | 1.7.3 | FetchContent, tag archive with SHA-256 | 2.x only |
+| libtiff | 4.7.2 | libfiles' recipe, tag archive with SHA-256 | libiw |
+| giflib | 6.1.3 | libfiles' recipe, release archive with SHA-256 | libiw |
+| hunspell | 1.7.6 | FetchContent, release tarball with SHA-256 | 2.x only |
 
 libtiff finds libfiles' zlib through libfiles' own CMake lookup. libfiles builds the
 static WebP codec, so no separately installed WIC WebP extension is required.
@@ -201,8 +207,8 @@ target include paths.
 ## The dd driver
 
 `dd.ps1` and `.dd/` are vendored without modification from the
-[ZacWalk/dd v0.2.4 release](https://github.com/ZacWalk/dd/releases/tag/v0.2.4),
-commit `139a210e46281a013c72b3a5e21786e36a3c3146`. Update the whole runtime
+[ZacWalk/dd v0.2.5 release](https://github.com/ZacWalk/dd/releases/tag/v0.2.5),
+commit `5d97d09ed7b4ae05b431fa99ec651e384b2d4d69`. Update the whole runtime
 through a reviewed change, checking it against the release archive and the
 per-file hashes in [docs/dd-upstream.json](dd-upstream.json); do not fork it for
 application behaviour.

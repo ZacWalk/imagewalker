@@ -353,7 +353,7 @@ IW_TEST(MemoryStreamsUseExactEofAndSignedSeekOffsets)
 IW_TEST(ExifDatesUseWordSizedSystemTimeFields)
 {
 	IW::FileTime date;
-	date.ParseExifDate("2026:10:17 14:32:42");
+	date.SetLocalClock(2026, 10, 17, 14, 32, 42);
 	const auto local = date.ToLocalTime().ToSystemTime();
 	IW_CHECK_EQ(local.wYear, 2026);
 	IW_CHECK_EQ(local.wMonth, 10);
@@ -738,4 +738,69 @@ IW_TEST(ExifSettingsAreReadWhereverTheDirectoriesLie)
 	IW_CHECK(other == before);
 	IW_CHECK_EQ(Exif::ReadOrientation(other.data(), static_cast<unsigned>(other.size())),
 	            static_cast<int>(IW::Orientation::TopLeft));
+}
+
+IW_TEST(ExifDateTakenFollowsLibfilesDateRule)
+{
+	// IFD 0 pointing to an Exif directory with DateTimeOriginal and, when given, OffsetTimeOriginal.
+	const auto taken = [](const std::string& original, const std::string& offset)
+	{
+		std::vector<BYTE> tiff = {'I', 'I', 42, 0, 8, 0, 0, 0};
+		const auto u16 = [&tiff](const unsigned v)
+		{
+			tiff.push_back(static_cast<BYTE>(v));
+			tiff.push_back(static_cast<BYTE>(v >> 8));
+		};
+		const auto u32 = [&u16](const unsigned v)
+		{
+			u16(v & 0xffff);
+			u16(v >> 16);
+		};
+		const auto entry = [&u16, &u32](const unsigned tag, const unsigned type, const unsigned count, const unsigned value)
+		{
+			u16(tag);
+			u16(type);
+			u32(count);
+			u32(value);
+		};
+
+		const unsigned exifDirectory = 8 + 2 + 12 + 4;
+		const unsigned entries = offset.empty() ? 1 : 2;
+		const unsigned values = exifDirectory + 2 + entries * 12 + 4;
+		const auto originalCount = static_cast<unsigned>(original.size() + 1);
+		u16(1);
+		entry(0x8769, 4, 1, exifDirectory);
+		u32(0);
+		u16(entries);
+		entry(0x9003, 2, originalCount, values);                                                 // DateTimeOriginal
+		if (!offset.empty())
+			entry(0x9011, 2, static_cast<unsigned>(offset.size() + 1), values + originalCount); // OffsetTimeOriginal
+		u32(0);
+		tiff.insert(tiff.end(), original.begin(), original.end());
+		tiff.push_back(0);
+		if (!offset.empty())
+		{
+			tiff.insert(tiff.end(), offset.begin(), offset.end());
+			tiff.push_back(0);
+		}
+
+		std::vector<BYTE> exif = {'E', 'x', 'i', 'f', 0, 0};
+		exif.insert(exif.end(), tiff.begin(), tiff.end());
+		IW::CameraSettings settings;
+		Exif::Parse(&settings, exif.data(), static_cast<unsigned>(exif.size()));
+		return settings.DateTaken;
+	};
+
+	// The camera's clock time, whatever offset the block states for it.
+	const auto zoned = taken("2024:05:06 14:30:15", "+09:00").ToLocalTime().ToSystemTime();
+	IW_CHECK(zoned.wYear == 2024 && zoned.wMonth == 5 && zoned.wDay == 6);
+	IW_CHECK(zoned.wHour == 14 && zoned.wMinute == 30 && zoned.wSecond == 15);
+
+	// The rule Diffractor reads by: a time without seconds is a time, where the scanf this replaced
+	// wanted all six fields; text after the time, which it ignored, makes it no date; and so does a
+	// camera's unset date.
+	const auto minutes = taken("2024:05:06 14:30", "").ToLocalTime().ToSystemTime();
+	IW_CHECK(minutes.wYear == 2024 && minutes.wHour == 14 && minutes.wMinute == 30 && minutes.wSecond == 0);
+	IW_CHECK(taken("2024:05:06 14:30:15 at noon", "").IsEmpty());
+	IW_CHECK(taken("0000:00:00 00:00:00", "").IsEmpty());
 }
