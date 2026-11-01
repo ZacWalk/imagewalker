@@ -17,7 +17,7 @@ position; see [workflows-3.0.md](workflows-3.0.md#4-convert-or-resize).
 Printing, contact sheets, search, descriptions and lossless JPEG rotation are
 not available in ImageWalker 3.0; use ImageWalker 2.3 for those functions.
 
-## ArtMate 1.0 and ImageWalker 2.x
+## ImageWalker 1.0 and 2.x
 
 | Issue | Workaround |
 |---|---|

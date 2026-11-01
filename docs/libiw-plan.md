@@ -41,16 +41,21 @@ BGRA pixels. Original dimensions describe the source independently of a reduced
 decode. Treat a failed or reduced decode as such; do not use a preview's enlarged
 pixels as evidence that a full-resolution request succeeded.
 
-Use [Document](../libiw/include/libiw/Document.h) when native pixel storage,
-multiple pages, palettes or opaque metadata matter. Its frame views describe
-format, stride, row order, offsets and animation attributes. Metadata views
-retain their type and original bytes. A document is not just its first frame.
+Use [Document.h](../libiw/include/libiw/Document.h)'s `decode_document` when
+native pixel storage, multiple pages, palettes or retained metadata matter. It
+gives libfiles' `decoded_document` - each frame's rows, top-down and DWORD
+aligned, with its storage, palette, offsets and animation attributes, and each
+metadata block libfiles names, all owned, so that a copy is an independent
+snapshot - and beside it what ImageWalker's loaders add: the orientation, the
+stored size a thumbnail was scaled from, and their description and name. A
+document is not just its first frame.
 
-Frame and metadata views borrow their document's storage. Keep that owner alive,
-and use `clone()` for independent storage. Native pixel rows are DWORD aligned;
-validate every borrowed extent, stride and destination size. `copy_bgra()` and
-`copy_frame_bgra()` can write directly into an adapter's owned buffer without an
-extra full-size intermediate. Indexed palette entries are BGRA, including alpha;
+Read stored rows as BGRA with libfiles' `copy_bgra`, over a frame's `rows()` or a
+`libfiles::pixel_rows` view of any storage, such as a page or a bottom-up DIB; it
+writes straight into an adapter's owned buffer without an extra full-size
+intermediate, and `pixels_from_rows` and `frame_pixels` make a `PixelImage`. A
+view borrows its storage: keep the owner alive, and validate every extent,
+stride and destination size. Indexed palette entries are BGRA, including alpha;
 the old `COLORREF` helper names must not be mistaken for a different byte order.
 
 Keep pixel-format tags consistent with actual storage. For example, colouring a
@@ -69,18 +74,21 @@ capability queries, dimensions/orientation, photo properties and encoding.
   retained metadata. Use the BGRA path for display/editing and installed Windows
   formats. Bundled WebP does not require a machine-installed WIC extension.
 - Select a BGRA decoder only through the rule in
-  [NativeCodec.h](../libiw/src/NativeCodec.h): libfiles/libwebp for WebP,
+  [NativeCodec.h](../libiw/src/NativeCodec.h): libfiles for WebP,
   identified by signature for encoded bytes and by extension for a path; an
   installed Windows codec where one claims the extension; otherwise the native
   decoders. Native-storage decodes start with the native loaders and reach
-  libwebp and WIC only through the WebP and Windows-codec loaders, which call
-  one backend directly and never re-enter selection.
+  WebP and WIC only through the WebP and Windows-codec loaders, which call
+  one backend directly and never re-enter selection. A display decode reads the
+  loaders' image straight to BGRA, without a document's copy of its rows.
 - Native JPEG, PNG, GIF, TIFF, PCX, PSD, WPG and uncompressed BMP readers call
   libfiles. [LibfilesDocument.cpp](../libiw/src/legacy/LibfilesDocument.cpp)
   adapts rows, palettes, metadata and diagnostics, not file formats. Memory
   streams lend an immutable `GetMemory()` view for the synchronous decode;
-  files retain positional buffered I/O. Keep encoders and SDK-backed WIC,
-  compressed DIB, metafile and OLE paths local.
+  files retain positional buffered I/O. WebP is encoded by libfiles, exact
+  under transparent pixels, and a re-encoded JPEG keeps its source's segments
+  through libfiles' `carry_jpeg_metadata`. Keep the other encoders and the
+  SDK-backed WIC, compressed DIB, metafile and OLE paths local.
 - Identify input by its extension, then by a complete signature. A first word
   shared with an image format, as RIFF audio and OLE containers share one, does
   not make a file an image; report it as unsupported rather than damaged.
@@ -118,7 +126,7 @@ The application installs its log callback through
 [Diagnostics.h](../libiw/include/libiw/Diagnostics.h); standalone clients receive
 diagnostics on stderr when no callback is installed. Never include the
 application's `TCHAR`-dependent logger in the backend: the same library also
-serves the MBCS ArtMate executable.
+serves the MBCS ImageWalker 1.0 executable.
 
 ### Write ownership
 
@@ -130,7 +138,7 @@ reviewed task. Keep those policies in the applications:
   [CFileTemp](../libiw/compat/iw/imaging/FileStreams.h).
 - 3.0 keeps temporary-output publication, identity checks, collision policy,
   backups and Undo in [Files.cpp](../src30/Files.cpp) and its task services.
-- ArtMate remains read-only.
+- ImageWalker 1.0 remains read-only.
 
 Pass metadata policy per operation. 3.0 Convert intentionally omits descriptive
 and GPS metadata, whereas Edit can carry it. A common engine is not permission
@@ -160,8 +168,8 @@ the adapter; do not add release-number switches to the engine.
 
 | Application boundary | Keep local |
 |---|---|
-| [ArtMate loader](../src10/LoadAny.cpp) | MBCS-to-Unicode paths, DIB storage adaptation, resource lookup, progress/error presentation, stored orientation and the 1 GiB native page budget |
-| [ArtMate scaling](../src10/DibExtra.cpp) | DIB conversion and display-buffer ownership; call the shared resize operation |
+| [1.0 loader](../src10/LoadAny.cpp) | MBCS-to-Unicode paths, DIB storage adaptation, resource lookup, progress/error presentation, stored orientation and the 1 GiB native page budget |
+| [1.0 scaling](../src10/DibExtra.cpp) | DIB conversion and display-buffer ownership; call the shared resize operation |
 | [2.x streams](../src23/ImagingStreams.h) | Snapshot application preferences and search policy into an image request |
 | [2.x file adapter](../src23/FileFormatAny.cpp) and [JPEG panel](../src23/FileJpeg.cpp) | File opening/publication and encoder settings UI |
 | [2.x metadata presentation](../src23/Metadata.cpp) | Property-list controls and application resources |
@@ -170,7 +178,7 @@ the adapter; do not add release-number switches to the engine.
 
 Treat adapters as translation and ownership code. Do not put a second codec,
 tone algorithm or image-format registry there. Keep the compatibility include
-directory private to the 2.x targets; 3.0 and ArtMate use the standard C++ API.
+directory private to the 2.x targets; 3.0 and 1.0 use the standard C++ API.
 Include `iw/imaging/...` or `<libiw/...>` directly; an application directory
 holds no forwarding header.
 

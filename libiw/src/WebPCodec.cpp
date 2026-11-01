@@ -1,11 +1,10 @@
 // ImageWalker by Zac Walker
-// libfiles decoding and bundled libwebp encoding, independent of installed WIC extensions.
+// WebP decoded and encoded by libfiles, independent of installed WIC extensions.
 
 #include <libiw/WebPCodec.h>
 #include <libiw/Diagnostics.h>
 #include <libfiles/decode.h>
-
-#include <webp/encode.h>
+#include <libfiles/encode.h>
 
 #include <algorithm>
 #include <array>
@@ -17,10 +16,12 @@ namespace iw::webp
 	{
 		constexpr std::uint64_t maximumFileBytes = 512ull * 1024 * 1024;
 		constexpr std::uint64_t maximumPixels = 128ull * 1024 * 1024;
+		// WebP's own limit on a side.
+		constexpr int maximumDimension = 16383;
 
 		bool dimensions_ok(const int width, const int height)
 		{
-			return width > 0 && height > 0 && width <= WEBP_MAX_DIMENSION && height <= WEBP_MAX_DIMENSION &&
+			return width > 0 && height > 0 && width <= maximumDimension && height <= maximumDimension &&
 				static_cast<std::uint64_t>(width) * height <= maximumPixels;
 		}
 
@@ -114,31 +115,26 @@ namespace iw::webp
 	{
 		if (!dimensions_ok(image.width, image.height) ||
 			static_cast<std::uint64_t>(image.width) * image.height > image.pixels.size()) return {};
-		WebPConfig config;
-		if (!WebPConfigInit(&config)) return {};
-		config.lossless = options.lossless ? 1 : 0;
-		config.quality = static_cast<float>(std::clamp(options.quality, 1, 100));
-		config.method = 4;
-		config.exact = 1; // Lossless includes RGB under zero alpha, not just the visible composite.
-		if (!WebPValidateConfig(&config)) return {};
-		WebPPicture picture;
-		if (!WebPPictureInit(&picture)) return {};
-		WebPMemoryWriter writer;
-		WebPMemoryWriterInit(&writer);
-		struct Cleanup
+		libfiles::image_view view;
+		view.pixels = reinterpret_cast<const std::uint8_t*>(image.pixels.data());
+		view.stride = static_cast<std::size_t>(image.width) * 4;
+		view.width = static_cast<std::uint32_t>(image.width);
+		view.height = static_cast<std::uint32_t>(image.height);
+		view.format = libfiles::pixel_format::bgra8;
+		libfiles::webp_options webp;
+		webp.lossless = options.lossless;
+		webp.quality = std::clamp(options.quality, 1, 100);
+		webp.method = 4;
+		webp.exact = true; // Lossless includes RGB under zero alpha, not just the visible composite.
+		try
 		{
-			WebPPicture& picture;
-			WebPMemoryWriter& writer;
-			~Cleanup() { WebPPictureFree(&picture); WebPMemoryWriterClear(&writer); }
-		} cleanup{picture, writer};
-		picture.width = image.width;
-		picture.height = image.height;
-		picture.use_argb = 1;
-		picture.writer = WebPMemoryWrite;
-		picture.custom_ptr = &writer;
-		if (!WebPPictureImportBGRA(&picture, reinterpret_cast<const std::uint8_t*>(image.pixels.data()),
-			image.width * 4) || !WebPEncode(&config, &picture) || writer.size == 0 ||
-			writer.size > maximumFileBytes) return {};
-		return {writer.mem, writer.mem + writer.size};
+			auto encoded = libfiles::encode_webp(view, 1, {}, webp);
+			if (encoded.data.empty() || encoded.data.size() > maximumFileBytes) return {};
+			return std::move(encoded.data);
+		}
+		catch (const std::exception&)
+		{
+			return {};
+		}
 	}
 }

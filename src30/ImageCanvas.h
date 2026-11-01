@@ -110,8 +110,8 @@ namespace iw
 		void zoom(double factor);
 		bool has_displayed_image() const { return displayed_image() != nullptr; }
 		std::vector<std::filesystem::path> selected_paths() const;
-		size_t selection_count() const { return selection_.size(); }
-		int focused_index() const { return selection_.focus(); }
+		size_t selection_count() const { return active_selection().size(); }
+		int focused_index() const { return active_selection().focus(); }
 		void select_all();
 		void clear_selection();
 		bool cancel_transient_state();

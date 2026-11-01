@@ -1,9 +1,13 @@
 # Build trees
 build/
 out/
+tmp/
 .vs/
 CMakeUserPresets.json
 /.dd/state/
+
+# Python tool caches
+__pycache__/
 
 # Built executables land in exe/ (IW_OUTPUT_DIR), but exe/dic holds the
 # spell-check dictionaries and is tracked.

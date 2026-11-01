@@ -23,8 +23,15 @@ void CJobThumb::Work()
 	{
 		ThreadLoader().Load(&m_dib, m_strName, this, TRUE);
 	}
+	catch (const std::exception& error)
+	{
+		IW::Logging::Error(_T("Failed to load thumbnail %s: %hs"), static_cast<LPCTSTR>(m_strName), error.what());
+		m_dib.Close();
+	}
 	catch (...)
 	{
+		IW::Logging::Error(_T("Failed to load thumbnail %s"), static_cast<LPCTSTR>(m_strName));
+		m_dib.Close();
 	}
 }
 
@@ -44,8 +51,16 @@ void CJobLoad::Work()
 	{
 		m_bLoaded = ThreadLoader().Load(&m_dib, m_strName, this, FALSE);
 	}
+	catch (const std::exception& error)
+	{
+		IW::Logging::Error(_T("Failed to load image %s: %hs"), static_cast<LPCTSTR>(m_strName), error.what());
+		m_dib.Close();
+		m_bLoaded = FALSE;
+	}
 	catch (...)
 	{
+		IW::Logging::Error(_T("Failed to load image %s"), static_cast<LPCTSTR>(m_strName));
+		m_dib.Close();
 		m_bLoaded = FALSE;
 	}
 }
@@ -85,8 +100,14 @@ void CJobCell::Work()
 		if (!ThreadLoader().Load(&dib, m_strName, this, FALSE) || !dib.IsOpen())
 			return;
 	}
+	catch (const std::exception& error)
+	{
+		IW::Logging::Error(_T("Failed to load collage image %s: %hs"), static_cast<LPCTSTR>(m_strName), error.what());
+		return;
+	}
 	catch (...)
 	{
+		IW::Logging::Error(_T("Failed to load collage image %s"), static_cast<LPCTSTR>(m_strName));
 		return;
 	}
 
@@ -118,7 +139,10 @@ void CJobWatch::Work()
 
 	HANDLE hChange = ::FindFirstChangeNotification(m_strPath, FALSE,
 	                                               FILE_NOTIFY_CHANGE_FILE_NAME |
-	                                               FILE_NOTIFY_CHANGE_DIR_NAME);
+	                                               FILE_NOTIFY_CHANGE_DIR_NAME |
+	                                               FILE_NOTIFY_CHANGE_SIZE |
+	                                               FILE_NOTIFY_CHANGE_LAST_WRITE |
+	                                               FILE_NOTIFY_CHANGE_ATTRIBUTES);
 
 	if (hChange == INVALID_HANDLE_VALUE || hChange == nullptr)
 	{

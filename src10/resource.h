@@ -1,5 +1,5 @@
 //{{NO_DEPENDENCIES}}
-// Used by ArtMate.rc
+// Used by ImageWalker.rc
 
 #define IDD_ABOUTBOX                    100
 #define IDR_MAINFRAME                   128

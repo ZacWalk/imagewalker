@@ -39,6 +39,8 @@
 namespace iw::platform
 {
 	class WindowFrame;
+	enum class FileOperation;
+	struct ChoiceDefinition;
 	using WindowFramePtr = std::shared_ptr<WindowFrame>;
 
 	namespace win32
@@ -48,5 +50,8 @@ namespace iw::platform
 		HANDLE shell_small_image_list();
 		int shell_icon_index(const std::filesystem::path& path);
 		std::vector<std::filesystem::path> dropped_files(HANDLE drop);
+		FileOperation clipboard_file_operation(HANDLE preferredEffect);
+		inline constexpr int firstChoiceButton = 100;
+		int choice_button_result(const ChoiceDefinition& definition, int nativeButton);
 	}
 }

@@ -2,7 +2,7 @@
 
 // One flat options dialog. There is not enough here to justify tabs.
 
-#include "ArtMate.h"
+#include "ImageWalker.h"
 
 class COptionsDlg : public CDialogImpl<COptionsDlg>
 {

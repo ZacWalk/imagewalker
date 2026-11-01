@@ -13,7 +13,7 @@ set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
 set(BUILD_SHARED_LIBS OFF)
 set(BUILD_TESTING OFF)
 
-set(IW_LIBFILES_REVISION f5cd78fc6807ece846b92e23eab46b565a50c084)
+set(IW_LIBFILES_REVISION 4481ded34629ec203400fcf1b0ecbdf8510b471c)
 set(IW_HUNSPELL_VERSION 1.7.6)
 
 # ------------------------------------------------------------------ libfiles

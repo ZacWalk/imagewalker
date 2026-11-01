@@ -505,7 +505,6 @@ namespace iw::platform
 		{
 			auto frame = std::make_shared<WinWindowFrame>();
 			frame->reactor_ = std::move(reactor);
-			frame->self_ = frame;
 			frame->topLevel_ = parent == nullptr;
 			frame->eraseBackground_ = options.eraseBackground;
 			const std::wstring className(options.className.begin(), options.className.end());
@@ -531,6 +530,7 @@ namespace iw::platform
 			const int y = options.useDefaultPosition ? CW_USEDEFAULT : options.bounds.y;
 			const int width = options.bounds.width;
 			const int height = options.bounds.height;
+			frame->self_ = frame;
 			frame->window_ = CreateWindowExW(0, className.c_str(), options.title.c_str(), style,
 			                                 x, y, width, height, parent, nullptr, resourceInstance, frame.get());
 			if (!frame->window_)
@@ -1677,6 +1677,11 @@ namespace iw::platform
 		ClipboardContent result;
 		if (!OpenClipboard(win32::owner_window(owner))) return result;
 		result.files = win32::dropped_files(GetClipboardData(CF_HDROP));
+		if (!result.files.empty())
+		{
+			const UINT format = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
+			result.operation = win32::clipboard_file_operation(format ? GetClipboardData(format) : nullptr);
+		}
 		if (result.files.empty())
 		{
 			for (const UINT format : {CF_DIBV5, CF_DIB})
@@ -1692,6 +1697,16 @@ namespace iw::platform
 		}
 		CloseClipboard();
 		return result;
+	}
+
+	FileOperation win32::clipboard_file_operation(const HANDLE preferredEffect)
+	{
+		if (!preferredEffect || GlobalSize(preferredEffect) < sizeof(DWORD)) return FileOperation::copy;
+		const auto* effect = static_cast<const DWORD*>(GlobalLock(preferredEffect));
+		if (!effect) return FileOperation::copy;
+		const DWORD value = *effect;
+		GlobalUnlock(preferredEffect);
+		return value == DROPEFFECT_MOVE ? FileOperation::move : FileOperation::copy;
 	}
 
 	bool perform_file_operation(const WindowFramePtr& owner, const FileOperation operation,

@@ -48,9 +48,9 @@ and test it against the compiled version resource and About dialog.
 Keep Delete mapped to the Recycle Bin, F2 to Rename and F7 to Move To.
 Validate the compiled accelerator tables, not just resource-source text.
 
-## ArtMate 1.0 and ImageWalker 3.0
+## ImageWalker 1.0 and 3.0
 
-Preserve ArtMate's read-only scope and smaller frame and views. Use the common
+Preserve ImageWalker 1.0's read-only scope and smaller frame and views. Use the common
 codec registry rather than maintaining a separate loader set.
 Keep ImageWalker 3.0 changes in its own platform, canvas, collection and task
 interfaces; do not add a dependency on a WTL application. Follow

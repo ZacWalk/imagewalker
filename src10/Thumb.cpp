@@ -82,6 +82,22 @@ CFolder::CFolder(HWND hwndOwner, const CShellItem& item)
 	Refresh();
 }
 
+UINT CFolder::FindItemKey(const std::map<UINT, std::unique_ptr<CThumb>>& thumbs, const CShellItem& item)
+{
+	UINT key = ShellHashKey(item);
+	const UINT size = CShellItem::GetSize(item.GetItem());
+	for (;; ++key)
+	{
+		const auto found = thumbs.find(key);
+		if (found == thumbs.end())
+			return key;
+		const auto& existing = *found->second;
+		if (CShellItem::GetSize(existing.GetItem()) == size &&
+			memcmp(existing.GetItem(), item.GetItem(), size) == 0)
+			return key;
+	}
+}
+
 void CFolder::Refresh()
 {
 	for (auto& entry : m_mapThumbs)
@@ -101,7 +117,7 @@ void CFolder::Refresh()
 	{
 		itemEnum.Attach(pItemRaw);
 
-		const UINT uKey = ShellHashKey(itemEnum);
+		const UINT uKey = FindItemKey(m_mapThumbs, itemEnum);
 		auto it = m_mapThumbs.find(uKey);
 
 		if (it == m_mapThumbs.end())

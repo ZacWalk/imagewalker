@@ -1,4 +1,4 @@
-# ArtMate 1.0, the earliest ancestor of ImageWalker: a thumbnail browser and
+# ImageWalker 1.0: a thumbnail browser and
 # image viewer, and nothing else. Originally MFC; now plain WTL.
 
 set(IW10_SOURCES
@@ -19,7 +19,7 @@ set(IW10_SOURCES
 
 list(TRANSFORM IW10_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 
-add_executable(imagewalker10 WIN32 ${IW10_SOURCES} ArtMate.rc)
+add_executable(imagewalker10 WIN32 ${IW10_SOURCES} ImageWalker.rc)
 
 target_include_directories(imagewalker10 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 

@@ -1,4 +1,4 @@
-// ArtMate's shell layer. The item, folder, desktop and enumerator wrappers are
+// ImageWalker 1.0's shell layer. The item, folder, desktop and enumerator wrappers are
 // the shared ones in include/iw/shell.h; what stays here is what only 1.0 has.
 //
 // 1.0 used to carry its own copy with an MFC shape - CObject bases, an

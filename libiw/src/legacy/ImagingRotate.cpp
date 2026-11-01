@@ -10,6 +10,7 @@
 #include <libiw/Pixel.h>
 #include "ImagingLock.h"
 #include "ImagingStreams.h"
+#include <type_traits>
 
 namespace
 {
@@ -251,7 +252,7 @@ void SkewLine(LPCOLORREF pLineOut, IW::LPCCOLORREF pLineIn, const int len, const
 
 // The locks and the two line buffers belong to the caller: this used to build a
 // pair of heap locks and a pair of buffers for every single scan line.
-template<class TLockIn, class TLockOut>
+template<bool TAlpha, class TLockIn, class TLockOut>
 static void HorizontalSkew(
 	const TLockIn* pLockIn,
 	TLockOut* pLockOut,
@@ -262,12 +263,26 @@ static void HorizontalSkew(
 	unsigned y, // Row index
 	int iOffset, // Skew offset
 	int weight, // Relative weight of right COLORREF
-	COLORREF clrBack // Background color
+	COLORREF clrBack, // Background color
+	const IW::Page* sourcePage = nullptr,
+	bool writeStraight = false
 )
 {
-	pLockIn->RenderLine(pLineIn, y, 0, cx);
+	if constexpr (TAlpha)
+	{
+		if constexpr (std::is_base_of_v<IW::IImageSurfaceLock, TLockIn>)
+		{
+			IW::ReadStraightLine(*sourcePage, pLockIn, pLineIn, y, 0, cx);
+			for (int x = 0; x < cx; ++x) pLineIn[x] = IW::PremultiplyStraight(pLineIn[x]);
+		}
+		else pLockIn->GetLine(pLineIn, y, 0, cx);
+	}
+	else pLockIn->RenderLine(pLineIn, y, 0, cx);
 
 	SkewLine(pLineOut, pLineIn, cx, cxOut, iOffset, weight, clrBack);
+	if constexpr (TAlpha)
+		if (writeStraight)
+			for (int x = 0; x < cxOut; ++x) pLineOut[x] = IW::UnpremultiplyStraight(pLineOut[x]);
 
 	pLockOut->SetLine(pLineOut, y, 0, cxOut);
 }
@@ -277,7 +292,7 @@ static void HorizontalSkew(
 // Limited to 45 degree skewing only. Filters two adjacent COLORREFs.
 //
 // A column cannot be read with GetLine, so this one stays per pixel -- but both
-// pages here are PF32, so the caller passes a concrete lock and the access
+// pages here use 32-bit storage, so the caller passes a concrete lock and the access
 // inlines to a load and a store.
 template<class TLockIn, class TLockOut>
 static void VerticalSkew(
@@ -314,7 +329,8 @@ static void VerticalSkew(
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
 
-bool RotatePage(IW::Image& imageOut, const IW::Page& pageIn, const double dRadAngle, const double dTan,
+template<bool TAlpha>
+static bool RotatePage(IW::Image& imageOut, const IW::Page& pageIn, const double dRadAngle, const double dTan,
                 const double dSinE, const COLORREF clrBack, IW::IStatus* pStatus)
 {
 	const int cx = pageIn.GetWidth();
@@ -322,28 +338,32 @@ bool RotatePage(IW::Image& imageOut, const IW::Page& pageIn, const double dRadAn
 
 	const int cx1 = cx + static_cast<int>(double(cy) * fabs(dTan) + 0.5);
 	const int cy1 = cy;
+	// The private alpha intermediates hold premultiplied samples until the last shear.
+	constexpr auto intermediateFormat = TAlpha ? IW::PixelFormat::PF32Alpha : IW::PixelFormat::PF32;
+	constexpr auto outputFormat = TAlpha ? IW::PixelFormat::PF32Alpha : IW::PixelFormat::PF24;
 
 	// Calc first shear (horizontal) destination image dimensions
 	IW::Image image1;
-	IW::Page& page1 = image1.CreatePage(cx1, cy1, IW::PixelFormat::PF32);
+	IW::Page& page1 = image1.CreatePage(cx1, cy1, intermediateFormat);
 
 	if (pStatus->QueryCancel()) return false;
 
 	// Perform 1st shear (horizontal)
 	{
 		IW::ConstIImageSurfaceLockPtr pLockIn = pageIn.GetSurfaceLock();
-		IW::SurfaceLock<IW::PixelFormat::PF32> lock1(page1);
+		IW::SurfaceLock<intermediateFormat> lock1(page1);
 
 		IW::CBuffer<COLORREF> pLineIn(cx);
 		IW::CBuffer<COLORREF> pLineOut(cx1);
 
 		for (int u = 0; u < cy1; u++)
 		{
+			if (pStatus->QueryCancel()) return false;
 			const double dShear = (dTan >= 0.0) ? ((u + 0.5) * dTan) : (((u - cy1) + 0.5) * dTan);
 			const int iShear = static_cast<int>(floor(dShear));
 			const int nWeight = static_cast<int>(255 * (dShear - iShear) + 1) & 0xFF;
 
-			HorizontalSkew(pLockIn.p, &lock1, pLineIn, pLineOut, cx, cx1, u, iShear, nWeight, clrBack);
+			HorizontalSkew<TAlpha>(pLockIn.p, &lock1, pLineIn, pLineOut, cx, cx1, u, iShear, nWeight, clrBack, &pageIn);
 		}
 	}
 
@@ -352,7 +372,7 @@ bool RotatePage(IW::Image& imageOut, const IW::Page& pageIn, const double dRadAn
 	const int cy2 = static_cast<int>((cx * fabs(dSinE)) + (cy * cos(dRadAngle)) + 0.5) + 1;
 
 	IW::Image image2;
-	IW::Page& page2 = image2.CreatePage(cx2, cy2, IW::PixelFormat::PF32);
+	IW::Page& page2 = image2.CreatePage(cx2, cy2, intermediateFormat);
 
 	// Variable skew offset
 	double dOffset2 = (dSinE > 0.0) ? ((cx - 1) * dSinE) : (-dSinE * (cx - cx2));
@@ -360,14 +380,15 @@ bool RotatePage(IW::Image& imageOut, const IW::Page& pageIn, const double dRadAn
 	if (pStatus->QueryCancel()) return false;
 
 	{
-		IW::SurfaceLock<IW::PixelFormat::PF32> lock1(page1);
-		IW::SurfaceLock<IW::PixelFormat::PF32> lock2(page2);
+		IW::SurfaceLock<intermediateFormat> lock1(page1);
+		IW::SurfaceLock<intermediateFormat> lock2(page2);
 
 		IW::CBuffer<COLORREF> pLineIn(cy1);
 		IW::CBuffer<COLORREF> pLineOut(cy2);
 
 		for (int u = 0; u < cx2; u++, dOffset2 -= dSinE)
 		{
+			if (pStatus->QueryCancel()) return false;
 			const int iShear = static_cast<int>(floor(dOffset2));
 			const int nWeight = static_cast<int>(255 * (dOffset2 - iShear) + 1) & 0xFF;
 
@@ -381,7 +402,7 @@ bool RotatePage(IW::Image& imageOut, const IW::Page& pageIn, const double dRadAn
 
 	// Not the CreatePage(cx, cy, pf) overload: that frees the destination, which
 	// on a multi-page image throws away the pages already rotated.
-	IW::Page& pageOut = imageOut.CreatePage(CRect(0, 0, cx3, cy3), IW::PixelFormat::PF24);
+	IW::Page& pageOut = imageOut.CreatePage(CRect(0, 0, cx3, cy3), outputFormat);
 
 	double dOffset3 = (dSinE >= 0.0)
 		                  ? ((cx - 1) * dSinE * -dTan)
@@ -390,18 +411,19 @@ bool RotatePage(IW::Image& imageOut, const IW::Page& pageIn, const double dRadAn
 	if (pStatus->QueryCancel()) return false;
 
 	{
-		IW::SurfaceLock<IW::PixelFormat::PF32> lock2(page2);
-		IW::SurfaceLock<IW::PixelFormat::PF24> lockOut(pageOut);
+		IW::SurfaceLock<intermediateFormat> lock2(page2);
+		IW::SurfaceLock<outputFormat> lockOut(pageOut);
 
 		IW::CBuffer<COLORREF> pLineIn(cx2);
 		IW::CBuffer<COLORREF> pLineOut(cx3);
 
 		for (int u = 0; u < cy3; u++, dOffset3 += dTan)
 		{
+			if (pStatus->QueryCancel()) return false;
 			const int iShear = static_cast<int>(floor(dOffset3));
 			const int nWeight = static_cast<int>(255 * (dOffset3 - iShear) + 1) & 0xFF;
 
-			HorizontalSkew(&lock2, &lockOut, pLineIn, pLineOut, cx2, cx3, u, iShear, nWeight, clrBack);
+			HorizontalSkew<TAlpha>(&lock2, &lockOut, pLineIn, pLineOut, cx2, cx3, u, iShear, nWeight, clrBack, nullptr, true);
 		}
 	}
 
@@ -412,10 +434,13 @@ bool RotatePage(IW::Image& imageOut, const IW::Page& pageIn, const double dRadAn
 
 bool IW::Rotate(const Image& imageInRaw, Image& imageOut, float fAngle, IStatus* pStatus)
 {
-	// Get it into the positive
-	//fAngle = -fAngle;
-	while (fAngle > 360.0f) fAngle -= 360.0f;
-	while (fAngle < 0.0f) fAngle += 360.0f;
+	if (!std::isfinite(fAngle))
+	{
+		pStatus->SetError(L"Invalid rotation angle.");
+		return false;
+	}
+	fAngle = std::fmod(fAngle, 360.0f);
+	if (fAngle < 0.0f) fAngle += 360.0f;
 
 	if (fAngle == 0.0)
 	{
@@ -470,6 +495,12 @@ bool IW::Rotate(const Image& imageInRaw, Image& imageOut, float fAngle, IStatus*
 		imageIn = imageTemp;
 	}
 
+	if (fAngle == 0.0f)
+	{
+		imageOut = imageIn;
+		return true;
+	}
+
 	// If we got here, angle is in (-45.0 .. +45.0]
 	constexpr double ROTATE_PI = 3.1415926535897932384626433832795;
 	const double dRadAngle = fAngle * ROTATE_PI / 180.0; // Angle in radians
@@ -482,7 +513,10 @@ bool IW::Rotate(const Image& imageInRaw, Image& imageOut, float fAngle, IStatus*
 	for (Image::PageList::const_iterator pageIn = imageIn.Pages.begin(); pageIn != imageIn.Pages.end(); ++pageIn)
 	{
 		if (pStatus->QueryCancel()) return false;
-		if (!RotatePage(imageOut, *pageIn, dRadAngle, dTan, dSinE, clrBack, pStatus))
+		const bool success = HasSourceAlpha(*pageIn)
+			? RotatePage<true>(imageOut, *pageIn, dRadAngle, dTan, dSinE, clrBack, pStatus)
+			: RotatePage<false>(imageOut, *pageIn, dRadAngle, dTan, dSinE, clrBack, pStatus);
+		if (!success)
 			return false;
 	}
 

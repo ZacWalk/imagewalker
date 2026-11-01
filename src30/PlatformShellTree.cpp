@@ -421,6 +421,7 @@ namespace iw::platform
 				const auto generation = generation_;
 				const bool queued = queue_work(WorkQueue::shell, [weak, item, parent, generation]
 				{
+					const auto exiting = exit_token();
 					std::vector<ShellItemData> folders;
 					try
 					{
@@ -433,7 +434,7 @@ namespace iw::platform
 								nullptr, BHID_EnumItems, IID_PPV_ARGS(&children))))
 							{
 								IShellItem* child = nullptr;
-								while (children->Next(1, &child, nullptr) == S_OK)
+								while (!exiting.stop_requested() && children->Next(1, &child, nullptr) == S_OK)
 								{
 									SFGAOF attributes = SFGAO_FOLDER;
 									if (SUCCEEDED(child->GetAttributes(attributes, &attributes)) &&
@@ -451,6 +452,7 @@ namespace iw::platform
 						});
 					}
 					catch (...) { folders.clear(); }
+					if (exiting.stop_requested()) return;
 					queue_ui([weak, item, parent, generation, folders = std::move(folders)]
 					{
 						const auto self = weak.lock();

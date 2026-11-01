@@ -1,8 +1,8 @@
-// ArtMate 1.00 - entry point.
+// ImageWalker 1.0 - entry point.
 
 #include "stdafx.h"
 
-#include "ArtMate.h"
+#include "ImageWalker.h"
 #include "MainFrm.h"
 #include "SplashWnd.h"
 
@@ -38,7 +38,13 @@ static int RunMessageLoop(CMainFrame& frame)
 			continue;
 		}
 
-		if (!::GetMessage(&msg, nullptr, 0, 0))
+		const BOOL result = ::GetMessage(&msg, nullptr, 0, 0);
+		if (result == -1)
+		{
+			IW::Logging::LastError(_T("GetMessage"));
+			return 1;
+		}
+		if (result == 0)
 			break;
 
 		if (!frame.PreTranslateMessage(&msg))
@@ -56,10 +62,10 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR lpstrCmdLine, int nC
 	// Before anything else: the reporter ends in a modal MessageBox, and a
 	// faulting case must reach the harness's SEH filter instead.
 	if (IW::Test::IsRequested(lpstrCmdLine))
-		return IW::Test::RunAll("ArtMate 1.00");
+		return IW::Test::RunAll("ImageWalker 1.0");
 
 	IW::Crash::Install(L"imagewalker10");
-	IW::Logging::Open(_T("ArtMate 1.00"));
+	IW::Logging::Open(_T("ImageWalker 1.0"));
 	IW::ConfigureImagingDiagnostics();
 
 	// Drag and drop needs full OLE, not just COM.
@@ -81,7 +87,7 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR lpstrCmdLine, int nC
 	g_strCmdLine.Remove(_T('\"'));
 	g_strCmdLine.Trim();
 
-	int nRet = 0;
+	int nRet = 1;
 
 	{
 		CSplashWnd splash;

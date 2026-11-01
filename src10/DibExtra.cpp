@@ -5,7 +5,7 @@
 #include <libiw/Document.h>
 #include <libiw/ImageEdits.h>
 
-// Members that ArtMate's copy of dib.lib had and 1.05's does not. That library's
+// Members that ImageWalker 1.0's copy of dib.lib had and 1.05's does not. That library's
 // sources are not in the repository at any revision, so these are written from
 // their call sites rather than recovered.
 
@@ -97,28 +97,28 @@ BOOL CDibScale::Scale(CDib& dibSrc, CSize sizeDst, CStatus* pStatus)
 	if (pStatus && pStatus->Exit()) return FALSE;
 	try
 	{
-		using Format = iw::imaging::PixelStorage;
-		iw::imaging::FrameView frame;
-		frame.width = static_cast<int>(dibSrc.Width());
-		frame.height = static_cast<int>(dibSrc.Height());
-		frame.stride = dibSrc.m_nStorageWidth;
-		frame.pixels = {dibSrc.GetBitmap(), static_cast<size_t>(frame.stride) * frame.height};
+		using Format = libfiles::document_storage;
+		libfiles::pixel_rows frame;
+		frame.width = static_cast<std::uint32_t>(dibSrc.Width());
+		frame.height = static_cast<std::uint32_t>(dibSrc.Height());
+		frame.stride = static_cast<std::size_t>(dibSrc.m_nStorageWidth);
+		frame.bottom_up = true;
+		frame.pixels = {dibSrc.GetBitmap(), frame.stride * frame.height};
 		switch (dibSrc.Bpp())
 		{
-		case 1: frame.format = Format::indexed1; break;
-		case 4: frame.format = Format::indexed4; break;
-		case 8: frame.format = Format::indexed8; break;
-		case 16: frame.format = Format::bgr555; break;
-		case 24: frame.format = Format::bgr24; break;
-		case 32: frame.format = Format::bgra32; break;
+		case 1: frame.storage = Format::indexed1; break;
+		case 4: frame.storage = Format::indexed4; break;
+		case 8: frame.storage = Format::indexed8; break;
+		case 16: frame.storage = Format::bgr555; break;
+		case 24: frame.storage = Format::bgr24; break;
+		case 32: frame.storage = Format::bgra32; break;
 		default:
 			IW::Logging::Error(_T("Unsupported DIB storage for image scaling"));
 			return FALSE;
 		}
 		if (dibSrc.Bpp() <= 8)
-			frame.paletteBgra = {reinterpret_cast<const std::uint8_t*>(dibSrc.GetColor()),
-				(size_t{1} << dibSrc.Bpp()) * sizeof(RGBQUAD)};
-		auto source = iw::imaging::pixels_from_frame(frame);
+			frame.palette = {reinterpret_cast<const std::uint32_t*>(dibSrc.GetColor()), size_t{1} << dibSrc.Bpp()};
+		auto source = iw::imaging::pixels_from_rows(frame);
 		auto scaled = iw::edits::resize_image(source, {sizeDst.cx, sizeDst.cy});
 		if (pStatus && pStatus->Exit()) return FALSE;
 		CDib result;

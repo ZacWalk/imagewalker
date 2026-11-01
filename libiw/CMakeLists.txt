@@ -5,7 +5,7 @@ target_sources(libiw PRIVATE ${LIBIW_LEGACY_SOURCES})
 set(LIBIW_MODERN_SOURCES
     src/Pixel.cpp src/Cpu.cpp src/Diagnostics.cpp src/PixelOps.cpp src/PixelOpsAvx2.cpp
     src/ImageResampler.cpp src/ImageEditor.cpp src/EditGeometry.cpp
-    src/WebPCodec.cpp src/JpegMetadata.cpp src/WicCodec.cpp src/PhotoMetadata.cpp)
+    src/WebPCodec.cpp src/WicCodec.cpp src/PhotoMetadata.cpp)
 target_sources(libiw PRIVATE ${LIBIW_MODERN_SOURCES})
 target_include_directories(libiw PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/include" "${PROJECT_SOURCE_DIR}/include")
@@ -31,8 +31,10 @@ set_source_files_properties(${LIBIW_LEGACY_SOURCES} PROPERTIES
 set_source_files_properties(${LIBIW_MODERN_SOURCES} PROPERTIES COMPILE_OPTIONS /permissive-)
 set_property(SOURCE src/PixelOpsAvx2.cpp APPEND PROPERTY COMPILE_OPTIONS /arch:AVX2)
 target_link_libraries(libiw PRIVATE
-    iw::jpeg iw::png iw::tiff iw::gif iw::zlib iw::webp libfiles::libfiles
+    iw::jpeg iw::png iw::tiff iw::gif iw::zlib
     gdi32 user32 ole32 oleaut32 shlwapi shell32 windowscodecs)
+# libfiles' types are libiw's public vocabulary for properties, colour profiles and documents.
+target_link_libraries(libiw PUBLIC libfiles::libfiles)
 
 add_executable(libiw_tests tests/test.cpp tests/legacy.cpp)
 target_link_libraries(libiw_tests PRIVATE iw::libiw iw::jpeg iw::png iw::gif iw::tiff)

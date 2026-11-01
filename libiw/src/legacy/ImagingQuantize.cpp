@@ -490,13 +490,14 @@ bool IW::Quantize(const Image& imageIn, Image& imageOut, IStatus* pStatus)
 {
 	for (auto pageIn = imageIn.Pages.begin(); pageIn != imageIn.Pages.end(); ++pageIn)
 	{
+		if (pStatus->QueryCancel()) return false;
 		CQuantizer q(*pageIn);
 
 		if (!q.Quantize(imageOut))
 			return false;
 
 		if (pStatus->QueryCancel())
-			break;
+			return false;
 	}
 
 	imageOut.Normalize();

@@ -56,32 +56,22 @@ BOOL CDibDC::Create(int x, int y, int bpp)
 }
 
 
-#define Mask1 0x000000ff
-#define Mask2 0x0000ff00
-#define Mask3 0x00ff0000
-#define Mask4 0xff000000
-
-
-inline void Blend24(UINT* dest, UINT source)
+void Blend24(BYTE* destination, UINT source)
 {
-	UINT alpha = source >> 24;
-	UINT ialpha = 256 - alpha;
-
-	auto p = (LPBYTE)dest;
-
-	// Three bytes in, three bytes out: the last pixel of a DIB has no fourth byte.
-	UINT d = p[0] | (p[1] << 8) | (static_cast<UINT>(p[2]) << 16);
-
-	UINT lo = (((Mask2 & ((source & Mask1) * alpha +
-			(d & Mask1) * ialpha)) |
-		(Mask3 & ((source & Mask2) * alpha +
-			(d & Mask2) * ialpha))) >> 8);
-
-	p[0] = static_cast<BYTE>(lo);
-	p[1] = static_cast<BYTE>(lo >> 8);
-
-	p[2] = static_cast<BYTE>((((Mask4 & ((source & Mask3) * alpha +
-		(d & Mask3) * ialpha))) >> 24));
+	const UINT alpha = source >> 24;
+	if (alpha == 0) return;
+	if (alpha == 255)
+	{
+		destination[0] = static_cast<BYTE>(source);
+		destination[1] = static_cast<BYTE>(source >> 8);
+		destination[2] = static_cast<BYTE>(source >> 16);
+		return;
+	}
+	for (unsigned channel = 0; channel < 3; ++channel)
+	{
+		const UINT value = (source >> (channel * 8)) & 255;
+		destination[channel] = static_cast<BYTE>((value * alpha + destination[channel] * (255 - alpha) + 127) / 255);
+	}
 }
 
 
@@ -112,7 +102,7 @@ public:
 
 			for (UINT x = 0; x < nWidth; x += 1)
 			{
-				Blend24(((UINT*)pDst), *((UINT*)pSrc));
+				Blend24(pDst, *((UINT*)pSrc));
 
 				pDst += 3;
 				pSrc += 4;
@@ -203,7 +193,7 @@ void CDibDC::Draw(LPRECT pRect, unsigned rgb)
 	{
 		for (UINT xx = 0; xx < nWidth; xx += 1)
 		{
-			Blend24((UINT*)pDst, rgb);
+			Blend24(pDst, rgb);
 
 			pDst += 3;
 		}
@@ -246,7 +236,7 @@ public:
 			for (UINT x = 0; x < nWidthDraw; x++)
 			{
 				UINT u = GetPixel(pLineSrc, ((x + nLeft) * nWidthSrc) / nWidthDst);
-				Blend24((UINT*)pLineDst, u);
+				Blend24(pLineDst, u);
 				pLineDst += 3;
 			}
 		}

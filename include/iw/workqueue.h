@@ -25,6 +25,7 @@
 #include <mutex>
 
 #include "iw/crashreport.h"
+#include "iw/logfile.h"
 
 namespace IW
 {
@@ -122,6 +123,7 @@ namespace IW
 				// the truth instead of leaving a dead worker looking live.
 				if (::WaitForSingleObject(_ready, INFINITE) == WAIT_FAILED)
 				{
+					Logging::LastError(_T("WaitForSingleObject (work queue)"));
 					Close();
 					return Item();
 				}
@@ -214,9 +216,13 @@ namespace IW
 					if (item->OwnerIsAlive())
 						item->Complete();
 				}
+				catch (const std::exception& error)
+				{
+					Logging::Error(_T("Work completion failed: %hs"), error.what());
+				}
 				catch (...)
 				{
-					// An escaping exception would unwind out of the message loop.
+					Logging::Error(_T("Work completion failed with an unknown exception"));
 				}
 			}
 		}
@@ -325,11 +331,16 @@ namespace IW
 				{
 					item->Work();
 				}
+				catch (const std::exception& error)
+				{
+					Logging::Error(_T("Background work failed: %hs"), error.what());
+				}
 				catch (...)
 				{
 					// A job that throws must still come back, or the UI waits
 					// forever for a completion that never arrives - and an
 					// exception escaping the thread entry point kills the process.
+					Logging::Error(_T("Background work failed with an unknown exception"));
 				}
 
 				// Only holds while the UI queue is open; closing it before the

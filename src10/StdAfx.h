@@ -1,4 +1,4 @@
-// stdafx.h : the headers that everything in ArtMate uses.
+// stdafx.h : the headers that everything in ImageWalker 1.0 uses.
 
 #pragma once
 
@@ -46,7 +46,7 @@ extern CAppModule _Module;
 #include <atlcrack.h>
 
 // atlapp.h drags in atlres.h, which claims ID_EDIT_DELETE and ID_VIEW_REFRESH
-// for the standard WTL command ids. ArtMate's resource.h assigns its own values
+// for the standard WTL command ids. ImageWalker 1.0's resource.h assigns its own values
 // to both, and its menus and accelerators are built against those.
 #undef ID_EDIT_DELETE
 #undef ID_VIEW_REFRESH

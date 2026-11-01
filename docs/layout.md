@@ -2,7 +2,7 @@
 
 | Path | Contents |
 |---|---|
-| `src10` | ArtMate 1.0 application and tests |
+| `src10` | ImageWalker 1.0 application and tests |
 | `src20` | ImageWalker 2.0 application and tests |
 | `src22` | ImageWalker 2.2 application and tests |
 | `src23` | ImageWalker 2.3 application and tests |

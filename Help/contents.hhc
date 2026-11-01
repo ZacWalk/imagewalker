@@ -24,5 +24,6 @@
 <li><object type="text/sitemap"><param name="Name" value="Supported image formats"><param name="Local" value="formats.html"></object><ul>
 <li><object type="text/sitemap"><param name="Name" value="Image file tips"><param name="Local" value="imageloader.html"></object></ul>
 <li><object type="text/sitemap"><param name="Name" value="ImageWalker versions"><param name="Local" value="versions.html"></object>
+<li><object type="text/sitemap"><param name="Name" value="ImageWalker 1.0"><param name="Local" value="iw10.html"></object>
 <li><object type="text/sitemap"><param name="Name" value="Support"><param name="Local" value="support.html"></object>
 </ul></body></html>

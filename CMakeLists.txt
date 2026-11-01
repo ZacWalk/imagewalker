@@ -80,7 +80,7 @@ target_compile_options(iw_flags INTERFACE
 # generator expressions never fired and /OPT:REF was never applied.
 target_compile_options(iw_flags INTERFACE $<$<NOT:$<CONFIG:Debug>>:/Zi>)
 target_link_options(iw_flags INTERFACE $<$<NOT:$<CONFIG:Debug>>:/DEBUG /OPT:REF /OPT:ICF /INCREMENTAL:NO>)
-# Character set is per-app: ArtMate is MBCS; all three 2.x ports are Unicode.
+# Character set is per-app: ImageWalker 1.0 is MBCS; all three 2.x ports are Unicode.
 target_compile_definitions(iw_flags INTERFACE
     STRICT
     _CRT_SECURE_NO_WARNINGS
@@ -163,6 +163,10 @@ endif()
 # the top of that script.
 find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
 
+add_test(NAME help-compiler COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_chmbuild.py")
+set_tests_properties(help-compiler PROPERTIES TIMEOUT 120)
+
 set(IW_HELP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Help")
 set(IW_HELP_PROJECT "${IW_HELP_DIR}/imagewalker.hhp")
 set(IW_HELP_OUTPUT "${IW_OUTPUT_DIR}/ImageWalker.chm")
@@ -219,6 +223,7 @@ if(Python3_Interpreter_FOUND AND EXISTS "${IW_HELP_PROJECT}")
         endif()
     endforeach()
     add_custom_target(iw_check_help
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_chmbuild.py"
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/checkhelp.py"
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/chmbuild.py"
             "${IW_HELP_PROJECT}" --strict -o "${IW_HELP_OUTPUT}"

@@ -5,7 +5,7 @@
 // are named after it, so imagewalker23d.exe uses imagewalker23d.ini/.log and
 // never collides with a release build in the same directory.
 //
-// Header-only and TCHAR-based, so it compiles correctly into MBCS ArtMate 1.0
+// Header-only and TCHAR-based, so it compiles correctly into MBCS ImageWalker 1.0
 // and Unicode ImageWalker 2.0, 2.2 and 2.3 alike.
 
 #include <windows.h>

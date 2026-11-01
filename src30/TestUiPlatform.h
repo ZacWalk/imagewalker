@@ -164,5 +164,19 @@ namespace iw::tests
 		bool fullscreen_state() const { return window->fullscreen_; }
 		bool can_undo() const { return window->can_undo_last_action(); }
 		void undo() { window->undo_last_action(); }
+		void begin_folder_scan(std::filesystem::path folder, const std::uint64_t generation)
+		{
+			window->folder_ = std::move(folder);
+			window->folderScanGeneration_ = generation;
+			window->collection_.begin_load();
+			window->scanning_ = true;
+		}
+		void finish_folder_scan(const std::uint64_t generation, const std::filesystem::path& folder,
+			std::vector<files::FolderItem> items, const std::error_code error = {})
+		{
+			window->finish_folder_scan(generation, folder, std::move(items), error);
+		}
+		LoadState collection_load_state() const { return window->collection_.load_state(); }
+		size_t collection_size() const { return window->collection_.items().size(); }
 	};
 }

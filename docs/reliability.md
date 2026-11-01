@@ -19,6 +19,8 @@ threading and user interaction.
 
 - Surface locks validate dimensions, stride and allocation size before pixel
   access.
+- Empty image copies stay empty, self-assignment preserves pixels and source
+  dimensions, and DIB recreation honours the requested bitmap storage mode.
 - Decoders reject input without a complete frame, invalid headers or offsets,
   and truncated pixel data. Damage after a complete GIF frame or TIFF page ends
   the image there with a warning instead of discarding the complete frames.
@@ -35,15 +37,20 @@ threading and user interaction.
   than left stating the old orientation.
 - A carried colour profile must describe RGB, because saved pixels are RGB.
 - Image and undo metadata blobs are deep copies wherever mutation is possible.
-- Treat `libiw` frame and metadata views as borrowed storage. Keep their document
-  alive, validate strides and lengths at adapters, and use `clone()` for an
-  independent mutable snapshot. Keep preview-only document formats out of photo
-  editing even when their thumbnails can be decoded.
+- A decoded document owns its frames and metadata, and a copy of it is an
+  independent mutable snapshot; a `libfiles::pixel_rows` view borrows its storage,
+  so keep the owner alive and validate strides and lengths at adapters. Keep
+  preview-only document formats out of photo editing even when their thumbnails
+  can be decoded.
 
 ## Threading and UI
 
 - Worker exceptions are handled per item, so one malformed file cannot stop a
-  queue for the rest of the session.
+  queue for the rest of the session. Log worker and completion exceptions.
+- Escape cancels a choice dialog; it must never accept a destructive alternate
+  such as Don't Save or Replace. Folder scan failures are errors, not empty folders.
+- Thumbnail identity distinguishes complete shell items even when their hashes
+  collide; directory refreshes invalidate outstanding thumbnail work.
 - Claimed-item state is released on success, failure, cancellation and stale
   completion.
 - Completion handlers continue the request chain even when a result is no longer
@@ -54,12 +61,16 @@ threading and user interaction.
   handlers rather than `_EX` macros.
 - Layout and control state update only when values change, limiting repaint and
   flicker during interactive edits.
+- Recreated render surfaces reset their cached GDI selection state, and
+  rectangle intersections retain only the shared area with nonnegative extents.
 
 ## Regression checks
 
 Test one-item worker failure followed by successful work, stop and start reuse,
 image conversion and lock boundaries, alpha edits, format round trips, damaged
-and misnamed images, temporary-file commit behaviour and rename rollback. For
+and misnamed images, temporary-file commit behaviour and rename rollback.
+Compressed Undo streams report consumed input bytes and zero-length transfers
+consistently. Cover search negation and self-assignment in all three 2.x suites. For
 ImageWalker 3.0, also
 test reviewed writes, identity changes, cancellation, rename cycles and
 sidecars, edit previews, saves and backups, all eight orientations, carried and

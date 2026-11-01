@@ -15,7 +15,7 @@ main="ImageWalker Help","contents.hhc","index.hhk","index.html",,,,,,0x62120,220
 [FILES]
 index.html
 versions.html
-artmate.html
+iw10.html
 userinterface.html
 search.html
 descriptions.html
@@ -44,7 +44,7 @@ images\normal.jpg
 images\print.jpg
 
 [ALIAS]
-HELP_ARTMATE=artmate.html
+HELP_IMAGEWALKER10=iw10.html
 HELP_VERSIONS=versions.html
 HELP_VIEW_OPTIONS=options.html
 HELP_USER_INTERFACE=userinterface.html

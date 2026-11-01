@@ -13,8 +13,8 @@ Win32 API, and its job was to make a folder of photographs open immediately.
 
 | Year | Release | What it introduced |
 |---:|---|---|
-| 1998 | ArtMate 1.0 | The first version, released before the ImageWalker name. A thumbnail browser and image viewer, with no editing, batch tools, printing or searching. |
-| 2001 | ImageWalker 2.0 | The first release under the ImageWalker name, adding descriptions, print preview and a slide show. |
+| 1998 | ImageWalker 1.0 | The first release: a thumbnail browser and image viewer, with no editing, batch tools, printing or searching. |
+| 2001 | ImageWalker 2.0 | Descriptions, print preview and a slide show. |
 | 2003 | ImageWalker 2.2 | Compare and Print modes, the Filters and Actions views, and six batch tools. The most widely distributed release. |
 | 2006 | ImageWalker 2.3 | Image tagging, EXIF auto-rotation and the Resize Images wizard. The last 2.x release. |
 | 2026 | ImageWalker 3.0 | Video and audio playback, reviewed file workflows and folder synchronization. |

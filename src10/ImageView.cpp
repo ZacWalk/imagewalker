@@ -1,7 +1,7 @@
 // The image pane.
 
 #include "stdafx.h"
-#include "ArtMate.h"
+#include "ImageWalker.h"
 #include "ImageView.h"
 #include "Jobs.h"
 

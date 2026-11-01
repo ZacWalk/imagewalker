@@ -5,7 +5,7 @@
 // help file extracted from a downloaded zip, or on a network share, shows only
 // blank pages.
 //
-// Header-only and wide-character, so it compiles into MBCS ArtMate 1.0 and
+// Header-only and wide-character, so it compiles into MBCS ImageWalker 1.0 and
 // Unicode ImageWalker 2.0, 2.2 and 2.3 alike.
 
 #include <windows.h>

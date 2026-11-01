@@ -10,151 +10,9 @@
 #include "ViewModelState.h"
 #include "ImagingDataObject.h"
 #include "FileFormatAny.h"
+#include "iw/formatenum.h"
 
-//////////////////////////////////////////////////////////////////////
-
-///////////////////////////////////////////////////////////////////////////////
-//
-// CEnumFORMATETCImpl::
-//
-
-using FORMATETCLIST = std::vector<FORMATETC>;
 static UINT cfPDE = RegisterClipboardFormat(CFSTR_PREFERREDDROPEFFECT);
-
-
-class CEnumFORMATETCImpl :
-	public CComObjectRootEx<CComSingleThreadModel>,
-	public CComCoClass<CEnumFORMATETCImpl>,
-	public IEnumFORMATETC
-{
-	FORMATETCLIST m_pFmtEtc;
-	DWORD m_iCur;
-
-public:
-	CEnumFORMATETCImpl();
-	CEnumFORMATETCImpl(FORMATETCLIST& ArrFE);
-	CEnumFORMATETCImpl(const FORMATETCLIST& ArrFE);
-
-	BEGIN_COM_MAP(CEnumFORMATETCImpl)
-		COM_INTERFACE_ENTRY(IEnumFORMATETC)
-	END_COM_MAP()
-
-	void Add(const FORMATETC&);
-	void Copy(const FORMATETCLIST& ArrFE);
-	void Copy(const CEnumFORMATETCImpl& ef);
-
-	//IEnumFORMATETC members
-	STDMETHOD(Next)(ULONG, LPFORMATETC, ULONG FAR *);
-	STDMETHOD(Skip)(ULONG);
-	STDMETHOD(Reset)(void);
-	STDMETHOD(Clone)(IEnumFORMATETC FAR * FAR*);
-};
-
-
-////////////////////
-//////   CEnumFORMATETCImpl
-///////////////////////////////
-
-CEnumFORMATETCImpl::CEnumFORMATETCImpl() : m_iCur(0)
-{
-}
-
-
-CEnumFORMATETCImpl::CEnumFORMATETCImpl(const FORMATETCLIST& ArrFE) : m_iCur(0)
-{
-	for (DWORD i = 0; i < ArrFE.size(); ++i)
-		m_pFmtEtc.push_back(ArrFE[i]);
-}
-
-void CEnumFORMATETCImpl::Copy(const CEnumFORMATETCImpl& ef)
-{
-	m_iCur = ef.m_iCur;
-
-	for (DWORD i = 0; i < ef.m_pFmtEtc.size(); ++i)
-		m_pFmtEtc.push_back(ef.m_pFmtEtc[i]);
-}
-
-void CEnumFORMATETCImpl::Copy(const FORMATETCLIST& ArrFE)
-{
-	m_iCur = 0;
-
-	for (DWORD i = 0; i < ArrFE.size(); ++i)
-		m_pFmtEtc.push_back(ArrFE[i]);
-}
-
-
-void CEnumFORMATETCImpl::Add(const FORMATETC& fmtetc)
-{
-	m_pFmtEtc.push_back(fmtetc);
-}
-
-
-////////////////////
-//////   CEnumFORMATETCImpl
-///////////////////////////////
-
-STDMETHODIMP CEnumFORMATETCImpl::Next(ULONG celt, LPFORMATETC lpFormatEtc, ULONG FAR * pceltFetched)
-{
-	if (pceltFetched != nullptr)
-		*pceltFetched = 0;
-
-	ULONG cReturn = celt;
-
-	if (celt <= 0 || lpFormatEtc == nullptr || m_iCur >= m_pFmtEtc.size())
-		return S_FALSE;
-
-	if (pceltFetched == nullptr && celt != 1) // pceltFetched can be NULL only for 1 item request
-		return S_FALSE;
-
-	while (m_iCur < m_pFmtEtc.size() && cReturn > 0)
-	{
-		*lpFormatEtc++ = m_pFmtEtc[m_iCur++];
-		--cReturn;
-	}
-	if (pceltFetched != nullptr)
-		*pceltFetched = celt - cReturn;
-
-	return (cReturn == 0) ? S_OK : S_FALSE;
-}
-
-
-////////////////////
-//////   CEnumFORMATETCImpl
-    ///////////////////////////////
-
-STDMETHODIMP CEnumFORMATETCImpl::Skip(ULONG celt)
-{
-	if ((m_iCur + static_cast<int>(celt)) >= m_pFmtEtc.size())
-		return S_FALSE;
-
-	m_iCur += celt;
-	return S_OK;
-}
-
-////////////////////
-//////   CEnumFORMATETCImpl
-///////////////////////////////
-
-STDMETHODIMP CEnumFORMATETCImpl::Reset(void)
-{
-	m_iCur = 0;
-	return S_OK;
-}
-
-////////////////////
-//////   CEnumFORMATETCImpl
-///////////////////////////////
-
-STDMETHODIMP CEnumFORMATETCImpl::Clone(IEnumFORMATETC FAR * FAR* ppCloneEnumFormatEtc)
-{
-	if (ppCloneEnumFormatEtc == nullptr)
-		return E_POINTER;
-
-	CComPtr<CEnumFORMATETCImpl> p = IW::CreateComObject<CEnumFORMATETCImpl>();
-	p->Copy(*this);
-
-	return p->QueryInterface(IID_IEnumFORMATETC, (LPVOID*)ppCloneEnumFormatEtc);
-}
 
 //////////////////////////////////////////////////////////////////////
 // CImageDataObject
@@ -360,6 +218,7 @@ STDMETHODIMP CImageDataObject::SetData(FORMATETC* pformatetc,
 STDMETHODIMP CImageDataObject::EnumFormatEtc(DWORD dwDirection, IEnumFORMATETC** ppenumFormatEtc)
 {
 	std::vector<FORMATETC> vfmtetc;
+	std::vector<std::unique_ptr<DVTARGETDEVICE, decltype(&::CoTaskMemFree)>> targetDevices;
 
 	static FORMATETC fmteDib = {static_cast<CLIPFORMAT>(CF_DIB), nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
 	static FORMATETC fmteMF = {static_cast<CLIPFORMAT>(CF_METAFILEPICT), nullptr, DVASPECT_CONTENT, -1, TYMED_MFPICT};
@@ -370,7 +229,9 @@ STDMETHODIMP CImageDataObject::EnumFormatEtc(DWORD dwDirection, IEnumFORMATETC**
 	if (ppenumFormatEtc == nullptr)
 		return E_POINTER;
 
-	vfmtetc.clear();
+	*ppenumFormatEtc = nullptr;
+	if (dwDirection != DATADIR_GET)
+		return E_NOTIMPL;
 
 	if (m_bCachedItemImage || m_bHasImage)
 	{
@@ -397,7 +258,9 @@ STDMETHODIMP CImageDataObject::EnumFormatEtc(DWORD dwDirection, IEnumFORMATETC**
 
 			while (S_OK == pEnumFmt->Next(1, &fmt, nullptr))
 			{
+				std::unique_ptr<DVTARGETDEVICE, decltype(&::CoTaskMemFree)> device(fmt.ptd, ::CoTaskMemFree);
 				vfmtetc.push_back(fmt);
+				targetDevices.push_back(std::move(device));
 			}
 		}
 
@@ -424,24 +287,7 @@ STDMETHODIMP CImageDataObject::EnumFormatEtc(DWORD dwDirection, IEnumFORMATETC**
 
 #endif //_DEBUG
 
-	*ppenumFormatEtc = nullptr;
-	switch (dwDirection)
-	{
-	case DATADIR_GET:
-		{
-			CComPtr<CEnumFORMATETCImpl> p = IW::CreateComObject<CEnumFORMATETCImpl>();
-			p->Copy(vfmtetc);
-			p->QueryInterface(IID_IEnumFORMATETC, (LPVOID*)ppenumFormatEtc);
-		}
-		break;
-
-	case DATADIR_SET:
-	default:
-		return E_NOTIMPL;
-		break;
-	}
-
-	return S_OK;
+	return IW::CreateFormatEnumerator(static_cast<UINT>(vfmtetc.size()), vfmtetc.data(), ppenumFormatEtc);
 }
 
 STDMETHODIMP CImageDataObject::DAdvise(FORMATETC* pformatetc,

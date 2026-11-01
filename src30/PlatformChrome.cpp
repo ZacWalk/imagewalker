@@ -485,7 +485,7 @@ namespace iw::platform
 			{
 				const auto found = commands_.find(id);
 				if (found == commands_.end()) return false;
-				const auto& command = found->second;
+				const auto command = found->second;
 				if (command->enabled && !command->enabled()) return true;
 				if (command->invoke) command->invoke();
 				if (owner_) refresh();

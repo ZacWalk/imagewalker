@@ -15,6 +15,7 @@
 #include "LegacyPch.h"
 #include "ImagingLock.h"
 #include "iw/channelaverage.h"
+#include <cstring>
 
 using IW::LockDetail::masks1;
 using IW::LockDetail::masks2;
@@ -89,7 +90,7 @@ void IW::SumLineTo16(LPBYTE pLine, const RGBSUM* ps, int cx)
 
 void IW::ToSums(LPRGBSUM pSum, LPDWORD pLineIn, int cxOut, int cxIn, bool isHighQuality, bool bFirstY)
 {
-	int x = (cxOut >> 1) + cxIn;
+	std::int64_t x = static_cast<std::int64_t>(cxOut >> 1) + cxIn;
 
 	LPCRGBSUM pSumEnd = pSum + cxOut;
 	LPCDWORD pLineEnd = pLineIn + cxIn;
@@ -148,7 +149,7 @@ void IW::ToSums(LPRGBSUM pSum, LPDWORD pLineIn, int cxOut, int cxIn, bool isHigh
 		{
 			for (int i = 0; i < cxOut; i++)
 			{
-				int xx = (i * cxIn) / cxOut;
+				int xx = static_cast<int>((static_cast<std::int64_t>(i) * cxIn) / cxOut);
 				assert(xx < cxIn);
 
 				c = pLineIn[xx];
@@ -272,51 +273,36 @@ void IW::Convert8GrayScaleto32(LPCOLORREF pBitsOut, LPCBYTE pBitsIn, const int n
 
 void IW::Convert555to32(LPCOLORREF pBitsOut, LPCBYTE pBitsInIn, const int nStart, const int nSize)
 {
-	// Get a pointer to the end
 	const COLORREF* pBitsOutEnd = pBitsOut + nSize;
-	auto pBitsIn = (LPDWORD)(pBitsInIn + (nStart * 2));
+	auto pBitsIn = reinterpret_cast<const unsigned short*>(pBitsInIn) + nStart;
 	DWORD c;
 
-	while (pBitsOut < pBitsOutEnd)
+	while (pBitsOutEnd - pBitsOut >= 2)
 	{
-		c = *pBitsIn++;
+		std::memcpy(&c, pBitsIn, sizeof(c));
+		pBitsIn += 2;
 		*pBitsOut++ = RGB555to888(c) | 0xFF000000;
-
-		if (pBitsOut >= pBitsOutEnd)
-			return;
-
 		c >>= 16;
 		*pBitsOut++ = RGB555to888(c) | 0xFF000000;
 	}
+	if (pBitsOut < pBitsOutEnd) *pBitsOut = RGB555to888(*pBitsIn) | 0xFF000000;
 }
 
 void IW::Convert565to32(LPCOLORREF pBitsOut, LPCBYTE pBitsInIn, const int nStart, const int nSize)
 {
-	// Get a pointer to the end
 	const COLORREF* pBitsOutEnd = pBitsOut + nSize;
-	LPCBYTE pBitsIn = pBitsInIn + nStart * 2;
+	auto pBitsIn = reinterpret_cast<const unsigned short*>(pBitsInIn) + nStart;
 	DWORD c;
 
-	// Move to an aligned bit part of memory
-	while ((0 != (reinterpret_cast<UINT_PTR>(pBitsOut) & 3)) && (pBitsOut < pBitsOutEnd))
+	while (pBitsOutEnd - pBitsOut >= 2)
 	{
-		c = *reinterpret_cast<const unsigned short*>(pBitsIn);
-		*pBitsOut++ = RGB565to888(c) | 0xFF000000;
+		std::memcpy(&c, pBitsIn, sizeof(c));
 		pBitsIn += 2;
-	}
-
-	while (pBitsOut < pBitsOutEnd)
-	{
-		c = *((LPDWORD)pBitsIn);
 		*pBitsOut++ = RGB565to888(c) | 0xFF000000;
-
-		if (pBitsOut >= pBitsOutEnd)
-			return;
-
 		c >>= 16;
 		*pBitsOut++ = RGB565to888(c) | 0xFF000000;
-		pBitsIn += 4;
 	}
+	if (pBitsOut < pBitsOutEnd) *pBitsOut = RGB565to888(*pBitsIn) | 0xFF000000;
 }
 
 void IW::Convert24to32(LPCOLORREF pBitsOut, LPCBYTE pBitsIn, const int nStart, const int nSize)

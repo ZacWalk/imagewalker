@@ -1,4 +1,4 @@
-// ArtMate.h : the application-wide bits.
+// ImageWalker.h : the application-wide bits.
 
 #pragma once
 

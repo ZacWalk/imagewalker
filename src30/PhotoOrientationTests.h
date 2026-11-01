@@ -4,7 +4,7 @@
 #pragma once
 
 #include "Files.h"
-#include <libiw/JpegMetadata.h>
+#include <libfiles/encode.h>
 #include "TaskConvert.h"
 #include "TaskEdit.h"
 #include "TaskRunner.h"
@@ -494,7 +494,7 @@ namespace iw::tests
 		append_segment(source, 0xFE, payload("kept comment", {}));
 		append_segment(source, 0xDB, std::vector<std::uint8_t>(65, 1));
 
-		const auto carried = jpeg::carry_metadata(source, encoded, 20, 70000);
+		const auto carried = libfiles::carry_jpeg_metadata(source, encoded, 20, 70000);
 		const auto segments = header_segments(carried);
 		const auto find = [&segments](const std::uint8_t marker, const std::string_view prefix) -> const Segment*
 		{
@@ -536,7 +536,7 @@ namespace iw::tests
 		const auto exifAt = std::ranges::search(bigEndian, std::string_view("Exif\0\0", 6)).begin() - bigEndian.begin();
 		const auto motorola = exif_segment(false);
 		std::ranges::copy(motorola, bigEndian.begin() + exifAt);
-		const auto carriedMotorola = header_segments(jpeg::carry_metadata(bigEndian, encoded, 20, 30));
+		const auto carriedMotorola = header_segments(libfiles::carry_jpeg_metadata(bigEndian, encoded, 20, 30));
 		const auto motorolaExif = std::ranges::find_if(carriedMotorola, [](const Segment& segment)
 			{ return segment.marker == 0xE1 && starts(segment.payload, {"Exif\0\0", 6}); });
 		reporter.check(motorolaExif != carriedMotorola.end() && read_number(motorolaExif->payload, 24, 2, false) == 1 &&
@@ -546,7 +546,7 @@ namespace iw::tests
 		auto grey = source;
 		const auto profileAt = std::ranges::search(grey, std::string_view("RGB ")).begin() - grey.begin();
 		std::memcpy(grey.data() + profileAt, "GRAY", 4);
-		const auto greySegments = header_segments(jpeg::carry_metadata(grey, encoded, 16, 16));
+		const auto greySegments = header_segments(libfiles::carry_jpeg_metadata(grey, encoded, 16, 16));
 		reporter.check(!greySegments.empty() && std::ranges::none_of(greySegments, [](const Segment& segment)
 			{ return segment.marker == 0xE2 && starts(segment.payload, {"ICC_PROFILE\0", 12}); }),
 			L"a profile that does not describe RGB is not attached to RGB pixels");
@@ -561,21 +561,26 @@ namespace iw::tests
 			return !list.empty() && std::ranges::none_of(list, [](const Segment& segment)
 				{ return segment.marker == 0xE1 && starts(segment.payload, {"Exif\0\0", 6}); });
 		};
-		const auto badSegments = header_segments(jpeg::carry_metadata(badExif, encoded, 16, 16));
+		const auto badSegments = header_segments(libfiles::carry_jpeg_metadata(badExif, encoded, 16, 16));
 		reporter.check(withoutExif(badSegments) && std::ranges::any_of(badSegments, [](const Segment& segment)
 			{ return segment.marker == 0xFE; }) &&
-			withoutExif(header_segments(jpeg::carry_metadata(asciiOrientation, encoded, 16, 16))),
+			withoutExif(header_segments(libfiles::carry_jpeg_metadata(asciiOrientation, encoded, 16, 16))),
 			L"EXIF that cannot be corrected is dropped rather than left claiming the old orientation");
 		auto truncated = source;
 		truncated.resize(40);
 		auto noScan = encoded;
 		noScan.resize(20);
-		reporter.check(jpeg::carry_metadata(truncated, encoded, 16, 16).empty() &&
-			jpeg::carry_metadata(source, noScan, 16, 16).empty() &&
-			jpeg::carry_metadata(std::vector<std::uint8_t>{0x89, 'P', 'N', 'G'}, encoded, 16, 16).empty() &&
-			jpeg::carry_metadata(source, encoded, 0, 16).empty(),
+		reporter.check(libfiles::carry_jpeg_metadata(truncated, encoded, 16, 16).empty() &&
+			libfiles::carry_jpeg_metadata(source, noScan, 16, 16).empty() &&
+			libfiles::carry_jpeg_metadata(std::vector<std::uint8_t>{0x89, 'P', 'N', 'G'}, encoded, 16, 16).empty() &&
+			libfiles::carry_jpeg_metadata(source, encoded, 0, 16).empty(),
 			L"truncated, scanless and non-JPEG inputs carry nothing");
-		reporter.check(jpeg::read_header(plain).size() > 2 && jpeg::read_header(root / L"missing.jpg").empty(),
+		const auto header_of = [](const std::vector<std::uint8_t>& bytes)
+		{
+			libfiles::reader reader{std::span<const std::uint8_t>(bytes)};
+			return libfiles::read_jpeg_header(reader);
+		};
+		reporter.check(header_of(read_bytes(plain)).size() > 2 && header_of(read_bytes(root / L"missing.jpg")).empty(),
 			L"header reading stops at the first scan and fails cleanly for a missing file");
 
 		const auto srgb = system_profile(L"sRGB Color Space Profile.icm");

@@ -1,10 +1,35 @@
 #pragma once
 
 #include <winver.h>
+#include "ImagingDataObject.h"
+#include "UtilMd5.h"
+#include "iw/formatenum.h"
+#include "iw/zstream.h"
 
 // Included by the three 2.x suites after their application headers.
 namespace
 {
+	struct WorkflowCompressedBytes
+	{
+		std::vector<BYTE> bytes;
+		size_t position = 0;
+
+		void Write(LPCVOID data, DWORD count, LPDWORD written)
+		{
+			const auto* first = static_cast<const BYTE*>(data);
+			bytes.insert(bytes.end(), first, first + count);
+			if (written) *written = count;
+		}
+
+		void Read(LPVOID data, DWORD count, LPDWORD read)
+		{
+			const size_t length = (std::min)(static_cast<size_t>(count), bytes.size() - position);
+			if (length) memcpy(data, bytes.data() + position, length);
+			position += length;
+			if (read) *read = static_cast<DWORD>(length);
+		}
+	};
+
 	struct WorkflowTestFiles
 	{
 		CString folder;
@@ -78,6 +103,142 @@ namespace
 		for (int y = 0; y < 32; ++y) lock->SetLine(line.data(), y, 0, 32);
 		return image;
 	}
+}
+
+IW_TEST(RawDigestRequiresFinalizationAndReturnsOwnedBytes)
+{
+	MD5 digest;
+	std::unique_ptr<unsigned char[]> unfinished(digest.raw_digest());
+	IW_CHECK(unfinished == nullptr);
+	digest.finalize();
+	IW_CHECK(digest.hex_digest() == _T("d41d8cd98f00b204e9800998ecf8427e"));
+	std::unique_ptr<unsigned char[]> bytes(digest.raw_digest());
+	IW_CHECK(bytes != nullptr);
+	if (!bytes) return;
+	const unsigned char expected[] = {0xd4, 0x1d, 0x8c, 0xd9, 0x8f, 0x00, 0xb2, 0x04,
+		0xe9, 0x80, 0x09, 0x98, 0xec, 0xf8, 0x42, 0x7e};
+	IW_CHECK(memcmp(bytes.get(), expected, sizeof(expected)) == 0);
+	bytes[0] = 0;
+	std::unique_ptr<unsigned char[]> independent(digest.raw_digest());
+	IW_CHECK(independent != nullptr);
+	if (independent) IW_CHECK_EQ(independent[0], expected[0]);
+}
+
+IW_TEST(ClipboardFormatEnumerationSkipsAndClonesAtTheCorrectPosition)
+{
+	CComPtr<CImageDataObject> object = IW::CreateComObject<CImageDataObject>();
+	object->Cache(WorkflowSolidImage(RGB(255, 0, 0)));
+	CComPtr<IEnumFORMATETC> formats;
+	IW_CHECK_EQ(object->EnumFormatEtc(DATADIR_GET, &formats), S_OK);
+	IW_CHECK(formats != nullptr);
+	if (!formats) return;
+	FORMATETC value{};
+	IW_CHECK_EQ(formats->Skip(0), S_OK);
+	IW_CHECK_EQ(formats->Skip(1), S_OK);
+	CComPtr<IEnumFORMATETC> cloned;
+	IW_CHECK_EQ(formats->Clone(&cloned), S_OK);
+	IW_CHECK(cloned != nullptr);
+	if (!cloned) return;
+	IW_CHECK_EQ(formats->Next(1, &value, nullptr), S_OK);
+	IW_CHECK_EQ(value.cfFormat, CF_METAFILEPICT);
+	::CoTaskMemFree(value.ptd);
+	IW_CHECK_EQ(cloned->Next(1, &value, nullptr), S_OK);
+	IW_CHECK_EQ(value.cfFormat, CF_METAFILEPICT);
+	::CoTaskMemFree(value.ptd);
+	IW_CHECK_EQ(formats->Next(1, &value, nullptr), S_FALSE);
+	IW_CHECK_EQ(formats->Reset(), S_OK);
+	IW_CHECK_EQ(formats->Skip(2), S_OK);
+	IW_CHECK_EQ(formats->Next(1, &value, nullptr), S_FALSE);
+	IW_CHECK_EQ(formats->Reset(), S_OK);
+	IW_CHECK_EQ(formats->Skip(0xffffffffu), S_FALSE);
+	IW_CHECK_EQ(formats->Next(1, &value, nullptr), S_FALSE);
+}
+
+IW_TEST(ClipboardFormatEnumerationOwnsItsTargetDeviceCopies)
+{
+	struct DeviceObject : CImageDataObject
+	{
+		STDMETHOD(EnumFormatEtc)(DWORD direction, IEnumFORMATETC** formats) override
+		{
+			if (direction != DATADIR_GET) return E_NOTIMPL;
+			DVTARGETDEVICE device{};
+			device.tdSize = sizeof(device);
+			FORMATETC value{CF_TEXT, &device, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+			return IW::CreateFormatEnumerator(1, &value, formats);
+		}
+	};
+	CComPtr<DeviceObject> provider = IW::CreateComObject<DeviceObject>();
+	CComPtr<CImageDataObject> object = IW::CreateComObject<CImageDataObject>();
+	object->AggregateDataObject(provider);
+	CComPtr<IEnumFORMATETC> formats;
+	IW_CHECK_EQ(object->EnumFormatEtc(DATADIR_GET, &formats), S_OK);
+	if (!formats) return;
+	object.Release();
+	provider.Release();
+	FORMATETC value{};
+	IW_CHECK_EQ(formats->Next(1, &value, nullptr), S_OK);
+	CComHeapPtr<DVTARGETDEVICE> device;
+	device.Attach(value.ptd);
+	IW_CHECK(device != nullptr);
+	if (device) IW_CHECK_EQ(device->tdSize, sizeof(DVTARGETDEVICE));
+}
+
+IW_TEST(CompressedStreamsReportConsumedBytesAndZeroLengthTransfers)
+{
+	std::vector<BYTE> input(4096);
+	for (size_t i = 0; i < input.size(); ++i)
+		input[i] = static_cast<BYTE>(i);
+	WorkflowCompressedBytes bytes;
+	{
+		IW::zostream<WorkflowCompressedBytes> output(bytes);
+		DWORD written = 123;
+		output.Write(nullptr, 0, &written);
+		IW_CHECK_EQ(written, 0u);
+		output.Write(input.data(), static_cast<DWORD>(input.size()), &written);
+		IW_CHECK_EQ(written, static_cast<DWORD>(input.size()));
+		output.Close();
+	}
+	IW::zistream<WorkflowCompressedBytes> stream(bytes);
+	DWORD read = 123;
+	stream.Read(nullptr, 0, &read);
+	IW_CHECK_EQ(read, 0u);
+	std::vector<BYTE> decoded(input.size() + 16, 0xCD);
+	stream.Read(decoded.data(), static_cast<DWORD>(decoded.size()), &read);
+	IW_CHECK_EQ(read, static_cast<DWORD>(input.size()));
+	IW_CHECK(memcmp(decoded.data(), input.data(), input.size()) == 0);
+	IW_CHECK_EQ(decoded.back(), 0xCD);
+	stream.Read(nullptr, 0, &read);
+	IW_CHECK_EQ(read, 0u);
+}
+
+IW_TEST(SearchNodeNegationAndReparsingKeepTheRequestedOperators)
+{
+	IW::CSearchNode node(IW::seOR, _T("cat"), true);
+	IW_CHECK_EQ(node._se, static_cast<DWORD>(IW::seOR | IW::seNOT));
+	IW_CHECK(node.ParseFromString(_T("+"), _T("dog")));
+	IW_CHECK_EQ(node._se, static_cast<DWORD>(IW::seAND));
+	IW_CHECK(node.ParseFromString(_T("!"), _T("cat")));
+	IW_CHECK_EQ(node._se, static_cast<DWORD>(IW::seNOT));
+
+	IW::CSearchNodeList words;
+	IW_CHECK(words.ParseFromString(_T("cat ! dog")));
+	IW_CHECK(words.Match(_T("cat")));
+	IW_CHECK(!words.Match(_T("cat dog")));
+}
+
+IW_TEST(SearchNodeSelfAssignmentPreservesTheQuery)
+{
+	IW::CSearchNodeList words;
+	IW_CHECK(words.ParseFromString(_T("cat -dog")));
+	IW_CHECK(words.Match(_T("cat")));
+	IW_CHECK(!words.Match(_T("cat dog")));
+	words.Copy(words);
+	IW_CHECK(!words.IsEmpty());
+	IW_CHECK(words.Match(_T("cat")));
+	IW_CHECK(!words.Match(_T("cat dog")));
+	IW::CSearchNodeList copied(words);
+	IW_CHECK(copied.Match(_T("cat")));
+	IW_CHECK(!copied.Match(_T("cat dog")));
 }
 
 IW_TEST(VersionIdentityMatchesTheCompiledResourcesAndAboutDialog)

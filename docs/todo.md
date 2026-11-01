@@ -74,9 +74,9 @@ User-facing symptoms and workarounds are listed in
 [known-issues.md](known-issues.md).
 
 - [ ] **WebP orientation and metadata.** Apply EXIF orientation when opening
-      WebP and preserve EXIF, XMP and ICCP chunks when saving. Use libwebp's
-      metadata-container support and cover upright decoding, in-place edits
-      and metadata round trips with tests.
+      WebP and preserve EXIF, XMP and ICCP chunks when saving. Pass them to
+      libfiles' `encode_webp`, which muxes them, and cover upright decoding,
+      in-place edits and metadata round trips with tests.
 - [ ] **Cross-format Save as metadata.** Carry camera, date and GPS fields
       when saving a photo into another format, such as HEIC or PNG to JPEG.
       Done when Save as maps EXIF and XMP into the destination format, or

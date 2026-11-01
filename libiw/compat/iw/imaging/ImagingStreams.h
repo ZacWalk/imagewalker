@@ -232,7 +232,7 @@ namespace IW
 		ImageStreamCore<CNull> _imageStream;
 
 
-		IW::LPRGBSUM _pRGBSum;
+		std::vector<IW::RGBSUM> _rgbSum;
 		bool _bNeedsThumbnailing;
 		CRect _rectIn;
 		CRect _rectOut;
@@ -271,7 +271,7 @@ namespace IW
 			while(_nLastYOut < nLineLimit)
 			{
 				_nLastYOut++;
-				const IW::RGBSUM *ps = _pRGBSum + (cx * _nLastYOut);
+				const IW::RGBSUM *ps = _rgbSum.data() + (cx * _nLastYOut);
 
 				if (bHasAlpha || isHighQuality)
 				{
@@ -291,9 +291,8 @@ namespace IW
 
 		ImageStreamThumbnailCore(IW::Image &image, const CSize &sizeThumbnail, bool autoRotate = true) : _imageStream(image, autoRotate), _sizeThumbnail(sizeThumbnail)
 		{
-			int nSumAllocSize = sizeof(IW::RGBSUM) * _sizeThumbnail.cx * _sizeThumbnail.cy;
-			_pRGBSum = static_cast<IW::LPRGBSUM>(IW::Alloc(nSumAllocSize));
-			IW::MemZero(_pRGBSum, nSumAllocSize);
+			if (_sizeThumbnail.cx <= 0 || _sizeThumbnail.cy <= 0)
+				throw std::invalid_argument("Invalid thumbnail dimensions.");
 
 			_dwPageFlags = 0;
 			_dwImageFlags = 0;
@@ -315,19 +314,14 @@ namespace IW
 		~ImageStreamThumbnailCore()
 		{
 			Flush();
-
-			if (_pRGBSum)
-			{
-				IW::Free(_pRGBSum);
-				_pRGBSum = 0;
-			}
 		}
 
 		void Flush()
 		{
 			if (_bPagePending)
 			{
-				MoveSumToPage(_nLastYIn);
+				MoveSumToPage(_nLastYIn >= 0 ? _nLastYIn : _rectOut.Height() - 1);
+				_bPagePending = false;
 			}
 
 			_imageStream.Flush();
@@ -349,20 +343,21 @@ namespace IW
 			else
 			{
 				_nLastYOut = -1;
+				_nLastYIn = -1;
 				_rectIn = rectIn;
 				_pf = pf;
 				_bIsSequential = bIsSequential;
 
 				long nDiv = 0x1000;
-				long sy = MulDiv(_sizeThumbnail.cy, nDiv, cyIn);
-				long sx = MulDiv(_sizeThumbnail.cx, nDiv, cxIn);
+				long sy = MulDiv((std::min)(_sizeThumbnail.cy, static_cast<LONG>(cyIn)), nDiv, cyIn);
+				long sx = MulDiv((std::min)(_sizeThumbnail.cx, static_cast<LONG>(cxIn)), nDiv, cxIn);
 				long s = IW::Min(sy, sx);
 
 				int cxOut = MulDiv(cxIn, s, nDiv);
 				int cyOut = MulDiv(cyIn, s, nDiv);
 
 				// MulDiv rounds to nearest, so the scaled extent can land a pixel
-				// outside the box _pRGBSum was allocated for -- 200x200 against a
+				// outside the requested box -- 200x200 against a
 				// 6000x6000 source comes out 201x201.
 				if (cxOut < 1) cxOut = 1;
 				if (cyOut < 1) cyOut = 1;
@@ -374,7 +369,9 @@ namespace IW
 				_rectOut.right = _rectOut.left + cxOut;
 				_rectOut.bottom = _rectOut.top + cyOut;
 
-				IW::MemZero(_pRGBSum, sizeof(IW::RGBSUM) * _sizeThumbnail.cx * _sizeThumbnail.cy);
+				const auto count = static_cast<std::uint64_t>(cxOut) * cyOut;
+				if (count > IW::kMaxPageBytes / sizeof(IW::RGBSUM)) throw std::bad_alloc();
+				_rgbSum.assign(static_cast<size_t>(count), IW::RGBSUM{});
 				_bPagePending = true;
 			}
 		}
@@ -431,12 +428,12 @@ namespace IW
 					break;
 				}
 
-				int yyy = (y * cyOut);
-				int yOut = yyy / cyIn; // Round down!!
+				const auto yyy = static_cast<std::int64_t>(y) * cyOut;
+				int yOut = static_cast<int>(yyy / cyIn); // Round down!!
 				bool firstRow = (yyy % cyIn) == 0;
 
 				assert(cyOut > yOut); // overflow?
-				IW::LPRGBSUM pSum = _pRGBSum + (cxOut * yOut);
+				IW::LPRGBSUM pSum = _rgbSum.data() + (cxOut * yOut);
 				IW::ToSums(pSum, pLineIn, cxOut, cxIn, _pf.HasAlpha() || isHighQuality, firstRow);
 
 				_nLastYIn = yOut;

@@ -8,12 +8,8 @@ namespace IW
 	class zstream : public z_stream
 	{
 	public:
-		zstream()
+		zstream() : z_stream{}
 		{
-			zalloc = (alloc_func)0;
-			zfree = (free_func)0;
-			opaque = (voidpf)0;
-			avail_in = 0;
 		};
 	};
 
@@ -48,6 +44,8 @@ namespace IW
 
 		void Read(LPVOID lpBuf, DWORD nCount, LPDWORD pdwRead = 0)
 		{
+			if (pdwRead) *pdwRead = 0;
+			if (nCount == 0) return;
 			assert(lpBuf != NULL);
 
 			if (nCount != 0)
@@ -104,7 +102,7 @@ namespace IW
 
 		void Write(LPCVOID lpBuf, DWORD nCount, LPDWORD pdwWritten = 0)
 		{			
-			DWORD nWrittenTotal = 0;
+			if (pdwWritten) *pdwWritten = 0;
 
 			assert(this);
 			if (nCount == 0) return;
@@ -124,14 +122,12 @@ namespace IW
 					DWORD nWritten = 0;
 					_streamNext.Write(&_buffer, buffer_size, &nWritten);
 					if (nWritten != buffer_size) throw IW::invalid_file();
-					nWrittenTotal += nWritten;
-
 					_stream.next_out = _buffer;
 					_stream.avail_out = buffer_size;
 				}
 			}
 
-			if (pdwWritten) *pdwWritten = nWrittenTotal;
+			if (pdwWritten) *pdwWritten = nCount;
 		}
 
 		void Close()
@@ -146,7 +142,7 @@ namespace IW
 
 				if (nOut > 0)
 				{
-					DWORD nWritten;
+					DWORD nWritten = 0;
 					_streamNext.Write(&_buffer, nOut, &nWritten);
 					if (nWritten != nOut) throw IW::invalid_file();
 
@@ -161,5 +157,4 @@ namespace IW
 	};
 
 }; // namespace IW
-
 

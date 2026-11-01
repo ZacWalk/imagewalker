@@ -99,8 +99,9 @@ Each executable accepts `/test` and returns its failure count. `dd.ps1 test`
 builds Debug and Release, runs CTest in both, then smoke-tests all five GUI
 targets in each configuration with crash-file checks and bounded cleanup.
 
-CTest has eight entries with 120-second deadlines: the five serial application
-suites run from `exe\`, `dd-contract` checks the driver contract, `libiw` runs
+CTest has nine entries with 120-second deadlines: the five serial application
+suites run from `exe\`, `dd-contract` checks the driver contract, `help-compiler`
+checks strict-build output safety, and `libiw` runs
 the standalone imaging suite, and `libiw-boundary` checks source ownership,
 forwarding headers and public-header isolation. The library test executable
 stays in the preset's build tree, not the portable application output directory.
@@ -148,7 +149,13 @@ python tools\chmdump.py exe\ImageWalker.chm full
 
 `tools/checkhelp.py` verifies context IDs, aliases and topic links; the strict
 build rejects missing files, broken local links and invalid help configuration.
-The `iw_check_help` CMake target runs both with CMake's discovered Python.
+Strict rejection leaves an existing CHM untouched and creates no new output.
+The `iw_check_help` CMake target runs the compiler regressions and both checks
+with CMake's discovered Python.
+For an interactive F1 check, run
+`.\tools\helptest.ps1 -Exe .\exe\imagewalker10d.exe`. It checks the help window
+owned by that application, reports failure with a nonzero exit code, and closes
+only the application it started; other applications' help windows are untouched.
 
 ## Dependencies
 
@@ -162,7 +169,7 @@ Archives use extraction-time timestamps so changing a pin rebuilds dependent
 objects even when upstream files predate the existing build.
 
 WTL 10.01 in `include/wtl` is the deliberate exception: it stays vendored
-for ArtMate 1.0 and ImageWalker 2.0, 2.2 and 2.3. ImageWalker 3.0 does not
+for ImageWalker 1.0, 2.0, 2.2 and 2.3. ImageWalker 3.0 does not
 use WTL.
 
 [libfiles](https://github.com/ZacWalk/libfiles), the file library ImageWalker
@@ -171,7 +178,7 @@ builds libjpeg-turbo, libpng over zlib-ng, libwebp, giflib and libtiff by its ow
 pinned by SHA-256 in its own manifest, and `iw::jpeg`, `iw::png`, `iw::zlib`
 and `iw::webp`, `iw::gif` and `iw::tiff` name its targets. libiw links libfiles itself:
 native JPEG, PNG, GIF, TIFF, PCX, PSD, WPG and uncompressed BMP reading goes
-through its document row stream; WebP uses its display decoder. The 2.x property
+through its document row stream; WebP uses its display decoder and its encoder. The 2.x property
 pages list EXIF through its `list_exif`, read XMP through its data model, and
 read IPTC through its `list_iptc`; the property pages, and the TIFF and PSD
 loaders, find the IPTC among Photoshop image resources through its
@@ -179,21 +186,21 @@ loaders, find the IPTC among Photoshop image resources through its
 and orientation through its `read_exif`, and its date taken by its one date
 rule through `properties_from_exif`; 3.0 reads the camera, capture date and
 exposure it shows and renames by through its `read_properties`, in every
-format it scans, and names the colour profile it shows through its `list_icc`;
-and the lossless turns and 3.0's saves
-correct EXIF in place through its `set_exif_numbers` and
-`unlink_exif_thumbnail`. Its HEIF, JPEG XL and camera raw codecs
+format it scans, and names the colour profile it shows through its `summarize_icc`;
+the lossless turns correct EXIF in place through its `set_exif_numbers`; and
+3.0's saves carry a photo's segments into the JPEG they write through its
+`carry_jpeg_metadata`, which corrects them by the same functions. Its HEIF, JPEG XL and camera raw codecs
 are not built: ImageWalker decodes those through the Windows codecs installed.
 When a sibling checkout `..\libfiles` exists, it is built instead of the pin,
 whatever its HEAD; CI and a fresh clone build the pin.
 
 | Dependency | Version | Acquired by | Primary owner |
 |---|---|---|---|
-| libfiles | `f5cd78f` | FetchContent, git commit; a sibling `..\libfiles` when present | libiw |
+| libfiles | `4481ded` | FetchContent, git commit; a sibling `..\libfiles` when present | libiw |
 | zlib-ng, zlib-compatible | 2.3.3 | libfiles' recipe, tag archive with SHA-256 | libiw |
 | libjpeg-turbo | 3.2.1 | libfiles' recipe, release tarball with SHA-256; SIMD and the libjpeg 8 API | libiw |
 | libpng | 1.6.59 | libfiles' recipe, tag archive with SHA-256 | libiw |
-| libwebp | 1.6.0 | libfiles' recipe, tag archive with SHA-256 | libiw |
+| libwebp | 1.6.0 | libfiles' recipe, tag archive with SHA-256 | libfiles |
 | NASM | 3.02 | libfiles' recipe, release build with SHA-256, when none is on the path | libjpeg-turbo |
 | libtiff | 4.7.2 | libfiles' recipe, tag archive with SHA-256 | libiw |
 | giflib | 6.1.3 | libfiles' recipe, release archive with SHA-256 | libiw |

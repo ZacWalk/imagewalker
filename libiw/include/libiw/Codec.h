@@ -2,8 +2,12 @@
 
 #include <libiw/Pixel.h>
 
+#include <libfiles/icc.h>
+#include <libfiles/properties.h>
+
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -23,19 +27,6 @@ namespace iw::imaging
 		bool lossless{};
 		std::filesystem::path metadataSource;
 		CarryMetadata carry{CarryMetadata::none};
-	};
-
-	// What a photo states of its taking, through libfiles' properties for every format libfiles scans: its
-	// camera, when it was taken - as EXIF writes a date, by the camera's clock - and its exposure, as a camera
-	// shows them. Empty where the file says nothing.
-	struct PhotoMetadata
-	{
-		std::wstring camera;
-		std::wstring dateTaken;
-		std::wstring exposure;
-		std::wstring aperture;
-		std::wstring iso;
-		std::wstring focalLength;
 	};
 
 	struct OperationResult
@@ -69,10 +60,12 @@ namespace iw::imaging
 	std::wstring lowercase_extension(const std::filesystem::path& path);
 	bool supports_extension(std::wstring_view extension);
 	bool is_preview_only(std::wstring_view extension);
-	PhotoMetadata read_photo_metadata(const std::filesystem::path& path);
-	// The colour profile a photo carries, by the name it gives itself - "sRGB IEC61966-2.1", "Display P3" -
-	// or failing that the gamut libfiles recognises in its colorants; empty when it carries none or neither.
-	std::wstring read_colour_profile(const std::filesystem::path& path);
+	// What a photo states of itself - its camera, when it was taken, its exposure - as libfiles reads it,
+	// for every format libfiles scans. Empty for a file that cannot be opened or that libfiles does not read.
+	libfiles::properties read_properties(const std::filesystem::path& path);
+	// The colour profile a photo carries, as libfiles summarises one: its name, and the gamut libfiles
+	// recognises in its colorants. Nothing when it carries none.
+	std::optional<libfiles::icc_summary> read_colour_profile(const std::filesystem::path& path);
 	bool read_dimensions(const std::filesystem::path& path, int& width, int& height);
 	int read_orientation(const std::filesystem::path& path);
 	bool orient_upright(PixelImage& image, int orientation);

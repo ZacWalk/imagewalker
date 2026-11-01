@@ -20,9 +20,9 @@ extern "C"
 
 #include "resource.h"
 
-// ArtMate 1.00 -- run with /test.
+// ImageWalker 1.0 -- run with /test.
 
-IW_TEST(VersionResourceNamesArtMate)
+IW_TEST(VersionResourceNamesImageWalker10)
 {
 	DWORD ignored = 0;
 	const DWORD size = GetFileVersionInfoSize(IW::Paths::ModulePath().c_str(), &ignored);
@@ -44,7 +44,10 @@ IW_TEST(VersionResourceNamesArtMate)
 	// The names match the title the application shows for itself.
 	TCHAR title[64] = {};
 	IW_CHECK(::LoadString(nullptr, IDR_MAINFRAME, title, ARRAYSIZE(title)) > 0);
-	IW_CHECK(_tcscmp(title, _T("ArtMate 1.0")) == 0);
+	IW_CHECK(_tcscmp(title, _T("ImageWalker 1.0")) == 0);
+	TCHAR appTitle[64] = {};
+	IW_CHECK(::LoadString(nullptr, IDS_APP_TITLE, appTitle, ARRAYSIZE(appTitle)) > 0);
+	IW_CHECK(_tcscmp(appTitle, title) == 0);
 	for (LPCTSTR field : {_T("FileDescription"), _T("ProductName"), _T("FileVersion"), _T("ProductVersion")})
 	{
 		TCHAR query[96] = {};
@@ -54,6 +57,16 @@ IW_TEST(VersionResourceNamesArtMate)
 		if (!found || length == 0) continue;
 		const bool numeric = _tcscmp(field, _T("FileVersion")) == 0 || _tcscmp(field, _T("ProductVersion")) == 0;
 		IW_CHECK(_tcscmp(static_cast<LPCTSTR>(value), numeric ? _T("1.0.0.0") : title) == 0);
+	}
+	for (const auto& field : {std::pair{_T("InternalName"), _T("imagewalker10")},
+		std::pair{_T("OriginalFilename"), _T("imagewalker10.exe")}})
+	{
+		TCHAR query[96] = {};
+		_stprintf_s(query, _T("\\StringFileInfo\\040904b0\\%s"), field.first);
+		const BOOL found = VerQueryValue(bytes.data(), query, &value, &length);
+		IW_CHECK(found && length > 0);
+		if (found && length > 0)
+			IW_CHECK(_tcscmp(static_cast<LPCTSTR>(value), field.second) == 0);
 	}
 }
 
@@ -73,6 +86,25 @@ IW_TEST(SharedPackedPixelsMaskEachFiveBitChannel)
 		IW_CHECK_EQ((color >> 16) & 255, ((value >> 10) & 31) << 3);
 		IW_CHECK_EQ((color >> 8) & 255, ((value >> 5) & 31) << 3);
 		IW_CHECK_EQ(color & 255, (value & 31) << 3);
+	}
+}
+
+IW_TEST(ThreeByteCompositingPreservesOpaquePixelsAndAlphaEndpoints)
+{
+	for (unsigned alpha = 0; alpha < 256; ++alpha)
+	{
+		BYTE destination[] = {37, 111, 205, 0xCD};
+		const BYTE original[] = {37, 111, 205};
+		const UINT source = (alpha << 24) | 0x00807133u;
+		Blend24(destination, source);
+		for (unsigned channel = 0; channel < 3; ++channel)
+		{
+			const UINT value = (source >> (channel * 8)) & 255;
+			const auto expected = static_cast<BYTE>(std::lround(
+				(value * alpha + original[channel] * (255 - alpha)) / 255.0));
+			IW_CHECK_EQ(destination[channel], expected);
+		}
+		IW_CHECK_EQ(destination[3], 0xCD);
 	}
 }
 
@@ -136,6 +168,82 @@ IW_TEST(ScaleJobOwnsItsSource)
 	IW_CHECK_EQ(job.m_dibSrc.Width(), 4u);
 	IW_CHECK_EQ(job.m_dibSrc.Height(), 4u);
 	IW_CHECK_EQ(job.m_dibSrc.GetBitmap(0)[0], 0x5A);
+}
+
+IW_TEST(DibCopiesHandleEmptySourcesAndSelfAssignment)
+{
+	CDib empty;
+	CDib copy(empty);
+	IW_CHECK(!copy.IsOpen());
+
+	IW_CHECK(copy.Create(4, 3, 24, FALSE));
+	copy = empty;
+	IW_CHECK(!copy.IsOpen());
+
+	IW_CHECK(copy.Create(4, 3, 24, FALSE));
+	if (!copy.IsOpen()) return;
+	copy.GetBitmap(0)[0] = 0x5A;
+	copy.m_sizeOriginal = CSize(400, 300);
+	copy.m_strInfo = _T("source image");
+	copy.CopyTo(copy);
+	IW_CHECK(copy.OriginalSize() == CSize(400, 300));
+	IW_CHECK(copy.m_strInfo == _T("source image"));
+	IW_CHECK_EQ(copy.GetBitmap(0)[0], 0x5A);
+
+	CDib independent(copy);
+	IW_CHECK(independent.IsOpen());
+	if (!independent.IsOpen()) return;
+	IW_CHECK(independent.OriginalSize() == CSize(400, 300));
+	independent.GetBitmap(0)[0] = 0xA5;
+	IW_CHECK_EQ(copy.GetBitmap(0)[0], 0x5A);
+}
+
+IW_TEST(DibRecreationHonorsBitmapStorageMode)
+{
+	CDib dib;
+	IW_CHECK(dib.Create(4, 3, 24, FALSE));
+	if (!dib.IsOpen()) return;
+	IW_CHECK(dib.GetHBitmap() == nullptr);
+	IW_CHECK(dib.Create(4, 3, 24, TRUE));
+	if (!dib.IsOpen()) return;
+	IW_CHECK(dib.GetHBitmap() != nullptr);
+	IW_CHECK(dib.Create(4, 3, 24, FALSE));
+	if (!dib.IsOpen()) return;
+	IW_CHECK(dib.GetHBitmap() == nullptr);
+}
+
+IW_TEST(DibRejectsUnsupportedPixelDepthsAndInvalidDimensions)
+{
+	CDib dib;
+	for (const unsigned depth : {0u, 2u, 3u, 7u, 9u, 15u, 33u})
+	{
+		IW_CHECK(!dib.Create(4, 3, depth, FALSE));
+		IW_CHECK(!dib.IsOpen());
+	}
+	IW_CHECK(!dib.Create(0, 3, 24, FALSE));
+	IW_CHECK(!dib.Create(4, 0, 24, FALSE));
+	IW_CHECK(!dib.Create(0x80000000u, 1, 1, FALSE));
+	IW_CHECK(!dib.Create(1, 0x80000000u, 1, FALSE));
+	IW_CHECK(!dib.IsOpen());
+}
+
+IW_TEST(ThumbnailHashCollisionsKeepDistinctShellItems)
+{
+	const BYTE firstBytes[] = {4, 0, 'A', 'b', 0, 0};
+	const BYTE secondBytes[] = {4, 0, 'B', 'A', 0, 0};
+	CShellItem first(reinterpret_cast<LPCITEMIDLIST>(firstBytes));
+	CShellItem second(reinterpret_cast<LPCITEMIDLIST>(secondBytes));
+	IW_CHECK_EQ(ShellHashKey(first), ShellHashKey(second));
+
+	std::map<UINT, std::unique_ptr<CThumb>> thumbs;
+	const UINT firstKey = CFolder::FindItemKey(thumbs, first);
+	thumbs.emplace(firstKey, std::make_unique<CThumb>(first));
+	const UINT secondKey = CFolder::FindItemKey(thumbs, second);
+	IW_CHECK(firstKey != secondKey);
+	thumbs.emplace(secondKey, std::make_unique<CThumb>(second));
+	IW_CHECK_EQ(thumbs.size(), size_t{2});
+	IW_CHECK_EQ(CFolder::FindItemKey(thumbs, first), firstKey);
+	IW_CHECK_EQ(CFolder::FindItemKey(thumbs, second), secondKey);
 }
 
 // The selection is the only thing that says what the image pane shows, so its
@@ -702,7 +810,7 @@ IW_TEST(JpegLoaderDecodesColorAndGrayscaleAndRecoversAfterBadHeader)
 		std::vector<BYTE> pixels;
 		std::vector<BYTE> rgba;
 		// Constant, MCU-aligned blocks avoid edge ringing. A small tolerance
-		// accounts for JPEG's lossy color conversion and ArtMate's fast IDCT.
+		// accounts for JPEG's lossy color conversion and the fast IDCT.
 		for (unsigned y = 0; y < 16; ++y)
 			for (unsigned x = 0; x < 16; ++x)
 			{

@@ -173,7 +173,6 @@ bool Image::Copy(const BITMAPINFOHEADER* pBmpFileHdr, int nSize)
 	}
 
 	PixelFormat pf = PixelFormat::FromBpp(pBmpFileHdr->biBitCount);
-	UINT nHeight = pBmpFileHdr->biHeight;
 
 	auto pRgb = (LPRGBQUAD)(pByte + static_cast<WORD>(pBmpFileHdr->biSize));
 	UINT nColors = pBmpFileHdr->biClrUsed;
@@ -184,7 +183,7 @@ bool Image::Copy(const BITMAPINFOHEADER* pBmpFileHdr, int nSize)
 		nColors = nMaxColors;
 	}
 
-	assert(nHeight > 0);
+	assert(pBmpFileHdr->biHeight != 0);
 
 	// We really need to calculate the bfOffBits
 	// ourselves as if it is corrupt a GPF may occur!
@@ -368,13 +367,15 @@ HGLOBAL Image::CopyToHandle() const
 
 	// How large is this image
 	PixelFormat pf = page.GetPixelFormat();
-	int nPaletteEntries = pf.NumberOfPaletteEntries();
 	int cx = page.GetWidth();
 	int cy = page.GetHeight();
 	int nStorageWidth = CalcStorageWidth(cx, pf);
 	int nSizeImage = nStorageWidth * cy;
-	// The header written below is a BITMAPINFOHEADER, not our IWBITMAPINFO.
-	int nSizeHeader = sizeof(BITMAPINFOHEADER) + nPaletteEntries * sizeof(RGBQUAD);
+	CImageBitmapInfoHeader bmi(page);
+	const auto* info = static_cast<LPBITMAPINFO>(bmi);
+	const int nColors = info->bmiHeader.biCompression == BI_BITFIELDS ? 3 :
+		static_cast<int>(info->bmiHeader.biClrUsed);
+	const int nSizeHeader = sizeof(BITMAPINFOHEADER) + nColors * sizeof(RGBQUAD);
 
 
 	// Alloc memory
@@ -386,16 +387,12 @@ HGLOBAL Image::CopyToHandle() const
 	auto lpCopy = static_cast<LPBYTE>(GlobalLock(hCopy));
 
 	if (lpCopy == nullptr)
-		throw std::bad_alloc();
-
-	CImageBitmapInfoHeader bmi(GetFirstPage());
-	MemCopy(lpCopy, bmi, sizeof(BITMAPINFOHEADER));
-
-	if (nPaletteEntries != 0)
 	{
-		MemCopy(lpCopy + sizeof(BITMAPINFOHEADER), page.GetPalette(), nPaletteEntries * sizeof(RGBQUAD));
+		GlobalFree(hCopy);
+		throw std::bad_alloc();
 	}
 
+	MemCopy(lpCopy, info, nSizeHeader);
 	MemCopy(lpCopy + nSizeHeader, page.GetBitmap(), nSizeImage);
 
 	GlobalUnlock(hCopy);
@@ -692,109 +689,98 @@ static bool Filter(const Page& pageIn, Image& imageOut, long* kernel, long Ksize
 	CRect rcOrg = pageIn.GetPageRect();
 	CRect rc = rcOrg;
 
-	Page pageOut = imageOut.CreatePage(rc, PixelFormat::PF24);
+	const bool hasAlpha = pf.HasAlpha() || (pageIn.GetFlags() & PageFlags::HasTransparent);
+	Page pageOut = imageOut.CreatePage(rc, hasAlpha ? PixelFormat::PF32Alpha : PixelFormat::PF24);
 	ConstIImageSurfaceLockPtr pLockIn = pageIn.GetSurfaceLock();
 	IImageSurfaceLockPtr pLockOut = pageOut.GetSurfaceLock();
 
 	IW::CBuffer<COLORREF> pLine(nWidth);
-	CSimpleArray<LPCOLORREF> lines;
-
-	for (k = 0; k < Ksize; k++)
+	const bool hasInterior = Ksize <= nWidth && Ksize <= nHeight;
+	IW::CBuffer<COLORREF> lines(hasInterior ? static_cast<size_t>(Ksize) * nWidth : 0);
+	const auto readLine = [&](COLORREF* line, int row)
 	{
-		auto pBuffer = static_cast<LPCOLORREF>(Alloc(nWidth * sizeof(COLORREF)));
-		lines.Add(pBuffer);
-	}
-
-	for (y = 0; y < k2; y++)
-	{
-		pLockIn->RenderLine(pLine, y, 0, nWidth);
-		pLockOut->SetLine(pLine, y, 0, nWidth);
-	}
-
-	bool bCancel = false;
-
-	for (y = k2; y < nHeight - k2 && !bCancel; y++)
-	{
-		pLockIn->RenderLine(pLine, y, 0, nWidth);
-
-		// Load the lines for this scan
-		for (k = 0; k < Ksize; k++)
+		if (!hasAlpha) pLockIn->RenderLine(line, row, 0, nWidth);
+		else
 		{
-			pLockIn->RenderLine(lines[k], y + k - k2, 0, nWidth);
-		}
-
-		for (x = k2; x < nWidth - k2; x++)
-		{
-			r = b = g = a = 0;
-
-			for (j = -k2; j < kmax; j++)
-			{
-				for (k = -k2; k < kmax; k++)
+			pLockIn->GetLine(line, row, 0, nWidth);
+			if (pf.HasPalette())
+				for (int column = 0; column < nWidth; ++column)
 				{
-					LPCOLORREF pBuffer = lines[k + k2];
-					int n = x + j;
-					c = pBuffer[n];
-
-					i = kernel[(j + k2) + Ksize * (k + k2)];
-
-					r += GetR(c) * i;
-					g += GetG(c) * i;
-					b += GetB(c) * i;
-					a += GetA(c) * i;
+					const auto index = line[column] & 0xff;
+					auto value = pageIn.GetPalette()[index];
+					if (!pf.HasAlpha()) value |= 0xff000000;
+					if ((pageIn.GetFlags() & PageFlags::HasTransparent) && index == pageIn.GetTransparent())
+						value &= 0x00ffffff;
+					line[column] = value;
 				}
-			}
+		}
+	};
 
-			if (Kfactor <= 1)
-			{
-				c = SaturateRGBA(
-					r + Koffset,
-					g + Koffset,
-					b + Koffset,
-					a + Koffset);
-			}
-			else
-			{
-				c = SaturateRGBA(
-					r / Kfactor + Koffset,
-					g / Kfactor + Koffset,
-					b / Kfactor + Koffset,
-					a / Kfactor + Koffset);
-			}
+	for (y = 0; y < nHeight; y++)
+	{
+		if (pStatus->QueryCancel()) return false;
+		readLine(pLine, y);
+		if (hasInterior && y >= k2 && y < nHeight - k2)
+		{
+			for (k = 0; k < Ksize; k++)
+				readLine(lines.data() + static_cast<size_t>(k) * nWidth, y + k - k2);
 
-			pLine[x] = c;
+			for (x = k2; x < nWidth - k2; x++)
+			{
+				r = b = g = 0;
+				a = GetA(pLine[x]);
+
+				for (j = -k2; j < kmax; j++)
+				{
+					for (k = -k2; k < kmax; k++)
+					{
+						const COLORREF* pBuffer = lines.data() + static_cast<size_t>(k + k2) * nWidth;
+						int n = x + j;
+						c = pBuffer[n];
+
+						i = kernel[(j + k2) + Ksize * (k + k2)];
+
+						r += GetR(c) * i;
+						g += GetG(c) * i;
+						b += GetB(c) * i;
+					}
+				}
+
+				if (Kfactor > 1)
+				{
+					r /= Kfactor;
+					g /= Kfactor;
+					b /= Kfactor;
+				}
+
+				pLine[x] = SaturateRGBA(r + Koffset, g + Koffset, b + Koffset, a);
+			}
 		}
 
 		pLockOut->SetLine(pLine, y, 0, nWidth);
 		pStatus->Progress(y, nHeight);
-		bCancel = pStatus->QueryCancel();
-	}
-
-	for (; y < nHeight; y++)
-	{
-		pLockIn->RenderLine(pLine, y, 0, nWidth);
-		pLockOut->SetLine(pLine, y, 0, nWidth);
+		if (pStatus->QueryCancel()) return false;
 	}
 
 	pageOut.CopyExtraInfo(pageIn);
 
-	for (k = 0; k < lines.GetSize(); k++)
-	{
-		Free(lines[k]);
-	}
-
-	lines.RemoveAll();
-
-	return !bCancel;
+	return true;
 }
 
 bool IW::Filter(const Image& imageIn, Image& imageOut, long* kernel, long Ksize, long Kfactor, long Koffset,
                 IStatus* pStatus)
 {
 	assert(imageOut.GetPageCount() == 0);
+	if (!kernel || Ksize <= 0 || (Ksize & 1) == 0)
+	{
+		pStatus->SetError(L"Invalid image filter kernel.");
+		return false;
+	}
 
 	for (auto pageIn = imageIn.Pages.begin(); pageIn != imageIn.Pages.end(); ++pageIn)
 	{
-		::Filter(*pageIn, imageOut, kernel, Ksize, Kfactor, Koffset, pStatus);
+		if (pStatus->QueryCancel() || !::Filter(*pageIn, imageOut, kernel, Ksize, Kfactor, Koffset, pStatus))
+			return false;
 	}
 
 	imageOut.Normalize();
@@ -1171,28 +1157,22 @@ Page& Image::CreatePage(const Page& pageIn)
 
 Page& Image::CreatePage(const CRect& rc, const PixelFormat& pf)
 {
-	int cx = rc.right - rc.left;
-	int cy = rc.bottom - rc.top;
-
-	// cx/cy come straight from file headers -- an int multiply here wraps.
-	const __int64 nSizeImage64 =
-		((((static_cast<__int64>(cx) * pf.ToStorageBpp()) + 7) / 8) + 3) / 4 * 4 * cy;
-
-	if (cx <= 0 || cy <= 0 || nSizeImage64 > kMaxPageBytes)
+	const auto width = static_cast<std::int64_t>(rc.right) - rc.left;
+	const auto height = static_cast<std::int64_t>(rc.bottom) - rc.top;
+	if (width <= 0 || height <= 0 || width > INT_MAX || height > INT_MAX)
 		throw std::bad_alloc();
 
-	Pages.push_back(Page());
-	Page& page = Pages.back();
+	const int cx = static_cast<int>(width);
+	const int cy = static_cast<int>(height);
+	const int nStorageWidth = CalcStorageWidth(cx, pf);
+	const auto nSizeImage64 = static_cast<std::uint64_t>(nStorageWidth) * cy;
+	if (nSizeImage64 > kMaxPageBytes) throw std::bad_alloc();
 
-	int nPaletteEntries = pf.NumberOfPaletteEntries();
-
-	// Calc storage GetWidth;
-	int nStorageWidth = CalcStorageWidth(cx, pf);
-
-	// Allocate memory for the bits (DWORD aligned).
-	const DWORD nSizeImage = nStorageWidth * cy;
+	const int nPaletteEntries = pf.NumberOfPaletteEntries();
+	const DWORD nSizeImage = static_cast<DWORD>(nSizeImage64);
 	const DWORD nSizePalette = nPaletteEntries * sizeof(RGBQUAD);
 
+	Page page;
 	PIWBITMAPINFO pIWBM = page.Alloc(nSizePalette + nSizeImage);
 	pIWBM->dwBackGround = 0xffffffff;
 	pIWBM->rectPage = rc;
@@ -1226,7 +1206,8 @@ Page& Image::CreatePage(const CRect& rc, const PixelFormat& pf)
 		}
 	}
 
-	return page;
+	Pages.push_back(page);
+	return Pages.back();
 }
 
 

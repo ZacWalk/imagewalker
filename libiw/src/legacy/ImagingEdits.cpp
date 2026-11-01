@@ -15,6 +15,7 @@
 #include "../NativeCodec.h"
 #include "LegacyPch.h"
 #include "Imaging.h"
+#include "ImagingLock.h"
 #include "ImagingStreams.h"
 #include "ImagingEdits.h"
 
@@ -121,14 +122,14 @@ namespace
 		return value;
 	}
 
-	void ReadEditRow(const iw::imaging::FrameView& frame, int y, std::vector<std::uint32_t>& pixels)
+	void ReadEditRow(const libfiles::pixel_rows& frame, int y, std::vector<std::uint32_t>& pixels)
 	{
 		auto row = frame;
 		row.height = 1;
-		row.bottomUp = false;
-		row.pixels = frame.pixels.subspan(static_cast<size_t>(frame.bottomUp ? frame.height - 1 - y : y) *
+		row.bottom_up = false;
+		row.pixels = frame.pixels.subspan(static_cast<size_t>(frame.bottom_up ? static_cast<int>(frame.height) - 1 - y : y) *
 			frame.stride, frame.stride);
-		iw::imaging::copy_frame_bgra(row, pixels, frame.width, false);
+		libfiles::copy_bgra(row, pixels, frame.width, false);
 	}
 }
 bool IW::ApplyEditColor(const Image& imageIn, Image& imageOut, const ImageEdits& edits, IStatus* pStatus)
@@ -515,10 +516,7 @@ namespace
 			{
 				IW::ConstIImageSurfaceLockPtr pLockIn = pageIn->GetSurfaceLock();
 
-				// The warp writes a PF32Alpha page, so it has to read real alpha.
-				// RenderLine composites it away; GetLine cannot resolve a palette,
-				// and a palettised page has no alpha channel to lose.
-				const bool bAlpha = pageIn->GetPixelFormat().HasAlpha();
+				const bool bAlpha = IW::HasSourceAlpha(*pageIn);
 
 				for (int y = 0; y < cy; y++)
 				{
@@ -526,7 +524,7 @@ namespace
 
 					if (bAlpha)
 					{
-						pLockIn->GetLine(pLine, y, 0, cx);
+						IW::ReadStraightLine(*pageIn, pLockIn, pLine, y, 0, cx);
 
 						// The sampler works premultiplied; an opaque source
 						// already is, so only this branch has to pay for it.
@@ -720,9 +718,9 @@ void IW::AutoColor(const Image& imageIn, ImageEdits& edits)
 	iw::edits::ColorHistogram histogram;
 	for (size_t index = 0; index < imageIn.Pages.size(); ++index)
 	{
-		const auto frame = iw::imaging::image_frame(imageIn, index);
+		const auto frame = iw::imaging::image_rows(imageIn, index);
 		std::vector<std::uint32_t> pixels(frame.width);
-		for (int y = 0; y < frame.height; ++y)
+		for (int y = 0; y < static_cast<int>(frame.height); ++y)
 		{
 			ReadEditRow(frame, y, pixels);
 			histogram.add(pixels);
@@ -740,11 +738,13 @@ void IW::AutoColor(const Image& imageIn, ImageEdits& edits)
 void IW::AutoStraighten(const Image& imageIn, ImageEdits& edits)
 {
 	if (imageIn.IsEmpty()) return;
-	const auto frame = iw::imaging::image_frame(imageIn);
-	if (frame.width < 8 || frame.height < 8) return;
-	const int step = (std::max)(1, (std::max)(frame.width, frame.height) / 384);
-	const int width = frame.width / step;
-	const int height = frame.height / step;
+	const auto frame = iw::imaging::image_rows(imageIn);
+	const int frameWidth = static_cast<int>(frame.width);
+	const int frameHeight = static_cast<int>(frame.height);
+	if (frameWidth < 8 || frameHeight < 8) return;
+	const int step = (std::max)(1, (std::max)(frameWidth, frameHeight) / 384);
+	const int width = frameWidth / step;
+	const int height = frameHeight / step;
 	std::vector<int> luma(static_cast<size_t>(width) * height);
 	std::vector<std::uint32_t> row(frame.width);
 	for (int y = 0; y < height; ++y)

@@ -1,5 +1,5 @@
 // ImageWalker by Zac Walker
-// WebP adapters over libfiles and libwebp. Publication stays with the caller.
+// WebP through libfiles, for ImageWalker's pixels. Publication stays with the caller.
 
 #pragma once
 

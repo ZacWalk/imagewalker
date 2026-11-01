@@ -434,6 +434,7 @@ namespace IW
 	{
 	public:
 		typedef PixelTraits<PF> Traits;
+		static constexpr bool storesAlpha = PixelFormat(PF).HasAlpha();
 
 		explicit SurfaceLock(IW::Page &page) :
 			_page(page),
@@ -563,6 +564,49 @@ namespace IW
 		IW::LPCCOLORREF _pPalette;
 		COLORREF _clrBackground;
 	};
+
+	inline bool HasSourceAlpha(const Page& page)
+	{
+		const auto format = page.GetPixelFormat();
+		return format.HasAlpha() ||
+			(format.HasPalette() && (page.GetFlags() & PageFlags::HasTransparent));
+	}
+
+	inline void ReadStraightLine(const Page& page, const IImageSurfaceLock* lock,
+		COLORREF* pixels, int y, int x, int count)
+	{
+		lock->GetLine(pixels, y, x, count);
+		const auto format = page.GetPixelFormat();
+		if (!format.HasPalette()) return;
+		const auto* palette = page.GetPalette();
+		const bool transparent = (page.GetFlags() & PageFlags::HasTransparent) != 0;
+		for (int i = 0; i < count; ++i)
+		{
+			const auto index = pixels[i] & 0xff;
+			auto pixel = palette[index];
+			if (!format.HasAlpha()) pixel |= 0xff000000;
+			if (transparent && index == page.GetTransparent()) pixel &= 0x00ffffff;
+			pixels[i] = pixel;
+		}
+	}
+
+	inline COLORREF PremultiplyStraight(COLORREF pixel)
+	{
+		const auto alpha = GetA(pixel);
+		if (alpha == 255) return pixel;
+		return RGBA((GetR(pixel) * alpha + 127) / 255, (GetG(pixel) * alpha + 127) / 255,
+			(GetB(pixel) * alpha + 127) / 255, alpha);
+	}
+
+	inline COLORREF UnpremultiplyStraight(COLORREF pixel)
+	{
+		const auto alpha = GetA(pixel);
+		if (!alpha) return 0;
+		if (alpha == 255) return pixel;
+		return RGBA((std::min)(255, (GetR(pixel) * 255 + alpha / 2) / alpha),
+			(std::min)(255, (GetG(pixel) * 255 + alpha / 2) / alpha),
+			(std::min)(255, (GetB(pixel) * 255 + alpha / 2) / alpha), alpha);
+	}
 
 	////////////////////////////////////////////////////////////
 	//

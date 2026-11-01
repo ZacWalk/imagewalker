@@ -1,7 +1,7 @@
 // The frame.
 
 #include "stdafx.h"
-#include "ArtMate.h"
+#include "ImageWalker.h"
 #include "MainFrm.h"
 
 #include "iw/help.h"
@@ -413,7 +413,7 @@ void CMainFrame::OnAppExit(UINT, int, CWindow)
 
 void CMainFrame::OnHelpFinder(UINT, int, CWindow)
 {
-	IW::InvokeHelp(m_hWnd, 0);
+	IW::InvokeHelp(m_hWnd, HELP_IMAGEWALKER10);
 }
 
 void CMainFrame::OnAppAbout(UINT, int, CWindow)

@@ -3,6 +3,7 @@
 
 #include "PlatformWin32.h"
 #include <objbase.h>
+#include <oleidl.h>
 #include <wincodec.h>
 #include "Platform.h"
 #include "Tests.h"
@@ -343,7 +344,7 @@ namespace iw::tests
 
 		void test_canvas_refresh(Reporter& reporter)
 		{
-			reporter.section(L"ImageCanvas refresh of the displayed item");
+			reporter.section(L"ImageCanvas refresh and fullscreen command targets");
 			std::error_code error;
 			const auto root = platform::unique_temp_folder(L"iw30-canvas-refresh");
 			const auto gone = root / L"gone";
@@ -358,6 +359,23 @@ namespace iw::tests
 			reporter.check(paths::equal(canvas.path(), gone), L"the folder is displayed");
 			canvas.set_items({{gone, files::ItemKind::folder}, {kept, files::ItemKind::folder}}, 2);
 			reporter.check(paths::equal(canvas.path(), gone), L"a refresh keeps a displayed item that is still listed");
+			canvas.select_index(0, false, false);
+			canvas.set_fullscreen(true);
+			canvas.select_index(1, false, false);
+			reporter.check(canvas.selected_paths() == std::vector<std::filesystem::path>{kept} &&
+				canvas.selection_count() == 1 && canvas.focused_index() == 1,
+				L"fullscreen file commands target the visible selection rather than the saved browsing selection");
+			canvas.select_index(0, false, true);
+			reporter.check(canvas.selection_count() == 2 && canvas.selected_paths().size() == 2 &&
+				canvas.focused_index() == 0,
+				L"fullscreen command counts and focus agree with a comparison selection");
+			canvas.set_items({{kept, files::ItemKind::folder}, {gone, files::ItemKind::folder}}, 2);
+			reporter.check(canvas.selection_count() == 2 && canvas.focused_index() == 1,
+				L"a fullscreen refresh restores its own selection and focus by path");
+			canvas.set_fullscreen(false);
+			reporter.check(canvas.selected_paths() == std::vector<std::filesystem::path>{gone} &&
+				canvas.selection_count() == 1 && canvas.focused_index() == 1,
+				L"leaving fullscreen after a refresh restores the independent browsing selection");
 			std::filesystem::remove(gone, error);
 			canvas.set_items({{kept, files::ItemKind::folder}}, 1);
 			reporter.check(canvas.path().empty(),
@@ -367,6 +385,33 @@ namespace iw::tests
 			reporter.check(paths::equal(canvas.path(), kept),
 				L"an item that still exists stays on show after browsing to another folder");
 			std::filesystem::remove_all(root, error);
+		}
+
+		void test_folder_scan_completion(Reporter& reporter)
+		{
+			reporter.section(L"MainWindow folder scan failures");
+			MainWindowAccess host;
+			reporter.check(host.create(), L"the folder scan host is created");
+			const std::filesystem::path folder = L"C:\\reviewed-folder";
+			host.begin_folder_scan(folder, 1);
+			host.finish_folder_scan(1, folder, {{folder / L"retained", files::ItemKind::folder}});
+			reporter.check(host.collection_load_state() == LoadState::ready && host.collection_size() == 1,
+				L"a successful scan publishes the reviewed folder contents");
+			host.begin_folder_scan(folder, 2);
+			const auto denied = std::make_error_code(std::errc::permission_denied);
+			host.finish_folder_scan(1, folder, {}, denied);
+			reporter.check(host.collection_load_state() == LoadState::loading && host.collection_size() == 1,
+				L"a stale scan failure cannot replace a newer folder request");
+			host.finish_folder_scan(2, folder, {}, denied);
+			reporter.check(host.collection_load_state() == LoadState::failed && host.collection_size() == 1 &&
+				host.chrome->status.text.find(L"Could not read") != std::wstring::npos &&
+				!host.chrome->status.scanning,
+				L"a failed refresh retains known contents and reports failure instead of an empty successful scan");
+			host.begin_folder_scan(folder, 3);
+			host.finish_folder_scan(3, folder, {});
+			reporter.check(host.collection_load_state() == LoadState::ready && host.collection_size() == 0 &&
+				host.chrome->status.text.find(L"Could not read") == std::wstring::npos,
+				L"a later successful scan clears the previous failure");
 		}
 
 		void test_sync_workflow(Reporter& reporter)
@@ -845,6 +890,18 @@ namespace iw::tests
 					std::this_thread::sleep_for(std::chrono::milliseconds(1));
 				return delivered->load();
 			}), L"startup completion is delivered instead of silently losing the initial folder scan");
+			std::weak_ptr<platform::FrameReactor> failedReactor;
+			{
+				const auto reactor = std::make_shared<platform::FrameReactor>();
+				failedReactor = reactor;
+				platform::WindowOptions invalid;
+				invalid.className.assign(1024, 'x');
+				invalid.visible = false;
+				reporter.check(!platform::create_top_level_frame(reactor, invalid),
+					L"an invalid native window class is refused");
+			}
+			reporter.check(failedReactor.expired(),
+				L"failed native class registration releases the frame and its reactor instead of retaining a self-cycle");
 			platform::WindowOptions options;
 			options.className = "ImageWalker30.NativeFullscreenTest";
 			options.title = L"Native fullscreen regression";
@@ -866,10 +923,78 @@ namespace iw::tests
 				reporter.check(rect_equals(frame->placement().normalBounds, placement.normalBounds) &&
 					rect_equals(frame->client_rect(), client) && frame->placement().maximized == placement.maximized,
 					L"leaving native fullscreen restores the original HWND placement and client extent");
+				const auto surface = platform::create_command_surface(frame);
+				std::weak_ptr<int> commandLifetime;
+				bool retainedDuringInvoke{};
+				{
+					const auto lifetime = std::make_shared<int>();
+					commandLifetime = lifetime;
+					auto command = std::make_shared<platform::Command>();
+					command->invoke = [surface, lifetime, &commandLifetime, &retainedDuringInvoke]
+					{
+						surface->clear_task_toolbar();
+						retainedDuringInvoke = !commandLifetime.expired();
+					};
+					surface->set_task_toolbar({platform::ToolbarItem::action(std::move(command))});
+				}
+				SendMessageW(reinterpret_cast<HWND>(frame->native_handle()), WM_COMMAND, MAKEWPARAM(1, 0), 0);
+				reporter.check(retainedDuringInvoke && commandLifetime.expired(),
+					L"a native command can rebuild its toolbar without destroying the callback being invoked");
 				frame->close();
 			}
 			});
 			uiThread.join();
+		}
+
+		void test_clipboard_file_operation(Reporter& reporter)
+		{
+			reporter.section(L"clipboard preferred file operation");
+			reporter.check(platform::ClipboardContent{}.operation == platform::FileOperation::copy &&
+				platform::win32::clipboard_file_operation(nullptr) == platform::FileOperation::copy,
+				L"a clipboard without a preferred drop effect defaults to Copy");
+			struct EffectData
+			{
+				HGLOBAL value{GlobalAlloc(GMEM_MOVEABLE, sizeof(DWORD))};
+				~EffectData() { if (value) GlobalFree(value); }
+			} effectData;
+			reporter.check(effectData.value != nullptr, L"the clipboard effect fixture allocates its own memory");
+			if (!effectData.value) return;
+			const auto operation = [&effectData](const DWORD value)
+			{
+				auto* effect = static_cast<DWORD*>(GlobalLock(effectData.value));
+				if (!effect) throw std::runtime_error("Cannot lock the clipboard effect fixture.");
+				*effect = value;
+				GlobalUnlock(effectData.value);
+				return platform::win32::clipboard_file_operation(effectData.value);
+			};
+			reporter.check(operation(DROPEFFECT_MOVE) == platform::FileOperation::move,
+				L"Cut's preferred Move effect survives clipboard decoding for Paste");
+			reporter.check(operation(DROPEFFECT_COPY) == platform::FileOperation::copy,
+				L"Copy retains copy semantics");
+			reporter.check(operation(DROPEFFECT_LINK) == platform::FileOperation::copy &&
+				operation(DROPEFFECT_NONE) == platform::FileOperation::copy &&
+				operation(DROPEFFECT_COPY | DROPEFFECT_MOVE) == platform::FileOperation::copy,
+				L"unsupported or ambiguous effects never authorize a move");
+		}
+
+		void test_choice_button_ids(Reporter& reporter)
+		{
+			reporter.section(L"native choice cancellation");
+			platform::ChoiceDefinition draft;
+			draft.buttons = {{1, L"Save"}, {2, L"Don't Save"}, {3, L"Cancel"}};
+			platform::ChoiceDefinition collision;
+			collision.buttons = {{1, L"Auto-rename"}, {2, L"Replace"}};
+			const auto first = platform::win32::firstChoiceButton;
+			reporter.check(platform::win32::choice_button_result(draft, IDCANCEL) == 0 &&
+				platform::win32::choice_button_result(collision, IDCANCEL) == 0,
+				L"Escape and the close box cannot become Don't Save or Replace");
+			reporter.check(platform::win32::choice_button_result(draft, first + 1) == 2 &&
+				platform::win32::choice_button_result(collision, first + 1) == 2,
+				L"explicitly clicked workflow actions retain their declared ids");
+			reporter.check(platform::win32::choice_button_result(draft, first) == 1 &&
+				platform::win32::choice_button_result(draft, first + 2) == 3 &&
+				platform::win32::choice_button_result(draft, first + 3) == 0,
+				L"native choice ids map only to buttons present in the dialog");
 		}
 
 		void test_color(Reporter& reporter)
@@ -1656,6 +1781,10 @@ namespace iw::tests
 			files::sort_items(items, files::SortField::dimensions);
 			reporter.check(items.front().kind == files::ItemKind::folder && items.size() == 4,
 			               L"dimensions sorting remains stable while image dimensions are deferred");
+			std::error_code scanError;
+			reporter.check(files::scan_folder_items(root / L"missing", stop.get_token(), {}, &scanError).empty() &&
+				static_cast<bool>(scanError),
+				L"an unavailable folder reports an enumeration error rather than a successful empty listing");
 			std::filesystem::remove_all(root, error);
 		}
 
@@ -4761,9 +4890,12 @@ namespace iw::tests
 				L"file Undo is an explicit window dependency rather than an uninitialized global lookup");
 
 			test_startup_dispatch(reporter);
+			test_clipboard_file_operation(reporter);
+			test_choice_button_ids(reporter);
 			test_mode_bar(reporter);
 			test_main_window_host(reporter);
 			test_canvas_refresh(reporter);
+			test_folder_scan_completion(reporter);
 			test_color(reporter);
 			test_dpi_metrics(reporter);
 			test_toolbar_symbols(reporter);

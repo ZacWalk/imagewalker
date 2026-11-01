@@ -82,7 +82,7 @@ namespace iw
 		bool open_folder(const std::filesystem::path& path, bool addHistory = true, bool synchronizeTree = true);
 		void report_scan_progress(std::uint64_t generation, size_t entries, size_t images);
 		void finish_folder_scan(std::uint64_t generation, const std::filesystem::path& folder,
-		                        std::vector<files::FolderItem> items);
+		                        std::vector<files::FolderItem> items, std::error_code error);
 		void open_image(const std::filesystem::path& path);
 		void activate_item(const std::filesystem::path& path);
 		void apply_collection_view();

@@ -8,9 +8,9 @@ Development requirements for all five applications.
   resources, settings, worker scheduling and final file publication in the
   application. See [libiw-plan.md](libiw-plan.md).
 - Debug executables end in `d`; binaries, settings and logs all live in `exe\`.
-- Keep version resources in each application's directory: `ArtMate.rc` for
-  ArtMate, `Ver.h` and `ImageWalker.rc` for 2.x, and `app.rc` for 3.0.
-  Use `ArtMate 1.0` and `1.0.0.0` in ArtMate's version resource and test the
+- Keep version resources in each application's directory: `ImageWalker.rc` for
+  1.0, `Ver.h` and `ImageWalker.rc` for 2.x, and `app.rc` for 3.0.
+  Use `ImageWalker 1.0` and `1.0.0.0` in 1.0's version resource and test the
   product name against its application title. Follow
   [architecture-2x.md](architecture-2x.md#version-labels) for 2.x labels.
 - Settings use an ini file named after the executable. There is no runtime

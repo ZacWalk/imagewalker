@@ -661,6 +661,7 @@ namespace iw::platform
 	{
 		std::vector<std::filesystem::path> files;
 		BitmapResource image;
+		FileOperation operation{FileOperation::copy};
 	};
 
 	ClipboardStatus clipboard_status();

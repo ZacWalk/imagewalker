@@ -1,6 +1,6 @@
 # ImageWalker agent notes
 
-Build ArtMate 1.0 and ImageWalker 2.0, 2.2, 2.3 and 3.0 as standalone x64
+Build ImageWalker 1.0, 2.0, 2.2, 2.3 and 3.0 as standalone x64
 applications from `src10`, `src20`, `src22`, `src23` and `src30`.
 Describe each release by its name, year and feature additions, not as a
 presentation of another version or a snapshot of the code. Keep development

@@ -18,7 +18,12 @@ namespace
 
 	std::string Narrow(const CString& text)
 	{
-		return std::string(CT2CA(text));
+		return std::string(CW2A(text, CP_UTF8));
+	}
+
+	CString Wide(const std::string& text)
+	{
+		return CString(CA2W(text.c_str(), CP_UTF8));
 	}
 
 	// Values are shown and searched without the whitespace around them, as they always were.
@@ -203,7 +208,7 @@ try
 	if (text.empty())
 		return false;
 
-	value = text.c_str();
+	value = Wide(text);
 	return true;
 }
 catch (const xmp::error&)
@@ -231,7 +236,7 @@ try
 		text = at >= nodes.size() ? std::string() : xmp::is_array(options) ? Join(Items(nodes, at)) : Composite(nodes, at);
 	}
 
-	value = text.c_str();
+	value = Wide(text);
 	return !value.IsEmpty();
 }
 catch (const xmp::error&)
@@ -254,7 +259,7 @@ try
 	if (!English(*_meta, schema, name, text, lang))
 		return false;
 
-	value = text.c_str();
+	value = Wide(text);
 	return true;
 }
 catch (const xmp::error&)
@@ -295,8 +300,8 @@ try
 			pending = nullptr;
 		}
 
-		propertiesOut.Add(CString(node.path.substr(node.path.find(':') + 1).c_str()),
-		                  CString(Shown(*_meta, nodes, i).c_str()));
+		propertiesOut.Add(Wide(node.path.substr(node.path.find(':') + 1)),
+		                  Wide(Shown(*_meta, nodes, i)));
 	}
 }
 catch (const xmp::error&)

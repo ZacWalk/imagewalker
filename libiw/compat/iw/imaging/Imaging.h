@@ -701,10 +701,10 @@ namespace IW
 
 	inline int CalcStorageWidth(int nWidth, const PixelFormat &pf)
 	{
-		// Fix for PF555
-		const int nBpp = pf.ToStorageBpp();
-		const int nBppWidth = nWidth * nBpp;
-		return ((nBppWidth + ((nBppWidth % 8) ? 8 : 0))/8+3) & ~3;
+		const auto bits = static_cast<std::int64_t>(nWidth) * pf.ToStorageBpp();
+		const auto stride = ((bits + 31) / 32) * 4;
+		if (nWidth < 0 || stride > INT_MAX) throw std::bad_alloc();
+		return static_cast<int>(stride);
 	}
 
 	//inline double DegreesToRadians(double d) { return (M_PI*d/180.0); };

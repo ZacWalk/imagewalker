@@ -2,7 +2,7 @@
 
 // One folder's worth of items, and the thumbnail each carries.
 //
-// The map is keyed on the shell item hash rather than on an index, because a
+// The map uses collision-resolved shell item hashes rather than indices: a
 // refresh renumbers everything and a background decode has to name the item it
 // was started for.
 
@@ -60,6 +60,8 @@ public:
 
 	BOOL GetPath(CString& strPath) const;
 	void Refresh();
+
+	static UINT FindItemKey(const std::map<UINT, std::unique_ptr<CThumb>>& thumbs, const CShellItem& item);
 
 	std::map<UINT, std::unique_ptr<CThumb>> m_mapThumbs;
 

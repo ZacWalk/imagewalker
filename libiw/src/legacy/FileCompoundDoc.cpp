@@ -44,34 +44,56 @@ bool CLoadCompoundDoc::Read(
 	IW::IStreamIn* pStreamIn,
 	IW::IImageStream* pImageOut,
 	IW::IStatus* pStatus)
+try
 {
 	CComPtr<IStorage> pStorage;
 	CComPtr<ILockBytes> pLockBytes;
 	CComPtr<IPropertySetStorage> pPropSetStg;
 
 	HRESULT hr;
-	IW::FileSize size = pStreamIn->GetFileSize();
-	HGLOBAL hg = GlobalAlloc(GMEM_FIXED, size);
-
-	if (hg == nullptr)
-		return false;
-
-	//  STEP 4.b:
-	//  GlobalLock the handle returned from the GlobalAlloc call.
-	auto p = static_cast<LPBYTE>(GlobalLock(hg));
-
-	if (p != nullptr)
+	const auto size = pStreamIn->GetFileSize().GetByteCount();
+	if (!size || size > INT_MAX)
 	{
-		pStreamIn->Read(p, size);
-		GlobalUnlock(hg);
+		const CString message(L"The compound document is empty or exceeds the input limit.");
+		if (size > INT_MAX) pStatus->SetResourceError(message);
+		else pStatus->SetError(message);
+		return false;
+	}
+	struct Memory
+	{
+		HGLOBAL handle;
+		~Memory() { if (handle) GlobalFree(handle); }
+	} memory{GlobalAlloc(GMEM_MOVEABLE, static_cast<SIZE_T>(size))};
+	if (!memory.handle) throw std::bad_alloc();
+
+	{
+		auto* bytes = static_cast<BYTE*>(GlobalLock(memory.handle));
+		if (!bytes)
+		{
+			pStatus->SetError(L"The compound document input could not be locked.");
+			return false;
+		}
+		struct Unlock
+		{
+			HGLOBAL handle;
+			~Unlock() { GlobalUnlock(handle); }
+		} unlock{memory.handle};
+		DWORD read{};
+		if (pStreamIn->Seek(IW::IStreamCommon::eBegin, 0) != 0 ||
+			!pStreamIn->Read(bytes, static_cast<DWORD>(size), &read) || read != size)
+		{
+			pStatus->SetError(L"The compound document could not be read completely.");
+			return false;
+		}
 	}
 
-	hr = CreateILockBytesOnHGlobal(hg, TRUE, &pLockBytes);
+	hr = CreateILockBytesOnHGlobal(memory.handle, TRUE, &pLockBytes);
 	if (FAILED(hr))
 	{
 		pStatus->SetError(CString(IW::Text::FAILEDTOLOCKBYTES));
 		return false;
 	}
+	memory.handle = nullptr;
 
 	hr = StgOpenStorageOnILockBytes(pLockBytes, nullptr,
 	                                STGM_DIRECT | STGM_READ | STGM_SHARE_EXCLUSIVE, nullptr,
@@ -110,6 +132,11 @@ bool CLoadCompoundDoc::Read(
 
 	IW::MemZero(&spec, sizeof(PROPSPEC));
 	PropVariantInit(&var);
+	struct Property
+	{
+		PROPVARIANT& value;
+		~Property() { PropVariantClear(&value); }
+	} property{var};
 	spec.ulKind = PRSPEC_PROPID;
 	spec.propid = PIDSI_THUMBNAIL;
 
@@ -142,8 +169,6 @@ bool CLoadCompoundDoc::Read(
 		}
 	}
 
-	PropVariantClear(&var);
-
 	if (bSuccess)
 	{
 		pImageOut->SetStatistics(GetTitle());
@@ -156,6 +181,16 @@ bool CLoadCompoundDoc::Read(
 	//DumpCustomProps(pPropSetStg);
 
 	return bSuccess;
+}
+catch (const std::bad_alloc&)
+{
+	pStatus->SetResourceError(L"Not enough memory to read the compound document.");
+	return false;
+}
+catch (const std::exception& error)
+{
+	pStatus->SetError(CString(error.what()));
+	return false;
 }
 
 bool CLoadCompoundDoc::Write(const CString& str, IW::IStreamOut* pStreamOut, const IW::Image& imageIn,

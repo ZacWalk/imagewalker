@@ -80,3 +80,19 @@ IW_TEST(RenderSurfaceFlipClampsOpacity)
 	::GdiFlush();
 	IW_CHECK(::GetPixel(destination.GetDC(), 1, 1) == foreground);
 }
+
+IW_TEST(RenderSurfaceRecreationReselectsTheRequestedFont)
+{
+	RenderSurface surface;
+	const HFONT font = static_cast<HFONT>(::GetStockObject(SYSTEM_FIXED_FONT));
+	IW_CHECK(font != nullptr);
+	for (int pass = 0; pass < 2; ++pass)
+	{
+		const bool created = surface.Create(nullptr, CRect(0, 0, 64, 32));
+		IW_CHECK(created);
+		if (!created) return;
+		CRect text(0, 0, 64, 32);
+		surface.DrawText(_T("sample"), text, font, DT_SINGLELINE, RGB(255, 255, 255));
+		IW_CHECK(::GetCurrentObject(surface.GetDC(), OBJ_FONT) == font);
+	}
+}

@@ -1,5 +1,6 @@
 #include <libiw/Document.h>
 #include <cstring>
+#include <optional>
 #include <string_view>
 #include <utility>
 #include "../NativeCodec.h"
@@ -10,86 +11,118 @@
 
 namespace iw::imaging
 {
-	static void copy_page_bgra(const IW::Page& page, std::span<std::uint32_t> destination,
-	                          std::size_t stride, bool bottomUp);
-	static FrameView frame_view(const IW::Page& page);
+	namespace
+	{
+		// A page's rows as libfiles describes stored pixels: bottom-up, as a page holds them.
+		libfiles::pixel_rows page_rows(const IW::Page& page)
+		{
+			const auto format = page.GetPixelFormat();
+			libfiles::pixel_rows rows;
+			rows.width = static_cast<std::uint32_t>(page.GetWidth());
+			rows.height = static_cast<std::uint32_t>(page.GetHeight());
+			rows.storage = static_cast<libfiles::document_storage>(format._pf);
+			rows.stride = static_cast<std::size_t>(page.GetStorageWidth());
+			rows.bottom_up = true;
+			rows.pixels = {page.GetBitmap(), rows.stride * rows.height};
+			rows.palette = {reinterpret_cast<const std::uint32_t*>(page.GetPalette()),
+				static_cast<std::size_t>(format.NumberOfPaletteEntries())};
+			if (page.GetFlags() & IW::PageFlags::HasTransparent)
+				rows.transparent = static_cast<std::uint32_t>(page.GetTransparent());
+			return rows;
+		}
 
-	struct Document::Impl
-	{
-		IW::Image image;
-	};
+		// The page as libfiles holds a frame: its rows top-down, its palette and its timing, copied.
+		libfiles::decoded_frame decoded_page(const IW::Page& page)
+		{
+			const auto rows = page_rows(page);
+			const auto rect = page.GetPageRect();
+			libfiles::decoded_frame frame;
+			frame.left = rect.left;
+			frame.top = rect.top;
+			frame.width = rows.width;
+			frame.height = rows.height;
+			frame.storage = rows.storage;
+			frame.stride = rows.stride;
+			frame.pixels.resize(rows.pixels.size());
+			for (std::size_t y = 0; y < rows.height; ++y)
+				std::memcpy(frame.pixels.data() + y * rows.stride,
+					rows.pixels.data() + (rows.height - 1 - y) * rows.stride, rows.stride);
+			frame.palette.assign(rows.palette.begin(), rows.palette.end());
+			frame.transparent = rows.transparent;
+			const auto flags = page.GetFlags();
+			if (flags & IW::PageFlags::HasBackGround) frame.background = static_cast<std::uint32_t>(page.GetBackGround());
+			if (flags & IW::PageFlags::HasTimeDelay) frame.delay_ms = static_cast<std::uint32_t>(page.GetTimeDelay());
+			if (const auto disposal = page.GetDisposalMethod(); disposal != 0)
+				frame.disposal = static_cast<std::uint32_t>(disposal);
+			return frame;
+		}
 
-	Document::Document() = default;
-	Document::~Document() = default;
-	Document::Document(Document&&) noexcept = default;
-	Document& Document::operator=(Document&&) noexcept = default;
+		// A block libfiles names; a thumbnail's encoded image and the loaders' private blocks have no name there.
+		std::optional<libfiles::document_metadata> metadata_kind(const IW::MetaData& blob)
+		{
+			if (blob.IsImageData()) return {};
+			switch (blob.GetType())
+			{
+			case IW::MetaDataTypes::PROFILE_EXIF: return libfiles::document_metadata::exif;
+			case IW::MetaDataTypes::PROFILE_IPTC: return libfiles::document_metadata::iptc;
+			case IW::MetaDataTypes::PROFILE_XMP: return libfiles::document_metadata::xmp;
+			case IW::MetaDataTypes::PROFILE_ICC: return libfiles::document_metadata::icc;
+			case IW::MetaDataTypes::PROFILE_SOURCE_ICC: return libfiles::document_metadata::source_icc;
+			case IW::MetaDataTypes::PROFILE_COMMENT: return libfiles::document_metadata::comment;
+			default: return {};
+			}
+		}
 
-	std::size_t Document::frame_count() const noexcept { return impl_ ? impl_->image.Pages.size() : 0; }
-	std::size_t Document::metadata_count() const noexcept { return impl_ ? impl_->image.Blobs.size() : 0; }
-	int Document::orientation() const { return impl_ ? impl_->image.GetCameraSettings().Orientation : 1; }
-	int Document::original_width() const
-	{
-		return impl_ ? impl_->image.GetCameraSettings().OriginalImageSize.cx : 0;
-	}
-	int Document::original_height() const
-	{
-		return impl_ ? impl_->image.GetCameraSettings().OriginalImageSize.cy : 0;
-	}
-	std::wstring Document::description() const
-	{
-		return impl_ ? std::wstring(impl_->image.GetStatistics().GetString()) : std::wstring{};
-	}
-	std::wstring Document::format_key() const
-	{
-		return impl_ ? std::wstring(impl_->image.GetLoaderName().GetString()) : std::wstring{};
+		// What ImageWalker's loaders read, as libfiles holds a document, and what they add to it.
+		void to_document(const IW::Image& image, DocumentResult& result)
+		{
+			auto& document = result.document;
+			for (const auto& page : image.Pages) document.frames.push_back(decoded_page(page));
+			for (const auto& blob : image.Blobs)
+			{
+				const auto kind = metadata_kind(blob);
+				if (!kind) continue;
+				const auto* bytes = blob.IsEmpty() ? nullptr : blob.GetData();
+				document.metadata.push_back({*kind, bytes ? std::vector<std::uint8_t>(bytes, bytes + blob.GetDataSize())
+					: std::vector<std::uint8_t>{}});
+			}
+			if (!document.frames.empty())
+			{
+				const auto& first = document.frames.front();
+				document.info.width = first.width;
+				document.info.height = first.height;
+				document.info.storage = first.storage;
+				document.info.bits_per_pixel = libfiles::storage_bits(first.storage);
+			}
+			document.info.frames = static_cast<std::uint32_t>(document.frames.size());
+			const auto& camera = image.GetCameraSettings();
+			result.orientation = camera.Orientation;
+			result.originalWidth = camera.OriginalImageSize.cx;
+			result.originalHeight = camera.OriginalImageSize.cy;
+			result.description = image.GetStatistics().GetString();
+			result.formatKey = image.GetLoaderName().GetString();
+		}
+
+		// Kept as libfiles' document: an image too large to copy is refused as one too large to decode.
+		void keep_document(const IW::Image& image, DocumentResult& result)
+		{
+			try
+			{
+				to_document(image, result);
+			}
+			catch (const std::bad_alloc&)
+			{
+				result.document = {};
+				result.error = ImageError::resource_limit;
+				result.message = L"Not enough memory to decode the image.";
+			}
+		}
 	}
 
-	FrameView Document::frame(const std::size_t index) const
-	{
-		if (index >= frame_count()) throw std::out_of_range("Image frame index.");
-		return frame_view(impl_->image.Pages[index]);
-	}
-
-	FrameView image_frame(const IW::Image& image, const std::size_t index)
+	libfiles::pixel_rows image_rows(const IW::Image& image, const std::size_t index)
 	{
 		if (index >= image.Pages.size()) throw std::out_of_range("Image frame index.");
-		return frame_view(image.Pages[index]);
-	}
-
-	static FrameView frame_view(const IW::Page& page)
-	{
-		const auto rect = page.GetPageRect();
-		const auto format = page.GetPixelFormat();
-		const auto paletteSize = static_cast<size_t>(format.NumberOfPaletteEntries()) * sizeof(COLORREF);
-		return {rect.left, rect.top, page.GetWidth(), page.GetHeight(), page.GetStorageWidth(),
-			static_cast<PixelStorage>(format._pf), true,
-			{page.GetBitmap(), static_cast<size_t>(page.GetStorageWidth()) * page.GetHeight()},
-			{reinterpret_cast<const std::uint8_t*>(page.GetPalette()), paletteSize},
-			static_cast<std::uint32_t>(page.GetFlags()), static_cast<std::uint32_t>(page.GetTimeDelay()),
-			static_cast<std::uint32_t>(page.GetDisposalMethod()), static_cast<std::uint32_t>(page.GetTransparent())};
-	}
-
-	MetadataView Document::metadata(const std::size_t index) const
-	{
-		if (index >= metadata_count()) throw std::out_of_range("Image metadata index.");
-		const auto& blob = impl_->image.Blobs[index];
-		auto kind = blob.IsImageData() ? MetadataKind::encodedImage : MetadataKind::opaque;
-		switch (blob.GetType())
-		{
-		case IW::MetaDataTypes::PROFILE_EXIF: kind = MetadataKind::exif; break;
-		case IW::MetaDataTypes::PROFILE_IPTC: kind = MetadataKind::iptc; break;
-		case IW::MetaDataTypes::PROFILE_XMP: kind = MetadataKind::xmp; break;
-		case IW::MetaDataTypes::PROFILE_ICC: kind = MetadataKind::icc; break;
-		case IW::MetaDataTypes::PROFILE_SOURCE_ICC: kind = MetadataKind::sourceProfile; break;
-		default: break;
-		}
-		return {blob.GetType(), {blob.IsEmpty() ? nullptr : blob.GetData(), blob.GetDataSize()}, kind};
-	}
-
-	PixelImage Document::frame_pixels(const std::size_t index) const
-	{
-		if (index >= frame_count()) throw std::out_of_range("Image frame index.");
-		return image_pixels(impl_->image, index);
+		return page_rows(image.Pages[index]);
 	}
 
 	PixelImage image_pixels(const IW::Image& image, const std::size_t index)
@@ -103,104 +136,31 @@ namespace iw::imaging
 		result.originalWidth = original.cx > 0 ? original.cx : result.width;
 		result.originalHeight = original.cy > 0 ? original.cy : result.height;
 		result.pixels.resize(static_cast<size_t>(result.width) * result.height);
-		copy_page_bgra(page, result.pixels, result.width, false);
+		libfiles::copy_bgra(page_rows(page), result.pixels, static_cast<size_t>(result.width), false);
 		return result;
 	}
 
-	void Document::copy_bgra(const std::span<std::uint32_t> destination, const std::size_t stride,
-	                         const bool bottomUp, const std::size_t index) const
+	PixelImage pixels_from_rows(const libfiles::pixel_rows& rows)
 	{
-		if (index >= frame_count()) throw std::out_of_range("Image frame index.");
-		copy_page_bgra(impl_->image.Pages[index], destination, stride, bottomUp);
-	}
-
-	static void copy_page_bgra(const IW::Page& page, const std::span<std::uint32_t> destination,
-	                          const std::size_t stride, const bool bottomUp)
-	{
-		copy_frame_bgra(frame_view(page), destination, stride, bottomUp);
-	}
-
-	void copy_frame_bgra(const FrameView& frame, const std::span<std::uint32_t> destination,
-	                     const std::size_t stride, const bool bottomUp)
-	{
-		using PF = IW::PixelFormat;
-		using Converter = void (*)(COLORREF*, const BYTE*, int, int);
-		constexpr Converter converters[] = {
-			&IW::PixelTraits<PF::PF1>::GetLine, &IW::PixelTraits<PF::PF2>::GetLine,
-			&IW::PixelTraits<PF::PF4>::GetLine, &IW::PixelTraits<PF::PF8>::GetLine,
-			&IW::PixelTraits<PF::PF8Alpha>::GetLine, &IW::PixelTraits<PF::PF8GrayScale>::GetLine,
-			&IW::PixelTraits<PF::PF555>::GetLine, &IW::PixelTraits<PF::PF565>::GetLine,
-			&IW::PixelTraits<PF::PF24>::GetLine, &IW::PixelTraits<PF::PF32>::GetLine,
-			&IW::PixelTraits<PF::PF32Alpha>::GetLine};
-		constexpr int bits[] = {1, 2, 4, 8, 8, 8, 16, 16, 24, 32, 32};
-		const auto format = static_cast<size_t>(frame.format);
-		const int width = frame.width;
-		const int height = frame.height;
-		if (width <= 0 || height <= 0 || format >= std::size(converters) || frame.stride <= 0 ||
-			frame.stride % 4 != 0 ||
-			static_cast<std::uint64_t>(frame.stride) < ((static_cast<std::uint64_t>(width) * bits[format] + 31) / 32) * 4 ||
-			static_cast<std::uint64_t>(frame.stride) * height > frame.pixels.size())
-			throw std::invalid_argument("Invalid source pixel storage.");
-		if (stride < static_cast<size_t>(width) ||
-			stride > (std::numeric_limits<size_t>::max)() / static_cast<size_t>(height) ||
-			destination.size() < stride * static_cast<size_t>(height))
-			throw std::invalid_argument("Invalid destination pixel storage.");
-		const auto inputAddress = reinterpret_cast<std::uintptr_t>(frame.pixels.data());
-		const auto outputAddress = reinterpret_cast<std::uintptr_t>(destination.data());
-		if (inputAddress < outputAddress + destination.size_bytes() &&
-			outputAddress < inputAddress + frame.pixels.size())
-			throw std::invalid_argument("Source and destination pixel storage overlap.");
-		const bool indexed = format <= static_cast<size_t>(PixelStorage::indexed8Alpha);
-		const size_t paletteSize = frame.paletteBgra.size() / 4;
-		IW::CBuffer<COLORREF> row(width);
-		for (int y = 0; y < height; ++y)
-		{
-			const auto* input = frame.pixels.data() +
-				static_cast<size_t>(frame.bottomUp ? height - 1 - y : y) * frame.stride;
-			converters[format](row, input, 0, width);
-			auto* output = destination.data() + static_cast<size_t>(bottomUp ? height - 1 - y : y) * stride;
-			for (int x = 0; x < width; ++x)
-			{
-				COLORREF value = row[x];
-				if (indexed)
-				{
-					const auto paletteIndex = value & 0xff;
-					if (paletteIndex >= paletteSize)
-						throw std::invalid_argument("Image palette index is out of range.");
-					std::memcpy(&value, frame.paletteBgra.data() + paletteIndex * 4, 4);
-					if ((frame.flags & IW::PageFlags::HasTransparent) && paletteIndex == frame.transparent)
-						value &= 0x00ffffff;
-				}
-				else if (frame.format != PixelStorage::bgra32) value |= 0xff000000;
-				output[x] = value;
-			}
-		}
-	}
-
-	PixelImage pixels_from_frame(const FrameView& frame)
-	{
-		if (frame.width <= 0 || frame.height <= 0 ||
-			static_cast<std::uint64_t>(frame.width) * frame.height > IW::kMaxPageBytes / 4)
+		if (rows.width == 0 || rows.height == 0 ||
+			static_cast<std::uint64_t>(rows.width) * rows.height > IW::kMaxPageBytes / 4)
 			throw std::invalid_argument("Invalid image frame dimensions.");
 		PixelImage result;
-		result.width = result.originalWidth = frame.width;
-		result.height = result.originalHeight = frame.height;
-		result.pixels.resize(static_cast<size_t>(frame.width) * frame.height);
-		copy_frame_bgra(frame, result.pixels, frame.width, false);
+		result.width = result.originalWidth = static_cast<int>(rows.width);
+		result.height = result.originalHeight = static_cast<int>(rows.height);
+		result.pixels.resize(static_cast<size_t>(rows.width) * rows.height);
+		libfiles::copy_bgra(rows, result.pixels, rows.width, false);
 		return result;
 	}
 
-	Document Document::clone() const
+	PixelImage frame_pixels(const DocumentResult& result, const std::size_t index)
 	{
-		Document result;
-		if (impl_)
-		{
-			result.impl_ = std::make_unique<Impl>();
-			result.impl_->image = impl_->image.Clone();
-		}
-		return result;
+		if (index >= result.document.frames.size()) throw std::out_of_range("Image frame index.");
+		auto pixels = pixels_from_rows(result.document.frames[index].rows());
+		if (result.originalWidth > 0) pixels.originalWidth = result.originalWidth;
+		if (result.originalHeight > 0) pixels.originalHeight = result.originalHeight;
+		return pixels;
 	}
-
 	namespace
 	{
 		const ImageLoaders& loaders()
@@ -367,40 +327,48 @@ namespace iw::imaging
 			result.message = L"The encoded image is empty or exceeds the input limit.";
 			return result;
 		}
-		auto image = std::make_unique<Document::Impl>();
+		IW::Image image;
 		IW::StreamConstBlob input(bytes.data(), IW::FileSize(bytes.size()));
-		if (read_native(input, extension, image->image, options, result)) result.document.impl_ = std::move(image);
+		if (read_native(input, extension, image, options, result)) keep_document(image, result);
 		return result;
+	}
+
+	namespace
+	{
+		// The file as the native loaders read it into image: false, with the result saying why, when they do not.
+		bool read_native_file(const std::filesystem::path& path, const DecodeOptions& options, OperationResult& result,
+		                      IW::Image& image)
+		{
+			std::error_code error;
+			const auto size = std::filesystem::file_size(native_path(path), error);
+			IW::CFile input;
+			if (error || !input.OpenForRead(native_path(path).c_str()))
+			{
+				result.error = ImageError::read_failed;
+				result.message = L"The image file could not be opened.";
+				return false;
+			}
+			if (size > INT_MAX)
+			{
+				// A large file no native decoder claims is not an image over the input limit.
+				CString type(lowercase_extension(path).c_str());
+				const bool claimed = claim(type, input);
+				result.error = claimed ? ImageError::resource_limit : ImageError::unsupported;
+				result.message = claimed ? L"The image file exceeds the input limit."
+					: L"No native-storage decoder recognizes this image.";
+				return false;
+			}
+			return read_native(input, lowercase_extension(path), image, options, result);
+		}
 	}
 
 	DocumentResult decode_document(const std::filesystem::path& path, const DecodeOptions& options)
 	{
 		DocumentResult result;
-		std::error_code error;
-		const auto size = std::filesystem::file_size(native_path(path), error);
-		IW::CFile input;
-		if (error || !input.OpenForRead(native_path(path).c_str()))
-		{
-			result.error = ImageError::read_failed;
-			result.message = L"The image file could not be opened.";
-			return result;
-		}
-		if (size > INT_MAX)
-		{
-			// A large file no native decoder claims is not an image over the input limit.
-			CString type(lowercase_extension(path).c_str());
-			const bool claimed = claim(type, input);
-			result.error = claimed ? ImageError::resource_limit : ImageError::unsupported;
-			result.message = claimed ? L"The image file exceeds the input limit."
-				: L"No native-storage decoder recognizes this image.";
-			return result;
-		}
-		auto image = std::make_unique<Document::Impl>();
-		if (read_native(input, lowercase_extension(path), image->image, options, result))
-			result.document.impl_ = std::move(image);
+		IW::Image image;
+		if (read_native_file(path, options, result, image)) keep_document(image, result);
 		return result;
 	}
-
 	bool native_supports_extension(const std::wstring_view extension)
 	{
 		if (extension.size() > INT_MAX) return false;
@@ -415,16 +383,57 @@ namespace iw::imaging
 		return format && (format->GetFlags() & IW::ImageLoaderFlags::THUMBONLY) != 0;
 	}
 
+	namespace
+	{
+		// The first frame as ImageWalker shows it, straight from the image the loaders read: a display
+		// decode has no use for a document's own copy of the rows.
+		bool show_first_frame(const IW::Image& image, const DecodeOptions& options, DecodeResult& result)
+		{
+			const auto& page = image.Pages.front();
+			if (static_cast<std::uint64_t>(page.GetWidth()) * page.GetHeight() > options.maximumBytes / 4)
+			{
+				result.error = ImageError::resource_limit;
+				result.message = L"The image exceeds the decoded-memory limit.";
+				return false;
+			}
+			result.image = image_pixels(image);
+			result.orientation = image.GetCameraSettings().Orientation;
+			return true;
+		}
+	}
+
+	DecodeResult decode_native(const std::span<const std::uint8_t> bytes, const std::wstring_view extension,
+	                           const DecodeOptions& options)
+	{
+		DecodeResult result;
+		if (bytes.empty() || bytes.size() > INT_MAX)
+		{
+			result.error = ImageError::invalid_input;
+			result.message = L"The encoded image is empty or exceeds the input limit.";
+			return result;
+		}
+		IW::Image image;
+		IW::StreamConstBlob input(bytes.data(), IW::FileSize(bytes.size()));
+		if (read_native(input, extension, image, options, result)) show_first_frame(image, options, result);
+		return result;
+	}
+
 	DecodeResult decode_native(const std::filesystem::path& path, const DecodeOptions& options)
 	{
-		auto document = decode_document(path, options);
 		DecodeResult result;
-		static_cast<OperationResult&>(result) = std::move(static_cast<OperationResult&>(document));
-		if (result)
-		{
-			result.image = document.document.frame_pixels();
+		IW::Image image;
+		if (read_native_file(path, options, result, image) && show_first_frame(image, options, result))
 			result.reduced = result.image.width != result.image.originalWidth || result.image.height != result.image.originalHeight;
-		}
 		return result;
+	}
+
+	bool native_dimensions(const std::filesystem::path& path, int& width, int& height)
+	{
+		DecodeResult result;
+		IW::Image image;
+		if (!read_native_file(path, {}, result, image)) return false;
+		width = image.Pages.front().GetWidth();
+		height = image.Pages.front().GetHeight();
+		return true;
 	}
 }

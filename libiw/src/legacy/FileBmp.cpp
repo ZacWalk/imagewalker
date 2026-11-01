@@ -154,6 +154,15 @@ bool CLoadBmp::Write(const CString& strType, IW::IStreamOut* pStreamOut, const I
 	CString str;
 	str.Format(IW::Text::ENCODING_FMT, static_cast<LPCTSTR>(GetTitle()));
 	pStatus->SetStatusMessage(str);
+	if (imageIn.IsEmpty() || pStatus->QueryCancel()) return false;
+	const auto write = [&](const void* bytes, DWORD count)
+	{
+		if (!count) return true;
+		DWORD written{};
+		if (pStreamOut->Write(bytes, count, &written) && written == count) return true;
+		pStatus->SetError(L"The BMP output could not be written completely.");
+		return false;
+	};
 
 	BITMAPFILEHEADER hdr;
 
@@ -162,10 +171,15 @@ bool CLoadBmp::Write(const CString& strType, IW::IStreamOut* pStreamOut, const I
 
 	int cx = page.GetWidth();
 	int cy = page.GetHeight();
-	int nPaletteEntries = pf.NumberOfPaletteEntries();
 	int nStorageWidth = IW::CalcStorageWidth(cx, pf);
 	int nSizeImage = nStorageWidth * cy;
-	int nSizeHeader = sizeof(BITMAPINFOHEADER) + nPaletteEntries * sizeof(RGBQUAD);
+	IW::CImageBitmapInfoHeader info(page);
+	auto* bitmapInfo = static_cast<LPBITMAPINFO>(info);
+	auto& bmh = bitmapInfo->bmiHeader;
+	if (pf == IW::PixelFormat::PF32 || pf == IW::PixelFormat::PF32Alpha)
+		bmh.biCompression = BI_RGB;
+	const int nColors = bmh.biCompression == BI_BITFIELDS ? 3 : static_cast<int>(bmh.biClrUsed);
+	const int nSizeHeader = sizeof(BITMAPINFOHEADER) + nColors * sizeof(RGBQUAD);
 
 
 	// Fill in the fields of the file header
@@ -175,27 +189,11 @@ bool CLoadBmp::Write(const CString& strType, IW::IStreamOut* pStreamOut, const I
 	hdr.bfReserved2 = 0;
 	hdr.bfOffBits = static_cast<DWORD>(sizeof(BITMAPFILEHEADER) + nSizeHeader);
 
-	pStreamOut->Write(&hdr, sizeof(BITMAPFILEHEADER), nullptr);
+	if (!write(&hdr, sizeof(BITMAPFILEHEADER))) return false;
 
-	// Fill in the header info.
-	BITMAPINFOHEADER bmh;
-	bmh.biSize = sizeof(BITMAPINFOHEADER);
-	bmh.biWidth = cx;
-	bmh.biHeight = cy;
-	bmh.biPlanes = 1;
-	bmh.biBitCount = static_cast<WORD>(pf.ToBpp());
-	bmh.biCompression = BI_RGB;
-	bmh.biSizeImage = nSizeImage;
 	bmh.biXPelsPerMeter = imageIn.GetXPelsPerMeter();
 	bmh.biYPelsPerMeter = imageIn.GetYPelsPerMeter();
-	bmh.biClrUsed = nPaletteEntries;
-	bmh.biClrImportant = 0;
-
-	// this struct already DWORD aligned!
-	// Write the DIB header and the bits
-
-	pStreamOut->Write(&bmh, sizeof(bmh), nullptr);
-	pStreamOut->Write(page.GetPalette(), nPaletteEntries * sizeof(RGBQUAD), nullptr);
+	if (!write(bitmapInfo, nSizeHeader)) return false;
 
 	if (pf == IW::PixelFormat::PF32Alpha || pf == IW::PixelFormat::PF32)
 	{
@@ -210,19 +208,21 @@ bool CLoadBmp::Write(const CString& strType, IW::IStreamOut* pStreamOut, const I
 
 		for (int y = 0; y < cy; ++y)
 		{
+			if (pStatus->QueryCancel()) return false;
 			if (bAlpha)
 				pLock->GetLine(pLine, cy - (y + 1), 0, cx);
 			else
 				pLock->RenderLine(pLine, cy - (y + 1), 0, cx);
 
-			pStreamOut->Write(pLine, nStorageWidth, nullptr);
+			if (!write(pLine, nStorageWidth)) return false;
 		}
 	}
 	else
 	{
 		for (int y = 0; y < cy; ++y)
 		{
-			pStreamOut->Write(page.GetBitmapLine(cy - (y + 1)), nStorageWidth, nullptr);
+			if (pStatus->QueryCancel() ||
+				!write(page.GetBitmapLine(cy - (y + 1)), nStorageWidth)) return false;
 		}
 	}
 

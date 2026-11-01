@@ -12,7 +12,7 @@
 
 // Context IDs for ImageWalker.chm, shared by the four WTL apps.
 //
-// One help file serves ArtMate 1.0 and ImageWalker 2.0, 2.2 and 2.3, so these
+// One help file serves ImageWalker 1.0, 2.0, 2.2 and 2.3, so these
 // numbers must agree across those trees. The historical versions had conflicting
 // IDs; this shared table keeps each topic consistent in the current builds.
 //
@@ -23,7 +23,7 @@
 // resolve to the right topic or to nothing, never to the wrong one.
 
 /* General topics */
-#define HELP_ARTMATE          131080
+#define HELP_IMAGEWALKER10    131080
 #define HELP_VERSIONS         131081
 #define HELP_VIEW_OPTIONS     131082
 #define HELP_USER_INTERFACE   131083

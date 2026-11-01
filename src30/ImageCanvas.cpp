@@ -535,7 +535,9 @@ namespace iw
 
 	void ImageCanvas::set_items(std::vector<files::FolderItem> items, const size_t totalItemCount)
 	{
-		const auto selectedPaths = selected_paths();
+		std::vector<std::filesystem::path> selectedPaths;
+		for (const int index : selection_.selected())
+			if (index >= 0 && static_cast<size_t>(index) < files_.size()) selectedPaths.push_back(files_[index]);
 		const auto path_at = [this](const int index)
 		{
 			return index >= 0 && index < static_cast<int>(files_.size()) ? files_[index] : std::filesystem::path{};
@@ -2464,8 +2466,9 @@ namespace iw
 	std::vector<std::filesystem::path> ImageCanvas::selected_paths() const
 	{
 		std::vector<std::filesystem::path> result;
-		result.reserve(selection_.size());
-		for (const int index : selection_.selected())
+		const auto& selected = active_selection();
+		result.reserve(selected.size());
+		for (const int index : selected.selected())
 			if (index >= 0 && index < static_cast<int>(files_.size())) result.push_back(files_[index]);
 		return result;
 	}

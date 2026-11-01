@@ -38,14 +38,13 @@ using read_struct = struct
 
 void CLoadPng::read_data(png_struct* png_ptr, png_byte* data, png_size_t length)
 {
+	if (!length) return;
 	USES_CONVERSION;
 
 	auto pStreamIn = static_cast<IW::IStreamIn*>(png_get_io_ptr(png_ptr));
 
-	DWORD dwRead;
-	pStreamIn->Read(data, static_cast<DWORD>(length), &dwRead);
-
-	if (dwRead != length)
+	DWORD dwRead{};
+	if (length > MAXDWORD || !pStreamIn->Read(data, static_cast<DWORD>(length), &dwRead) || dwRead != length)
 		png_error(png_ptr, CT2A(CString(IW::Text::FAILEDTODECODEIMAGEFILE)));
 }
 
@@ -62,13 +61,12 @@ void CLoadPng::user_warning_fn(png_structp png_ptr, png_const_charp warning_msg)
 
 void CLoadPng::write_data(png_struct* png_ptr, png_byte* data, png_size_t length)
 {
+	if (!length) return;
 	USES_CONVERSION;
 	auto pStreamOut = static_cast<IW::IStreamOut*>(png_get_io_ptr(png_ptr));
 
-	DWORD dwWrite;
-	pStreamOut->Write(data, static_cast<DWORD>(length), &dwWrite);
-
-	if (dwWrite != length)
+	DWORD dwWrite{};
+	if (length > MAXDWORD || !pStreamOut->Write(data, static_cast<DWORD>(length), &dwWrite) || dwWrite != length)
 		png_error(png_ptr, CT2A(CString(IW::Text::FAILEDTOENCODE)));
 }
 
@@ -383,10 +381,21 @@ bool CLoadPng::WriteTranscode(IW::IStreamOut* pStreamOut, IW::IStreamIn* pStream
 	{
 		for (y = 0; y < height; y++)
 		{
+			if (pStatus->QueryCancel())
+			{
+				pStatus->SetError(CString(IW::Text::CANCELED));
+				return false;
+			}
 			png_read_rows(m_png_ptr, &row_buf, nullptr, 1);
 
 			png_write_rows(write_ptr, &row_buf, 1);
+			pStatus->Progress(static_cast<int>(y + 1), static_cast<int>(height));
 		}
+	}
+	if (pStatus->QueryCancel())
+	{
+		pStatus->SetError(CString(IW::Text::CANCELED));
+		return false;
 	}
 
 	png_free_data(m_png_ptr, m_info_ptr, PNG_FREE_UNKN, -1);
@@ -432,10 +441,12 @@ bool CLoadPng::WriteTranscode(IW::IStreamOut* pStreamOut, IW::IStreamIn* pStream
 }
 
 bool CLoadPng::Write(const CString& strType, IW::IStreamOut* pStreamOut, const IW::Image& imageIn, const IW::CodecSettings& settings, IW::IStatus* pStatus)
+try
 {
 	CString str;
 	str.Format(IW::Text::ENCODING_FMT, static_cast<LPCTSTR>(GetTitle()));
 	pStatus->SetStatusMessage(str);
+	if (imageIn.IsEmpty() || pStatus->QueryCancel()) return false;
 
 	if (imageIn.HasMetaData(IW::MetaDataTypes::PNG_IMAGE))
 	{
@@ -459,6 +470,12 @@ bool CLoadPng::Write(const CString& strType, IW::IStreamOut* pStreamOut, const I
 		png_destroy_write_struct(&png_ptr, nullptr);
 		return FALSE;
 	}
+	struct Guard
+	{
+		png_structp& png;
+		png_infop& info;
+		~Guard() { png_destroy_write_struct(&png, &info); }
+	} guard{png_ptr, info_ptr};
 
 	// Palette holders!
 
@@ -520,11 +537,13 @@ bool CLoadPng::Write(const CString& strType, IW::IStreamOut* pStreamOut, const I
 		// This used to store 255 minus the palette alpha, so an ordinary opaque
 		// palette was written out fully transparent. Only a format that carries
 		// alpha has anything meaningful in that byte, so only it gets a tRNS.
-		if (pf.HasAlpha())
+		if (pf.HasAlpha() || (pageIn.GetFlags() & IW::PageFlags::HasTransparent))
 		{
 			for (int i = 0; i < nColors; i++)
 			{
-				trans[i] = static_cast<BYTE>(pRgb[i] >> 24);
+				trans[i] = pf.HasAlpha() ? static_cast<BYTE>(pRgb[i] >> 24) : 255;
+				if ((pageIn.GetFlags() & IW::PageFlags::HasTransparent) &&
+					static_cast<DWORD>(i) == pageIn.GetTransparent()) trans[i] = 0;
 			}
 
 			png_set_tRNS(png_ptr, info_ptr, trans, nColors, nullptr);
@@ -563,6 +582,7 @@ bool CLoadPng::Write(const CString& strType, IW::IStreamOut* pStreamOut, const I
 			if (pStatus->QueryCancel())
 			{
 				pStatus->SetError(CString(IW::Text::CANCELED));
+				return false;
 			}
 
 			pStatus->Progress(y, pageIn.GetHeight());
@@ -584,6 +604,7 @@ bool CLoadPng::Write(const CString& strType, IW::IStreamOut* pStreamOut, const I
 			if (pStatus->QueryCancel())
 			{
 				pStatus->SetError(CString(IW::Text::CANCELED));
+				return false;
 			}
 
 			pStatus->Progress(i, pageIn.GetHeight());
@@ -614,10 +635,17 @@ bool CLoadPng::Write(const CString& strType, IW::IStreamOut* pStreamOut, const I
 			if (pStatus->QueryCancel())
 			{
 				pStatus->SetError(CString(IW::Text::CANCELED));
+				return false;
 			}
 
 			pStatus->Progress(y, pageIn.GetHeight());
 		}
+	}
+
+	if (pStatus->QueryCancel())
+	{
+		pStatus->SetError(CString(IW::Text::CANCELED));
+		return false;
 	}
 
 	// Save XMP
@@ -629,10 +657,12 @@ bool CLoadPng::Write(const CString& strType, IW::IStreamOut* pStreamOut, const I
 	// write the rest of the file
 	png_write_end(png_ptr, info_ptr);
 
-	// clean up after the write, and free any memory allocated
-	png_destroy_write_struct(&png_ptr, &info_ptr);
-
 	return TRUE;
+}
+catch (const std::exception& error)
+{
+	pStatus->SetError(CString(error.what()));
+	return false;
 }
 
 #endif // COMPILE_PNG

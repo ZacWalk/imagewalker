@@ -5,20 +5,20 @@ made by each release over its predecessor. See [versions.md](versions.md) for
 release dates and [known-issues.md](known-issues.md) for limitations and
 workarounds.
 
-## ArtMate 1.0
+## ImageWalker 1.0
 
-The original 1998 application, before the ImageWalker name:
+The original 1998 application:
 
 - Thumbnail and detail browsing beside an image preview.
 - Fit-to-window and fixed zoom, panning and multi-image collages.
 - Clipboard copy and individually toggled address, tool and status bars.
 - BMP, GIF, JPEG, PCX, PNG and TIFF viewing.
 
-ArtMate is read-only, without editing, batch tools, printing or search.
+ImageWalker 1.0 is read-only, without editing, batch tools, printing or search.
 
 ## ImageWalker 2.0
 
-The 2001 release introduced the ImageWalker name and added:
+The 2001 release added:
 
 - Image descriptions.
 - Print preview.

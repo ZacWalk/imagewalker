@@ -12,7 +12,7 @@ IW::CSearchNode::CSearchNode() : _se(seAND), _str(g_szEmptyString)
 }
 
 IW::CSearchNode::CSearchNode(DWORD se, const CString& str, bool bNot) :
-	_se(se)
+	_se(se | (bNot ? seNOT : seAND))
 {
 	SetText(str);
 }
@@ -50,6 +50,7 @@ void IW::CSearchNode::UpdateMatchPattern()
 
 bool IW::CSearchNode::ParseFromString(const CString& strPrefix, const CString& strText)
 {
+	_se = seAND;
 	TCHAR szSeps[] = _T(" ");
 	int curPos = 0;
 	CString token = strPrefix.Tokenize(szSeps, curPos);
@@ -67,7 +68,8 @@ bool IW::CSearchNode::ParseFromString(const CString& strPrefix, const CString& s
 			_se |= seOR;
 		}
 		else if (_tcsicmp(token, App.LoadString(IDS_NOT)) == 0 ||
-			_tcsicmp(token, _T("-")) == 0)
+			_tcsicmp(token, _T("-")) == 0 ||
+			_tcsicmp(token, _T("!")) == 0)
 		{
 			_se |= seNOT;
 		}
@@ -101,6 +103,9 @@ void IW::CSearchNodeList::operator=(const CSearchNodeList& ss)
 
 void IW::CSearchNodeList::Copy(const CSearchNodeList& ss)
 {
+	if (&ss == this)
+		return;
+
 	_children.RemoveAll();
 
 	for (int i = 0; i < ss._children.GetSize(); i++)

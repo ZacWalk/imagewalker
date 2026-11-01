@@ -5,6 +5,7 @@
 // you happen to run.
 
 #include "help_file.h"
+#include "util_geometry.h"
 #include "iw/appinfo.h"
 #include "iw/cursorautohide.h"
 #include "iw/inifile.h"
@@ -33,6 +34,19 @@ IW_TEST(HelpIsEmbeddedAndWrittenOutUnmarked)
 	IW_CHECK(memcmp(signature, "ITSF", sizeof(signature)) == 0);
 	IW_CHECK(::GetFileAttributesW((path + L":Zone.Identifier").c_str()) == INVALID_FILE_ATTRIBUTES);
 	IW_CHECK(iw::help::prepare_embedded() == path);
+}
+
+IW_TEST(FloatingRectangleIntersectionUsesOnlyTheSharedArea)
+{
+	iw::rectd result;
+	IW_CHECK(iw::rectd::intersect(result, {0, 0, 10, 10}, {5, 6, 10, 10}));
+	IW_CHECK(result == iw::rectd(5, 6, 5, 4));
+	IW_CHECK(!iw::rectd::intersect(result, {0, 0, 10, 10}, {12, 14, 3, 3}));
+	IW_CHECK(result.is_empty());
+	IW_CHECK(result.Width >= 0 && result.Height >= 0);
+	IW_CHECK(!iw::rectd::intersect(result, {0, 0, 10, 10}, {10, 2, 4, 4}));
+	IW_CHECK(result.is_empty());
+	IW_CHECK(iw::rectd(0, 0, -1, 4).is_empty());
 }
 
 IW_TEST(CursorAutoHideStaysInsideItsOwnWindow)
@@ -238,4 +252,63 @@ IW_TEST(DispatchQueueSkipsItemsWhoseOwnerHasGone)
 
 	IW_CHECK_EQ(orphan->completed, 0);
 	IW_CHECK_EQ(ownerless->completed, 1);
+}
+
+IW_TEST(WorkerExceptionsAreLoggedAndDoNotRetireTheWorker)
+{
+	struct FailedItem : CountingItem
+	{
+		void Work() override { throw 17; }
+	};
+	struct SignalingItem : CountingItem
+	{
+		HANDLE finished;
+		explicit SignalingItem(HANDLE event) : finished(event) {}
+		void Work() override
+		{
+			CountingItem::Work();
+			::SetEvent(finished);
+		}
+	};
+	IW::UiQueue().DrainAll();
+	const long errorsBefore = IW::Logging::Detail::Get().errors;
+	const HANDLE finished = ::CreateEvent(nullptr, TRUE, FALSE, nullptr);
+	IW_CHECK(finished != nullptr);
+	if (!finished) return;
+	auto failed = std::make_shared<FailedItem>();
+	auto next = std::make_shared<SignalingItem>(finished);
+	IW::CWorkerThread worker;
+	const bool started = worker.Start();
+	IW_CHECK(started);
+	if (started)
+	{
+		IW_CHECK(worker.Post(failed));
+		IW_CHECK(worker.Post(next));
+		IW_CHECK_EQ(::WaitForSingleObject(finished, 5000), static_cast<DWORD>(WAIT_OBJECT_0));
+	}
+	worker.Stop();
+	::CloseHandle(finished);
+	IW::UiQueue().DrainAll();
+	IW_CHECK_EQ(failed->completed, 1);
+	IW_CHECK_EQ(next->worked, 1);
+	IW_CHECK_EQ(next->completed, 1);
+	IW_CHECK_EQ(IW::Logging::Detail::Get().errors, errorsBefore + 1);
+}
+
+IW_TEST(DispatchExceptionsAreLoggedAndDoNotDropLaterCompletions)
+{
+	struct FailedItem : CountingItem
+	{
+		void Complete() override { throw 17; }
+	};
+	const long errorsBefore = IW::Logging::Detail::Get().errors;
+	IW::CDispatchQueue queue;
+	auto failed = std::make_shared<FailedItem>();
+	auto next = std::make_shared<CountingItem>();
+	IW_CHECK(queue.Push(failed));
+	IW_CHECK(queue.Push(next));
+	queue.DrainAll();
+	IW_CHECK_EQ(next->completed, 1);
+	IW_CHECK_EQ(queue.Size(), size_t{0});
+	IW_CHECK_EQ(IW::Logging::Detail::Get().errors, errorsBefore + 1);
 }

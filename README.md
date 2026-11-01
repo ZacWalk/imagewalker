@@ -15,7 +15,7 @@ interface, settings and workflows.
 
 | Directory | Application | Year | New in this release |
 |---|---|---:|---|
-| `src10` | ArtMate 1.0 | 1998 | Read-only thumbnail browser and viewer |
+| `src10` | ImageWalker 1.0 | 1998 | Read-only thumbnail browser and viewer |
 | `src20` | ImageWalker 2.0 | 2001 | Descriptions, print preview and slide shows |
 | `src22` | ImageWalker 2.2 | 2003 | Compare and Print modes, Filters and Actions views, six batch tools |
 | `src23` | ImageWalker 2.3 | 2006 | Image tagging, EXIF auto-rotation and the Resize Images wizard |
@@ -30,7 +30,6 @@ screen or feature limit.
 
 ## Screenshots
 
-All five applications are shown browsing the same original sample illustrations.
 Click an image to view it at full size.
 
 ### ImageWalker 3.0
@@ -39,9 +38,9 @@ Click an image to view it at full size.
 
 ### Historical versions
 
-| ArtMate 1.0 | ImageWalker 2.0 |
+| ImageWalker 1.0 | ImageWalker 2.0 |
 |---|---|
-| [![ArtMate 1.0 showing the sample gallery and image preview](docs/screenshots/artmate-1.0.png)](docs/screenshots/artmate-1.0.png) | [![ImageWalker 2.0 showing the sample gallery and image preview](docs/screenshots/imagewalker-2.0.png)](docs/screenshots/imagewalker-2.0.png) |
+| [![ImageWalker 1.0 showing the sample gallery and image preview](docs/screenshots/imagewalker-1.0.png)](docs/screenshots/imagewalker-1.0.png) | [![ImageWalker 2.0 showing the sample gallery and image preview](docs/screenshots/imagewalker-2.0.png)](docs/screenshots/imagewalker-2.0.png) |
 
 | ImageWalker 2.2 | ImageWalker 2.3 |
 |---|---|

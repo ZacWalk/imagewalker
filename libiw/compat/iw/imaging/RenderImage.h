@@ -1,11 +1,26 @@
 #pragma once
 
+#include "ImagingLock.h"
+
 template<class TCanvas, class TBlitter>
 class RenderImage
 {
 private:
 	TCanvas &_canvas;
 	TBlitter &_blitter;
+	struct SourceLock
+	{
+		const IW::Page& page;
+		const IW::IImageSurfaceLock* lock;
+		void GetLine(COLORREF* pixels, int y, int x, int count) const
+		{
+			IW::ReadStraightLine(page, lock, pixels, y, x, count);
+		}
+		void RenderLine(COLORREF* pixels, int y, int x, int count) const
+		{
+			lock->RenderLine(pixels, y, x, count);
+		}
+	};
 
 public:
 
@@ -19,6 +34,7 @@ public:
 		const int nHeightIn = rectSrcIn.bottom - rectSrcIn.top;
 		const int nWidthOut = rectDstIn.right - rectDstIn.left;
 		const int nHeightOut = rectDstIn.bottom - rectDstIn.top;
+		if (nWidthIn <= 0 || nHeightIn <= 0 || nWidthOut <= 0 || nHeightOut <= 0) return;
 
 		CRect rDst, rSrc, rcClip(_canvas.GetClipRect());
 
@@ -41,11 +57,11 @@ public:
 		const CSize sizeSrc(rSrc.Size());
 
 		// Need Blend?
-		IW::PixelFormat pf = page.GetPixelFormat();
+		bool bNeedBlend = IW::HasSourceAlpha(page);
 
-		bool bNeedBlend = page.GetFlags() & IW::PageFlags::HasTransparent || pf.HasAlpha();
-
-		IW::ConstIImageSurfaceLockPtr pLock = page.GetSurfaceLock();
+		IW::ConstIImageSurfaceLockPtr lock = page.GetSurfaceLock();
+		const SourceLock source{page, lock};
+		const auto* pLock = &source;
 
 		// Do we need to scale?
 		if (nWidthOut == nWidthIn && nHeightOut == nHeightIn)
@@ -66,12 +82,70 @@ public:
 			}
 		else
 		{
-			DrawImageScaleDown(rectDstIn, nWidthIn, nWidthOut, nHeightIn, nHeightOut, bNeedBlend, pLock, sizeDst);
+			DrawImageScaleDown(rectDstIn, rectSrcIn, nWidthIn, nWidthOut, nHeightIn, nHeightOut, bNeedBlend, pLock, sizeDst);
 		}
 	}
 
 private:
-	void DrawImageNoScaleBlend(CRect& rDst, CRect& rSrc, const CSize& sizeSrc, const IW::IImageSurfaceLock* pLock)
+	// Display blitters assume opaque rows; keep alpha sampling premultiplied until source-over.
+	void CompositeLine(COLORREF* destination, const COLORREF* source, int count)
+	{
+		constexpr bool destinationAlpha = []
+		{
+			if constexpr (requires { TCanvas::storesAlpha; }) return TCanvas::storesAlpha;
+			else return false;
+		}();
+		for (int x = 0; x < count; ++x)
+		{
+			const auto pixel = source[x];
+			const unsigned alpha = IW::GetA(pixel);
+			if (!alpha) continue;
+			if (alpha == 255) { destination[x] = pixel; continue; }
+			const auto background = destination[x];
+			const unsigned backgroundAlpha = destinationAlpha ? IW::GetA(background) : 255;
+			const unsigned backgroundWeight = backgroundAlpha * (255 - alpha);
+			const unsigned denominator = alpha * 255 + backgroundWeight;
+			const auto channel = [&](int shift)
+			{
+				return (((pixel >> shift & 255) * alpha * 255) +
+					((background >> shift & 255) * backgroundWeight) + denominator / 2) / denominator;
+			};
+			destination[x] = IW::RGBA(channel(0), channel(8), channel(16), (denominator + 127) / 255);
+		}
+	}
+
+	static void PremultiplyLine(COLORREF* pixels, int count)
+	{
+		for (int x = 0; x < count; ++x) pixels[x] = IW::PremultiplyStraight(pixels[x]);
+	}
+
+	static COLORREF InterpolateAlpha(COLORREF first, COLORREF second, unsigned firstWeight)
+	{
+		firstWeight = (std::min)(firstWeight, 255u);
+		const unsigned secondWeight = 255 - firstWeight;
+		COLORREF result{};
+		for (int shift = 0; shift < 32; shift += 8)
+			result |= (((first >> shift & 255) * firstWeight +
+				(second >> shift & 255) * secondWeight + 127) / 255) << shift;
+		return result;
+	}
+
+	void CompositeSums(COLORREF* destination, const DWORD* sums, int count)
+	{
+		using Sum = typename TBlitter::SUM;
+		const auto* rows = reinterpret_cast<const Sum*>(sums);
+		for (int x = 0; x < count; ++x)
+		{
+			const auto& sum = rows[x];
+			if (!sum.cr) continue;
+			const auto pixel = IW::UnpremultiplyStraight(IW::RGBA(
+				(sum.r + sum.cr / 2) / sum.cr, (sum.g + sum.cr / 2) / sum.cr,
+				(sum.b + sum.cr / 2) / sum.cr, (sum.a + sum.cr / 2) / sum.cr));
+			CompositeLine(destination + x, &pixel, 1);
+		}
+	}
+
+	void DrawImageNoScaleBlend(CRect& rDst, CRect& rSrc, const CSize& sizeSrc, const SourceLock* pLock)
 	{
 		IW::CBuffer<COLORREF> pLineIn(sizeSrc.cx + 1);
 		IW::CBuffer<COLORREF> pLineOut(sizeSrc.cx + 1);
@@ -84,12 +158,12 @@ private:
 			// GetLine, not RenderLine: RenderLine consumes the alpha channel, so
 			// RenderAlphaLine would see 0 for every pixel.
 			pLock->GetLine(pLineIn, y + rSrc.top, rSrc.left, sizeSrc.cx);
-			_blitter.RenderAlphaLine(pLineOut, pLineIn, sizeSrc.cx);
+			CompositeLine(pLineOut, pLineIn, sizeSrc.cx);
 			_canvas.SetLine(pLineOut, y + rDst.top, rDst.left, sizeSrc.cx);
 		}
 	}
 
-	void DrawImageNoScale(CRect& rDst, CRect& rSrc, const CSize& sizeSrc, const IW::IImageSurfaceLock* pLock)
+	void DrawImageNoScale(CRect& rDst, CRect& rSrc, const CSize& sizeSrc, const SourceLock* pLock)
 	{
 		IW::CBuffer<COLORREF> pLineBuffer(sizeSrc.cx + 1);
 
@@ -100,7 +174,7 @@ private:
 		}
 	}
 
-	void DrawImageScaleUp(CRect& rDst, CRect& rSrc, const int nSrcTop, const int nOffsetX, const int nWidthIn, const int nWidthOut, const int nOffsetY, const int nHeightIn, const int nHeightOut, bool bNeedBlend, const CSize& sizeSrc, const IW::IImageSurfaceLock* pLock, const CSize& sizeDst)
+	void DrawImageScaleUp(CRect& rDst, CRect& rSrc, const int nSrcTop, const int nOffsetX, const int nWidthIn, const int nWidthOut, const int nOffsetY, const int nHeightIn, const int nHeightOut, bool bNeedBlend, const CSize& sizeSrc, const SourceLock* pLock, const CSize& sizeDst)
 	{
 		// Figure out x position
 		int xOut = rDst.top - nOffsetX;
@@ -126,8 +200,7 @@ private:
 		}
 
 		// Do the Y
-		int nSumSize = sizeDst.cx * sizeof(DWORD) * 4;
-		IW::CBuffer<DWORD> pSum(sizeDst.cx * 4);
+		IW::CBuffer<DWORD> pSum(static_cast<size_t>(sizeDst.cx) * 4);
 
 		IW::CBuffer<COLORREF> pLineIn(sizeSrc.cx + 1);
 		IW::CBuffer<COLORREF> pLineBuffer(sizeDst.cx + 1);
@@ -139,7 +212,7 @@ private:
 
 		while (yy < nHeightIn)
 		{
-			IW::MemZero(pSum, nSumSize);
+			std::fill_n(pSum.data(), pSum.size(), DWORD{0});
 
 			ySum += nHeightIn;
 			nCount = 0;
@@ -152,7 +225,10 @@ private:
 					// includes that plus the clip offset, so adding it double-counts.
 					// GetLine preserves alpha for the blend below.
 					if (bNeedBlend)
+					{
 						pLock->GetLine(pLineIn, yy + nSrcTop, rSrc.left, sizeSrc.cx);
+						PremultiplyLine(pLineIn, sizeSrc.cx);
+					}
 					else
 						pLock->RenderLine(pLineIn, yy + nSrcTop, rSrc.left, sizeSrc.cx);
 
@@ -184,7 +260,8 @@ private:
 					if (bNeedBlend)
 						_canvas.GetLine(pLineBuffer, yOut, rDst.left, sizeDst.cx);
 
-					_blitter.RenderScaleDownLine(pLineBuffer, pSum, sizeDst.cx);
+					if (bNeedBlend) CompositeSums(pLineBuffer, pSum, sizeDst.cx);
+					else _blitter.RenderScaleDownLine(pLineBuffer, pSum, sizeDst.cx);
 					_canvas.SetLine(pLineBuffer, yOut, rDst.left, sizeDst.cx);
 				}
 			}
@@ -201,7 +278,7 @@ private:
 		}
 	}
 
-	void DrawImageScaleDown(const CRect& rectDstIn, const int nWidthIn, const int nWidthOut, const int nHeightIn, const int nHeightOut, bool bNeedBlend, const IW::IImageSurfaceLock* pLock, const CSize& sizeDst)
+	void DrawImageScaleDown(const CRect& rectDstIn, const CRect& rectSrcIn, const int nWidthIn, const int nWidthOut, const int nHeightIn, const int nHeightOut, bool bNeedBlend, const SourceLock* pLock, const CSize& sizeDst)
 	{
 		CRect rcClip(_canvas.GetClipRect());
 		IW::CBuffer<COLORREF> pLineIn(sizeDst.cx + 1);
@@ -257,7 +334,9 @@ private:
 				int strength1 = MulDiv(nWidthOut - x, 255, nWidthOut);
 				int strength2 = 255 - strength1;
 
-				pLookupXDiff[xx] = MAKELONG(strength1, strength2);
+				const int alphaWeight = std::clamp(strength1, 0, 255);
+				pLookupXDiff[xx] = bNeedBlend ? MAKELONG(alphaWeight, 255 - alphaWeight) :
+					MAKELONG(strength1, strength2);
 				pLookupX[xx] = MAKELONG(xSrcLine, xSrcLineLast);
 
 				assert(nWidthIn > xSrcLine); // Check source overflow
@@ -298,12 +377,24 @@ private:
 				}
 			}
 
-			// Get the two starting rasta lines
-			pLock->RenderLine(pLineInNotScaled, ySrcLine, 0, nWidthIn);
-			_blitter.InterpolateLine(pLineInScaled1, pLineInNotScaled, pLookupX, pLookupXDiff, nIntersectWidth);
-
-			pLock->RenderLine(pLineInNotScaled, ySrcLineLast, 0, nWidthIn);
-			_blitter.InterpolateLine(pLineInScaled2, pLineInNotScaled, pLookupX, pLookupXDiff, nIntersectWidth);
+			const auto readRow = [&](COLORREF* target, int sourceY)
+			{
+				if (bNeedBlend)
+				{
+					pLock->GetLine(pLineInNotScaled, sourceY + rectSrcIn.top, rectSrcIn.left, nWidthIn);
+					PremultiplyLine(pLineInNotScaled, nWidthIn);
+					for (int x = 0; x < nIntersectWidth; ++x)
+						target[x] = InterpolateAlpha(pLineInNotScaled[LOWORD(pLookupX[x])],
+							pLineInNotScaled[HIWORD(pLookupX[x])], LOWORD(pLookupXDiff[x]));
+				}
+				else
+				{
+					pLock->RenderLine(pLineInNotScaled, sourceY + rectSrcIn.top, rectSrcIn.left, nWidthIn);
+					_blitter.InterpolateLine(target, pLineInNotScaled, pLookupX, pLookupXDiff, nIntersectWidth);
+				}
+			};
+			readRow(pLineInScaled1, ySrcLine);
+			readRow(pLineInScaled2, ySrcLineLast);
 
 			// Render the following lines
 			for(yy = 0; yy < nIntersectHeight; yy++)
@@ -318,8 +409,12 @@ private:
 
 				if (bNeedBlend)
 				{
-					_blitter.InterpolateLine(pLineIn, pLineInScaled1, pLineInScaled2, strength1, strength2, nIntersectWidth);
-					_blitter.RenderAlphaLine(pLineOut, pLineIn, nIntersectWidth);
+					const auto weight = static_cast<unsigned>(std::clamp(strength1, 0, 255));
+					for (int outputX = 0; outputX < nIntersectWidth; ++outputX)
+						pLineIn[outputX] = IW::UnpremultiplyStraight(
+							InterpolateAlpha(pLineInScaled1[outputX], pLineInScaled2[outputX], weight));
+					_canvas.GetLine(pLineOut, yy + rIntersect.top, rIntersect.left, nIntersectWidth);
+					CompositeLine(pLineOut, pLineIn, nIntersectWidth);
 				}
 				else
 				{
@@ -331,8 +426,7 @@ private:
 					y += nHeightOut;
 					if (nHeightIn-1 > ySrcLine) ySrcLine++;
 					IW::Swap(pLineInScaled1, pLineInScaled2);
-					pLock->RenderLine(pLineInNotScaled, ySrcLine, 0, nWidthIn);
-					_blitter.InterpolateLine(pLineInScaled1, pLineInNotScaled, pLookupX, pLookupXDiff, nIntersectWidth);
+					readRow(pLineInScaled1, ySrcLine);
 				}
 
 				_canvas.SetLine(pLineBuffer, yy + rIntersect.top, rIntersect.left, nIntersectWidth);

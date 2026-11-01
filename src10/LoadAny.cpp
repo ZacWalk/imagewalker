@@ -10,7 +10,7 @@ namespace
 	{
 		iw::imaging::DecodeOptions options;
 		options.thumbnail = thumbnail;
-		// ArtMate shows pixels as stored and is bounded by the 1 GiB native page ceiling.
+		// ImageWalker 1.0 shows stored pixels within the 1 GiB native page ceiling.
 		options.applyOrientation = false;
 		options.maximumBytes = std::uint64_t{1} << 30;
 		if (thumbnail)
@@ -26,55 +26,55 @@ namespace
 		return options;
 	}
 
-	bool import_image(CDib& dib, const iw::imaging::Document& image)
+	bool import_image(CDib& dib, const iw::imaging::DocumentResult& image)
 	{
-		const auto frame = image.frame(0);
-		using Format = iw::imaging::PixelStorage;
+		const auto& frame = image.document.frames.front();
+		using Format = libfiles::document_storage;
 		int bits = 32;
-		switch (frame.format)
+		switch (frame.storage)
 		{
 		case Format::indexed1: bits = 1; break;
 		case Format::indexed4: bits = 4; break;
 		case Format::indexed8:
-		case Format::indexed8Alpha:
+		case Format::indexed8_alpha:
 		case Format::gray8: bits = 8; break;
-		case Format::bgr24: bits = image.format_key() == L"TaggedImageFile" ? 32 : 24; break;
+		case Format::bgr24: bits = image.formatKey == L"TaggedImageFile" ? 32 : 24; break;
 		default: break;
 		}
-		if (!dib.Create(frame.width, frame.height, bits, FALSE))
+		const int width = static_cast<int>(frame.width);
+		const int height = static_cast<int>(frame.height);
+		if (!dib.Create(width, height, bits, FALSE))
 		{
 			IW::Logging::Error(_T("Unable to allocate the decoded DIB"));
 			return false;
 		}
 		if (bits == 32)
 		{
-			image.copy_bgra({reinterpret_cast<std::uint32_t*>(dib.GetBitmap()),
-				static_cast<size_t>(dib.m_nStorageWidth / 4) * frame.height}, dib.m_nStorageWidth / 4, true);
+			libfiles::copy_bgra(frame.rows(), {reinterpret_cast<std::uint32_t*>(dib.GetBitmap()),
+				static_cast<size_t>(dib.m_nStorageWidth / 4) * height}, dib.m_nStorageWidth / 4, true);
 		}
 		else
 		{
-			for (int y = 0; y < frame.height; ++y)
-				memcpy(dib.GetBitmap(y), frame.pixels.data() +
-					static_cast<size_t>(frame.bottomUp ? frame.height - 1 - y : y) * frame.stride, dib.m_nStorageWidth);
-			if (frame.format == Format::gray8)
+			for (int y = 0; y < height; ++y)
+				memcpy(dib.GetBitmap(y), frame.pixels.data() + static_cast<size_t>(y) * frame.stride, dib.m_nStorageWidth);
+			if (frame.storage == Format::gray8)
 			{
 				for (unsigned i = 0; i < 256; ++i)
 					dib.GetColor()[i] = {static_cast<BYTE>(i), static_cast<BYTE>(i), static_cast<BYTE>(i), 255};
 			}
 			else if (bits <= 8)
 			{
-				const auto count = (std::min)(size_t{1} << bits, frame.paletteBgra.size() / 4);
-				memcpy(dib.GetColor(), frame.paletteBgra.data(), count * sizeof(RGBQUAD));
-				if ((frame.flags & 0x04) && frame.transparent < count)
-					dib.GetColor()[frame.transparent].rgbReserved = 0;
+				const auto count = (std::min)(size_t{1} << bits, frame.palette.size());
+				memcpy(dib.GetColor(), frame.palette.data(), count * sizeof(RGBQUAD));
+				if (frame.transparent && *frame.transparent < count)
+					dib.GetColor()[*frame.transparent].rgbReserved = 0;
 			}
 		}
-		dib.m_sizeOriginal = CSize(image.original_width() > 0 ? image.original_width() : frame.width,
-			image.original_height() > 0 ? image.original_height() : frame.height);
-		dib.m_strInfo = CW2A(image.description().c_str());
+		dib.m_sizeOriginal = CSize(image.originalWidth > 0 ? image.originalWidth : width,
+			image.originalHeight > 0 ? image.originalHeight : height);
+		dib.m_strInfo = CW2A(image.description.c_str());
 		return true;
 	}
-
 	BOOL finish_decode(CDib& dib, const iw::imaging::DocumentResult& result)
 	{
 		for (const auto& warning : result.warnings) IW::Logging::Warn(_T("Image decode: %ls"), warning.c_str());
@@ -86,7 +86,7 @@ namespace
 				IW::Logging::Warn(_T("Image decode: %ls"), result.message.c_str());
 			return FALSE;
 		}
-		return import_image(dib, result.document) ? TRUE : FALSE;
+		return import_image(dib, result) ? TRUE : FALSE;
 	}
 }
 

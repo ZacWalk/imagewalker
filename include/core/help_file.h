@@ -8,7 +8,7 @@
 // restriction. The copy is named after its contents, so executables from different
 // releases never share one, and an existing copy is used only when its bytes match.
 //
-// Header-only and wide-character throughout, so MBCS ArtMate 1.0, the Unicode 2.x
+// Header-only and wide-character throughout, so MBCS ImageWalker 1.0, the Unicode 2.x
 // trees and ImageWalker 3.0 share it.
 
 #pragma once

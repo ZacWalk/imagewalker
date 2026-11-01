@@ -172,7 +172,7 @@ void MD5::finalize()
 	encode(digest, state, 16);
 
 	// Zeroize sensitive information
-	memset(buffer, 0, sizeof(*buffer));
+	memset(buffer, 0, sizeof(buffer));
 
 	finalized = 1;
 }
@@ -193,15 +193,14 @@ MD5::MD5(FILE* file)
 
 unsigned char* MD5::raw_digest()
 {
-	auto s = new uint1[16];
-
 	if (!finalized)
 	{
 		std::cerr << "MD5::raw_digest:  Can't get digest if you haven't " <<
 			"finalized the digest!" << std::endl;
-		return ((unsigned char*)"");
+		return nullptr;
 	}
 
+	auto s = new uint1[16];
 	memcpy(s, digest, 16);
 	return s;
 }

@@ -8,6 +8,7 @@
 #include <shlwapi.h>
 #include <algorithm>
 #include <cwctype>
+#include <limits>
 #include <set>
 
 namespace iw::platform
@@ -599,11 +600,19 @@ namespace iw::platform
 
 	int show_choice(const WindowFramePtr& owner, const ChoiceDefinition& definition)
 	{
-		if (definition.buttons.empty()) return 0;
+		if (definition.buttons.empty() ||
+			definition.buttons.size() > static_cast<size_t>((std::numeric_limits<int>::max)() - win32::firstChoiceButton))
+			return 0;
 		std::vector<TASKDIALOG_BUTTON> buttons;
 		buttons.reserve(definition.buttons.size());
-		for (const auto& button : definition.buttons)
-			buttons.push_back({button.id, button.label.c_str()});
+		int defaultButton = win32::firstChoiceButton;
+		for (size_t index = 0; index < definition.buttons.size(); ++index)
+		{
+			const auto& button = definition.buttons[index];
+			const int nativeButton = win32::firstChoiceButton + static_cast<int>(index);
+			buttons.push_back({nativeButton, button.label.c_str()});
+			if (definition.defaultButton && button.id == definition.defaultButton) defaultButton = nativeButton;
+		}
 
 		TASKDIALOGCONFIG config{sizeof(config)};
 		config.hwndParent = win32::owner_window(owner);
@@ -615,16 +624,20 @@ namespace iw::platform
 		if (!definition.message.empty()) config.pszContent = definition.message.c_str();
 		config.cButtons = static_cast<UINT>(buttons.size());
 		config.pButtons = buttons.data();
-		config.nDefaultButton = definition.defaultButton ? definition.defaultButton : definition.buttons.front().id;
+		config.nDefaultButton = defaultButton;
 
 		int chosen = 0;
 		if (FAILED(TaskDialogIndirect(&config, &chosen, nullptr, nullptr))) return 0;
-		// Dismissing with Escape or the close box reports IDCANCEL, which is not one of ours.
-		const bool known = std::ranges::any_of(definition.buttons, [chosen](const ChoiceButton& button)
-		{
-			return button.id == chosen;
-		});
-		return known ? chosen : 0;
+		return win32::choice_button_result(definition, chosen);
+	}
+
+	int win32::choice_button_result(const ChoiceDefinition& definition, const int nativeButton)
+	{
+		// IDCANCEL is also a common workflow action id, such as Don't Save or Replace.
+		// Native ids must be disjoint so Escape and the close box cannot select those actions.
+		if (nativeButton < firstChoiceButton) return 0;
+		const auto index = static_cast<size_t>(nativeButton - firstChoiceButton);
+		return index < definition.buttons.size() ? definition.buttons[index].id : 0;
 	}
 }
 

@@ -6,7 +6,7 @@
 // rather than the window's own non-client bars, because the view-mode strips
 // sit in that gutter beside them.
 
-#include "ArtMate.h"
+#include "ImageWalker.h"
 #include "Dib.h"
 
 // The powder tile behind both panes. One copy for the whole app.

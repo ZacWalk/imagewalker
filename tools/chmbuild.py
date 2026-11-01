@@ -662,16 +662,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         project = Project(args.project.resolve())
         sources = gather(project, args.verbose)
+        for warning in project.warnings:
+            print(f"chmbuild: warning: {warning}", file=sys.stderr)
+        if args.strict and project.warnings:
+            print(f"chmbuild: {len(project.warnings)} warning(s), --strict", file=sys.stderr)
+            return 1
         out_path = (args.output or project.output).resolve()
         write_chm(project, sources, out_path, args.verbose)
     except BuildError as exc:
         print(f"chmbuild: {exc}", file=sys.stderr)
-        return 1
-
-    for warning in project.warnings:
-        print(f"chmbuild: warning: {warning}", file=sys.stderr)
-    if args.strict and project.warnings:
-        print(f"chmbuild: {len(project.warnings)} warning(s), --strict", file=sys.stderr)
         return 1
 
     print(f"chmbuild: wrote {out_path} ({out_path.stat().st_size:,} bytes)")

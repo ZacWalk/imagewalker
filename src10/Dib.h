@@ -19,6 +19,9 @@ inline int CalcStorageWidth(UINT nWidth, UINT nBpp)
    return (nBytes > 0x7FFFFFFFui64) ? 0 : static_cast<int>(nBytes);
 }
 
+// Composites straight-alpha BGRA onto exactly one three-byte BGR pixel.
+void Blend24(BYTE* destination, UINT source);
+
 // The largest size with the aspect of 'size' that fits inside 'box'. It enlarges
 // as well as shrinks, so one axis always lands exactly on the box: a fit worked
 // out through a whole-number percentage instead leaves up to 1/scale of the box
@@ -144,7 +147,7 @@ public:
    inline BOOL IsOpen() const
    {
       ASSERT_VALID(this);
-      return (m_pBMI != NULL) && (Width()) && (Height());
+      return (m_pBMI != NULL) && (m_pBits != NULL) && (Width()) && (Height());
    }
    
    inline unsigned Width() const { return GetHeader()->biWidth; };
@@ -157,7 +160,7 @@ public:
 
 class CStatus;
 
-// ArtMate cached a pre-scaled copy of an image while the preview was resized.
+// ImageWalker 1.0 cached a pre-scaled copy of an image while the preview was resized.
 class CDibScale
 {
 public:
@@ -740,4 +743,3 @@ public:
 };
 
 #endif // __DIB__
-

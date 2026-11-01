@@ -853,7 +853,7 @@ namespace iw
 
 		constexpr bool is_empty() const
 		{
-			return equiv(Width, 0.0) || equiv(Height, 0.0);
+			return Width <= 0.0 || Height <= 0.0 || equiv(Width, 0.0) || equiv(Height, 0.0);
 		}
 
 		constexpr bool operator==(const rectd other) const noexcept
@@ -956,13 +956,13 @@ namespace iw
 		{
 			const auto right = std::min(a.right(), b.right());
 			const auto bottom = std::min(a.bottom(), b.bottom());
-			const auto left = std::min(a.left(), b.left());
-			const auto top = std::min(a.top(), b.top());
+			const auto left = std::max(a.left(), b.left());
+			const auto top = std::max(a.top(), b.top());
 
 			c.X = left;
 			c.Y = top;
-			c.Width = right - left;
-			c.Height = bottom - top;
+			c.Width = std::max(0.0, right - left);
+			c.Height = std::max(0.0, bottom - top);
 			return !c.is_empty();
 		}
 

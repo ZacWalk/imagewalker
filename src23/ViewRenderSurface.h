@@ -152,6 +152,9 @@ public:
 			  ::DeleteDC(m_hdcMem);
 			  m_hdcMem = 0;
 		  }
+		  m_pByte = nullptr;
+		  m_hbitmapOld = nullptr;
+		  m_hFontSelected = nullptr;
 	  }
 
 	  void Flip()

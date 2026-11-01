@@ -6,7 +6,7 @@ Follow a release link for its feature highlights, or read
 
 | Application | Release year | Directory |
 |---|---:|---|
-| [ArtMate 1.0](features.md#artmate-10) | 1998 | `src10` |
+| [ImageWalker 1.0](features.md#imagewalker-10) | 1998 | `src10` |
 | [ImageWalker 2.0](features.md#imagewalker-20) | 2001 | `src20` |
 | [ImageWalker 2.2](features.md#imagewalker-22) | 2003 | `src22` |
 | [ImageWalker 2.3](features.md#imagewalker-23) | 2006 | `src23` |
@@ -18,7 +18,7 @@ Each About box names the application, its release year and its theme song.
 
 | Application | Theme song |
 |---|---|
-| ArtMate 1.0 | "It's Like That" by Run-DMC vs. Jason Nevins |
+| ImageWalker 1.0 | "It's Like That" by Run-DMC vs. Jason Nevins |
 | ImageWalker 2.0 | "It Wasn't Me" by Shaggy |
 | ImageWalker 2.2 | "Where Is the Love?" by The Black Eyed Peas |
 | ImageWalker 2.3 | "Crazy" by Gnarls Barkley |

@@ -176,7 +176,7 @@ namespace iw
 		auto content = platform::read_clipboard(frame_);
 		if (!content.files.empty())
 		{
-			if (platform::perform_file_operation(frame_, platform::FileOperation::copy, content.files, folder_))
+			if (platform::perform_file_operation(frame_, content.operation, content.files, folder_))
 				open_folder(folder_, false);
 			return;
 		}

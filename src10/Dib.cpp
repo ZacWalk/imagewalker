@@ -50,6 +50,15 @@ void CDib::CopyTo(CDib& dib) const
 {
 	ASSERT_VALID(this);
 
+	if (&dib == this)
+		return;
+
+	if (!IsOpen())
+	{
+		dib.Close();
+		return;
+	}
+
 	if (!dib.Create(Width(), Height(), Bpp(), FALSE))
 		return;
 

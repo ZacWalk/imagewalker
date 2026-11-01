@@ -1,7 +1,7 @@
 // The items pane.
 
 #include "stdafx.h"
-#include "ArtMate.h"
+#include "ImageWalker.h"
 #include "ItemsView.h"
 #include "Jobs.h"
 
@@ -447,6 +447,7 @@ void CItemsView::OnDirChanged()
 
 	const CString strFocus = FocusFileName();
 
+	::InterlockedIncrement(&m_nThumbOrder);
 	m_pFolder->Refresh();
 
 	RebuildItems();
@@ -856,31 +857,47 @@ void CItemsView::OnEditCopy(UINT, int, CWindow)
 	const HGLOBAL hMem = ::GlobalAlloc(GMEM_MOVEABLE, nBytes);
 
 	if (hMem == nullptr)
-		return;
-
-	if (auto pDrop = static_cast<DROPFILES*>(::GlobalLock(hMem)))
 	{
-		ZeroMemory(pDrop, nBytes);
-		pDrop->pFiles = sizeof(DROPFILES);
-		pDrop->fWide = (sizeof(TCHAR) == sizeof(WCHAR));
-
-		CopyMemory(reinterpret_cast<BYTE*>(pDrop) + sizeof(DROPFILES),
-		           names.data(), names.size() * sizeof(TCHAR));
-
-		::GlobalUnlock(hMem);
+		IW::Logging::LastError(_T("GlobalAlloc (clipboard)"));
+		return;
 	}
+
+	auto pDrop = static_cast<DROPFILES*>(::GlobalLock(hMem));
+	if (pDrop == nullptr)
+	{
+		IW::Logging::LastError(_T("GlobalLock (clipboard)"));
+		::GlobalFree(hMem);
+		return;
+	}
+
+	ZeroMemory(pDrop, nBytes);
+	pDrop->pFiles = sizeof(DROPFILES);
+	pDrop->fWide = (sizeof(TCHAR) == sizeof(WCHAR));
+	CopyMemory(reinterpret_cast<BYTE*>(pDrop) + sizeof(DROPFILES),
+	           names.data(), names.size() * sizeof(TCHAR));
+	::GlobalUnlock(hMem);
 
 	if (!::OpenClipboard(m_hWnd))
 	{
+		IW::Logging::LastError(_T("OpenClipboard"));
 		::GlobalFree(hMem);
 		return;
 	}
 
-	::EmptyClipboard();
+	if (!::EmptyClipboard())
+	{
+		IW::Logging::LastError(_T("EmptyClipboard"));
+		::GlobalFree(hMem);
+		::CloseClipboard();
+		return;
+	}
 
 	// The clipboard owns the block on success, and only on success.
 	if (::SetClipboardData(CF_HDROP, hMem) == nullptr)
+	{
+		IW::Logging::LastError(_T("SetClipboardData"));
 		::GlobalFree(hMem);
+	}
 
 	::CloseClipboard();
 }

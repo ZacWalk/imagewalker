@@ -193,8 +193,7 @@ namespace iw::files
 		try
 		{
 			std::error_code iterationError;
-			std::filesystem::directory_iterator iterator(
-				native_path(folder), std::filesystem::directory_options::skip_permission_denied, iterationError);
+			std::filesystem::directory_iterator iterator(native_path(folder), iterationError);
 			if (iterationError)
 			{
 				if (error) *error = iterationError;
@@ -584,6 +583,26 @@ namespace iw::files
 			return result;
 		}
 
+		std::wstring wide(const std::string& utf8)
+		{
+			const int length = utf8.empty() ? 0 : MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
+			if (length <= 0) return {};
+			std::wstring result(static_cast<size_t>(length), L'\0');
+			MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), result.data(), length);
+			return result;
+		}
+
+		// As EXIF writes a date, "YYYY:MM:DD HH:MM:SS", by the camera's clock whatever zone the file states, as
+		// Diffractor shows it; as much of it as the file gives.
+		std::wstring exif_text(const libfiles::date& d)
+		{
+			if (!d.valid()) return {};
+			if (d.has_time) return std::format(L"{:04}:{:02}:{:02} {:02}:{:02}:{:02}", d.year, d.month, d.day, d.hour, d.minute, d.second);
+			if (d.day != 0) return std::format(L"{:04}:{:02}:{:02}", d.year, d.month, d.day);
+			if (d.month != 0) return std::format(L"{:04}:{:02}", d.year, d.month);
+			return std::format(L"{:04}", d.year);
+		}
+
 		std::wstring token_value(const std::wstring_view token, const Metadata& metadata,
 		                         const std::filesystem::path& path, const NameDate& date)
 		{
@@ -661,18 +680,32 @@ namespace iw::files
 			result.mediaError = info.error;
 			return result;
 		}
-		const auto photo = imaging::read_photo_metadata(path);
-		result.camera = photo.camera;
-		result.dateTaken = photo.dateTaken;
-		result.exposure = photo.exposure;
-		result.aperture = photo.aperture;
-		result.iso = photo.iso;
-		result.focalLength = photo.focalLength;
+		const auto photo = imaging::read_properties(path);
+		const auto make = wide(photo.camera_make);
+		const auto model = wide(photo.camera_model);
+		result.camera = make.empty() ? model : model.empty() ? make : make + L" " + model;
+		result.dateTaken = exif_text(photo.created);
+
+		// Under a second as 1/n, as a camera shows it, and otherwise in seconds.
+		if (photo.exposure_time > 0.0 && photo.exposure_time < 1.0)
+			result.exposure = std::format(L"1/{:.0f} s", 1.0 / photo.exposure_time);
+		else if (photo.exposure_time >= 1.0)
+			result.exposure = std::format(L"{:.1f} s", photo.exposure_time);
+
+		if (photo.f_number > 0.0) result.aperture = std::format(L"f/{:.1f}", photo.f_number);
+		if (photo.iso_speed > 0) result.iso = std::format(L"ISO {}", photo.iso_speed);
+		if (photo.focal_length > 0.0) result.focalLength = std::format(L"{:.1f} mm", photo.focal_length);
 		return result;
 	}
 	std::wstring read_colour_profile(const std::filesystem::path& path)
 	{
-		return classify(path) == ItemKind::image ? imaging::read_colour_profile(path) : std::wstring{};
+		if (classify(path) != ItemKind::image) return {};
+		const auto profile = imaging::read_colour_profile(path);
+		if (!profile) return {};
+
+		// The name the profile gives itself, or failing that the gamut libfiles recognises in its colorants.
+		if (!profile->name.empty()) return wide(profile->name);
+		return profile->primaries == "custom" ? std::wstring{} : wide(profile->primaries);
 	}
 	bool read_dimensions(const std::filesystem::path& path, int& width, int& height)
 	{

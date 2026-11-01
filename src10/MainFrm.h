@@ -14,7 +14,7 @@
 class CMainFrame : public CFrameWindowImpl<CMainFrame>, public IW::CAddressBar<CMainFrame>
 {
 public:
-	DECLARE_FRAME_WND_CLASS(_T("IWArtMateFrame"), IDR_MAINFRAME)
+	DECLARE_FRAME_WND_CLASS(_T("IWImageWalker10Frame"), IDR_MAINFRAME)
 
 	enum { kLogoTimer = 1 };
 

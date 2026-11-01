@@ -4,7 +4,7 @@
 //
 // The later historical releases tied CLogoWindow to IW::Image; earlier ones
 // used a rebar band image (REBARINFO + RBBIM_IMAGE) that disappeared with the
-// rebar. ArtMate 1.0 originally had no logo.
+// rebar. ImageWalker 1.0 originally had no logo.
 //
 // This version owns an 8bpp DIB and a 256-entry palette directly, so it needs
 // nothing from any app's imaging layer and can sit in all four. The plasma and

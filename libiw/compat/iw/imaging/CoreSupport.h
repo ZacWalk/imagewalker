@@ -614,6 +614,8 @@ namespace IW
 			return (int)_size;
 		}
 
+		std::uint64_t GetByteCount() const { return static_cast<std::uint64_t>(_size); }
+
 		static FileSize FromFile(const CString &strFileName)
 		{
 			WIN32_FIND_DATA   ff32; MemZero(&ff32, sizeof(ff32));

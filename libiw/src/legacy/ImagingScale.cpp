@@ -17,7 +17,9 @@
 #include "ImagingBlitter.h"
 #include "RenderImage.h"
 
+#ifndef _USE_MATH_DEFINES
 #define _USE_MATH_DEFINES  1
+#endif
 #include <Math.h>
 
 // A resampling kernel is a weighted average, and averaging straight RGBA lets
@@ -373,27 +375,49 @@ using ImageContrib = struct tagImageContrib
 
 ////////////////////////////////////////////////////////////////////////////////////////
 
+static bool ScaleBufferCount(int width, int height, size_t itemSize, size_t& count)
+{
+	if (width <= 0 || height <= 0) return false;
+	const auto size = static_cast<std::uint64_t>(width) * height;
+	if (size > static_cast<std::uint64_t>(IW::kMaxPageBytes) / itemSize) return false;
+	count = static_cast<size_t>(size);
+	return true;
+}
 
 bool IW::Scale(const CSize& sizeIn, int nFilterType, const Image& imageIn, Image& imageOut, IStatus* pStatus)
 {
 	const CRect rcBounding = imageIn.GetBoundingRect();
-	const int cxBounding = rcBounding.Width();
-	const int cyBounding = rcBounding.Height();
+	const auto boundingWidth = static_cast<std::int64_t>(rcBounding.right) - rcBounding.left;
+	const auto boundingHeight = static_cast<std::int64_t>(rcBounding.bottom) - rcBounding.top;
+	size_t outputCount{};
+	if (boundingWidth <= 0 || boundingHeight <= 0 || boundingWidth > INT_MAX || boundingHeight > INT_MAX ||
+		!ScaleBufferCount(sizeIn.cx, sizeIn.cy, sizeof(COLORREF), outputCount))
+	{
+		pStatus->SetError(L"Invalid or excessive image scaling dimensions.");
+		return false;
+	}
+	const int cxBounding = static_cast<int>(boundingWidth);
+	const int cyBounding = static_cast<int>(boundingHeight);
 
 	// zoom scale factors
 	const double dScaleX = static_cast<double>(sizeIn.cx) / static_cast<double>(cxBounding);
 	const double dScaleY = static_cast<double>(sizeIn.cy) / static_cast<double>(cyBounding);
 
-	if (nFilterType >= countof(filters)) nFilterType = 0;
+	if (nFilterType < 0 || nFilterType >= countof(filters)) nFilterType = 0;
 
-	int nProgress = 0;
-	int nProgressMax = 0;
+	std::int64_t nProgress = 0;
+	std::int64_t nProgressMax = 0;
 	for (unsigned nPage = 0; nPage < imageIn.Pages.size(); nPage++)
 	{
 		int cy = imageIn.Pages[nPage].GetHeight();
 		nProgressMax += cy;
 		nProgressMax += MulDiv(cy, sizeIn.cy, cyBounding);
 	}
+	const auto progress = [&]
+	{
+		pStatus->Progress(static_cast<int>((std::min)(nProgress++, static_cast<std::int64_t>(INT_MAX))),
+			static_cast<int>((std::min)(nProgressMax, static_cast<std::int64_t>(INT_MAX))));
+	};
 
 	for (unsigned nPage = 0; nPage < imageIn.Pages.size(); nPage++)
 	{
@@ -414,25 +438,44 @@ bool IW::Scale(const CSize& sizeIn, int nFilterType, const Image& imageIn, Image
 
 		const int cxIn = rcIn.right - rcIn.left;
 		const int cyIn = rcIn.bottom - rcIn.top;
-		const int cxOut = rcOut.right - rcOut.left;
-		const int cyOut = rcOut.bottom - rcOut.top;
+		const auto outWidth = static_cast<std::int64_t>(rcOut.right) - rcOut.left;
+		const auto outHeight = static_cast<std::int64_t>(rcOut.bottom) - rcOut.top;
+		if (outWidth <= 0 || outHeight <= 0 || outWidth > INT_MAX || outHeight > INT_MAX)
+		{
+			pStatus->SetError(L"Invalid image scaling extent.");
+			return false;
+		}
+		const int cxOut = static_cast<int>(outWidth);
+		const int cyOut = static_cast<int>(outHeight);
 		double (*FilterFunction)(double, double) = filters[nFilterType].function;
 		// Box Point declares zero support: without a floor of half a pixel every
 		// non-integral centre selects no source samples at all and comes out black.
 		const double dFilterSupport = filters[nFilterType].support < 0.5 ? 0.5 : filters[nFilterType].support;
 
-		// array of Contribution lists
-		//int nContribListHeight = IW::Max(size.cx, size.cy);
-const int nContribListWidth = static_cast<int>(Max(static_cast<int>((dScaleX < 1.0) ? (dFilterSupport / dScaleX) * 2 + 1 : dFilterSupport * 2 + 1),
-		                                  static_cast<int>((dScaleY < 1.0)
-		                                          ? (dFilterSupport / dScaleY) * 2 + 1
-		                                          : dFilterSupport * 2 + 1)));
+		const double contributionWidth = (std::max)(
+			(dScaleX < 1.0 ? dFilterSupport / dScaleX : dFilterSupport) * 2 + 1,
+			(dScaleY < 1.0 ? dFilterSupport / dScaleY : dFilterSupport) * 2 + 1);
+		if (!std::isfinite(contributionWidth) || contributionWidth >= INT_MAX)
+		{
+			pStatus->SetError(L"The image scaling filter exceeds the memory limit.");
+			return false;
+		}
+		const int nContribListWidth = static_cast<int>(contributionWidth);
+		size_t temporaryCount{}, contributionCountX{}, contributionCountY{};
+		if (!ScaleBufferCount(cxOut, cyOut, sizeof(COLORREF), outputCount) ||
+			!ScaleBufferCount(cxOut, cyIn, sizeof(DWORD), temporaryCount) ||
+			!ScaleBufferCount(cxOut, nContribListWidth, sizeof(ImageContrib), contributionCountX) ||
+			!ScaleBufferCount(cyOut, nContribListWidth, sizeof(ImageContrib), contributionCountY))
+		{
+			pStatus->SetError(L"The image scaling buffers exceed the memory limit.");
+			return false;
+		}
 
-		IW::CBuffer<DWORD> pTemp(cxOut * cyIn);
+		IW::CBuffer<DWORD> pTemp(temporaryCount);
 		IW::CBuffer<int> pContrCountX(cxOut);
 		IW::CBuffer<int> pContrCountY(cyOut);
-		IW::CBuffer<ImageContrib> pContrX(cxOut * nContribListWidth);
-		IW::CBuffer<ImageContrib> pContrY(cyOut * nContribListWidth);
+		IW::CBuffer<ImageContrib> pContrX(contributionCountX);
+		IW::CBuffer<ImageContrib> pContrY(contributionCountY);
 
 		// pre-calculate Filter pContributions for a row
 		if (dScaleX < 1.0)
@@ -458,6 +501,7 @@ const int nContribListWidth = static_cast<int>(Max(static_cast<int>((dScaleX < 1
 					nTotal += pContrX[k].dWeight = DoubleToFixed(dWeight);
 				}
 
+				if (nTotal == 0) return false;
 				// Normalize
 				for (int j = 0; j < pContrCountX[i]; ++j)
 				{
@@ -486,6 +530,7 @@ const int nContribListWidth = static_cast<int>(Max(static_cast<int>((dScaleX < 1
 					nTotal += pContrX[k].dWeight = DoubleToFixed(dWeight);
 				}
 
+				if (nTotal == 0) return false;
 				// Normalize
 				for (int j = 0; j < pContrCountX[i]; ++j)
 				{
@@ -519,6 +564,7 @@ const int nContribListWidth = static_cast<int>(Max(static_cast<int>((dScaleX < 1
 					nTotal += pContrY[k].dWeight = DoubleToFixed(dWeight);
 				}
 
+				if (nTotal == 0) return false;
 				// Normalize
 				for (int j = 0; j < pContrCountY[i]; ++j)
 				{
@@ -552,6 +598,7 @@ const int nContribListWidth = static_cast<int>(Max(static_cast<int>((dScaleX < 1
 					nTotal += pContrY[k].dWeight = DoubleToFixed(dWeight);
 				}
 
+				if (nTotal == 0) return false;
 				// Normalize
 				for (int j = 0; j < pContrCountY[i]; ++j)
 				{
@@ -573,16 +620,9 @@ const int nContribListWidth = static_cast<int>(Max(static_cast<int>((dScaleX < 1
 		}
 
 
-		PixelFormat pf(pageIn.GetPixelFormat().HasAlpha() ? PixelFormat::PF32Alpha : PixelFormat::PF24);
+		const bool bAlpha = HasSourceAlpha(pageIn);
+		PixelFormat pf(bAlpha ? PixelFormat::PF32Alpha : PixelFormat::PF24);
 		Page pageOut = imageOut.CreatePage(rcOut, pf);
-
-		// The page is deliberately PF32Alpha so transparency survives, so it has
-		// to be read with GetLine -- RenderLine composites the alpha away and
-		// hands back 0xFF, which flattens the picture onto its background.
-		// PF8Alpha is excluded: it HasAlpha(), but GetLine hands back raw palette
-		// indices with a zero alpha byte, which would premultiply to nothing.
-		const IW::PixelFormat pfIn = pageIn.GetPixelFormat();
-		const bool bAlpha = pfIn.HasAlpha() && !pfIn.HasPalette();
 
 		// Scale the line
 		RefPtr<IImageSurfaceLock> pLockOut = pageOut.GetSurfaceLock();
@@ -594,7 +634,7 @@ const int nContribListWidth = static_cast<int>(Max(static_cast<int>((dScaleX < 1
 
 			if (bAlpha)
 			{
-				pLockIn->GetLine(pLineBuffer, y, 0, cxIn);
+				ReadStraightLine(pageIn, pLockIn, pLineBuffer, y, 0, cxIn);
 
 				for (int x = 0; x < cxIn; x++)
 					pLineBuffer[x] = PremultiplyPixel(pLineBuffer[x]);
@@ -637,7 +677,8 @@ const int nContribListWidth = static_cast<int>(Max(static_cast<int>((dScaleX < 1
 				pLineOut++;
 			}
 
-			pStatus->Progress(nProgress++, nProgressMax);
+			progress();
+			if (pStatus->QueryCancel()) return false;
 		}
 
 		// apply Filter to zoom vertically from pImage to pDst
@@ -676,7 +717,7 @@ const int nContribListWidth = static_cast<int>(Max(static_cast<int>((dScaleX < 1
 
 			pLockOut->SetLine(pLineBuffer, y, 0, cxOut);
 
-			pStatus->Progress(nProgress++, nProgressMax);
+			progress();
 			if (pStatus->QueryCancel())
 				return false;
 		}
@@ -696,12 +737,21 @@ const int nContribListWidth = static_cast<int>(Max(static_cast<int>((dScaleX < 1
 bool IW::Scale(const Image& imageIn, Image& imageOut, CSize size, IStatus* pStatus)
 {
 	const CRect rcBounding = imageIn.GetBoundingRect();
-
-	int cxBounding = rcBounding.Width();
-	int cyBounding = rcBounding.Height();
+	const auto boundingWidth = static_cast<std::int64_t>(rcBounding.right) - rcBounding.left;
+	const auto boundingHeight = static_cast<std::int64_t>(rcBounding.bottom) - rcBounding.top;
+	size_t outputCount{};
+	if (boundingWidth <= 0 || boundingHeight <= 0 || boundingWidth > INT_MAX || boundingHeight > INT_MAX ||
+		!ScaleBufferCount(size.cx, size.cy, sizeof(COLORREF), outputCount))
+	{
+		pStatus->SetError(L"Invalid or excessive image scaling dimensions.");
+		return false;
+	}
+	const int cxBounding = static_cast<int>(boundingWidth);
+	const int cyBounding = static_cast<int>(boundingHeight);
 
 	for (auto pageIn = imageIn.Pages.begin(); pageIn != imageIn.Pages.end(); ++pageIn)
 	{
+		if (pStatus->QueryCancel()) return false;
 		CRect rcIn = pageIn->GetPageRect();
 
 		CRect rcOut(
@@ -710,8 +760,9 @@ bool IW::Scale(const Image& imageIn, Image& imageOut, CSize size, IStatus* pStat
 			MulDiv(rcIn.right, size.cx, cxBounding),
 			MulDiv(rcIn.bottom, size.cy, cyBounding));
 
-		PixelFormat pf(pageIn->GetPixelFormat().HasAlpha() ? PixelFormat::PF32Alpha : PixelFormat::PF24);
+		PixelFormat pf(HasSourceAlpha(*pageIn) ? PixelFormat::PF32Alpha : PixelFormat::PF24);
 		Page& pageOut = imageOut.CreatePage(rcOut, pf);
+		const CRect sourceRect(0, 0, pageIn->GetWidth(), pageIn->GetHeight());
 
 		// RenderImage is already a template on its canvas, and only two formats
 		// ever reach here, so the canvas is named rather than dispatched.
@@ -724,14 +775,14 @@ bool IW::Scale(const Image& imageIn, Image& imageOut, CSize size, IStatus* pStat
 				typedef SurfaceLock<PixelFormat::PF32Alpha> TLock;
 				TLock lockOut(pageOut);
 				RenderImage<TLock, TBlitter> render(lockOut, blitter);
-				render.DrawImage(*pageIn, rcOut, rcIn);
+				render.DrawImage(*pageIn, rcOut, sourceRect);
 			}
 			else
 			{
 				typedef SurfaceLock<PixelFormat::PF24> TLock;
 				TLock lockOut(pageOut);
 				RenderImage<TLock, TBlitter> render(lockOut, blitter);
-				render.DrawImage(*pageIn, rcOut, rcIn);
+				render.DrawImage(*pageIn, rcOut, sourceRect);
 			}
 		});
 

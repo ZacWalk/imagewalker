@@ -1,7 +1,8 @@
 #include "ImagingWin32.h"
 #include "NativeCodec.h"
 #include <libiw/Codec.h>
-#include <libiw/JpegMetadata.h>
+#include "FileStream.h"
+#include <libfiles/encode.h>
 #include <libiw/WebPCodec.h>
 #include <libiw/PixelOps.h>
 #include <algorithm>
@@ -384,16 +385,32 @@ namespace
 			return bytes;
 		}
 
-		// Replaces the encoder's own segments with the source's, byte for byte. False only when
-		// the output could not be rewritten, which leaves it unusable.
+		// The source's header, read no further than its first scan.
+		std::vector<std::uint8_t> jpeg_header(const std::filesystem::path& path)
+		{
+			FileStream file(path);
+			if (!file.is_open()) return {};
+			try
+			{
+				libfiles::reader reader(file);
+				return libfiles::read_jpeg_header(reader);
+			}
+			catch (const std::exception&)
+			{
+				return {};
+			}
+		}
+
+		// Replaces the encoder's own segments with the source's, byte for byte, as libfiles carries them.
+		// False only when the output could not be rewritten, which leaves it unusable.
 		bool carry_jpeg_segments(const std::filesystem::path& output, const std::filesystem::path& source,
 		                         const int width, const int height, const std::function<void(std::wstring_view)>& diagnostic)
 		{
-			const auto header = jpeg::read_header(source);
+			const auto header = jpeg_header(source);
 			const auto encoded = read_file(output);
 			const auto carried = header.empty() || encoded.empty()
 				                     ? std::vector<std::uint8_t>{}
-				                     : jpeg::carry_metadata(header, encoded, width, height);
+				                     : libfiles::carry_jpeg_metadata(header, encoded, width, height);
 			if (carried.empty())
 			{
 				diagnostic(L"The photo's metadata could not be carried into the saved JPEG.\n");
@@ -483,12 +500,7 @@ namespace
 		if (backend == PixelDecoder::webp) return webp::probe(path, width, height);
 		if (backend == PixelDecoder::native)
 		{
-			auto result = decode_document(path);
-			if (!result) return false;
-			const auto frame = result.document.frame(0);
-			width = frame.width;
-			height = frame.height;
-			return true;
+			return native_dimensions(path, width, height);
 		}
 		IWICImagingFactory* factory = nullptr;
 		IWICBitmapDecoder* decoder = nullptr;
@@ -1038,9 +1050,7 @@ namespace
 			}
 			else if (decoder == PixelDecoder::native)
 			{
-				auto document = decode_document(bytes, extension, options);
-				static_cast<OperationResult&>(result) = std::move(static_cast<OperationResult&>(document));
-				if (result) result.image = document.document.frame_pixels();
+				result = decode_native(bytes, extension, options);
 			}
 			else
 			{

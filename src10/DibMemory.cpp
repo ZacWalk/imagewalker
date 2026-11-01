@@ -5,6 +5,7 @@
 #include "stdafx.h"
 
 #include "dib.h"
+#include "iw/logfile.h"
 
 #include <malloc.h>
 
@@ -29,12 +30,20 @@ BOOL CDib::Create(unsigned width, unsigned height, unsigned bpp, BOOL bHBitmap)
 	// of whatever was in it last.
 	m_sizeOriginal = CSize(0, 0);
 
-	if (IsOpen() && Width() == width && Height() == height && bpp == Bpp())
+	if (IsOpen() && Width() == width && Height() == height && bpp == Bpp() &&
+		(bHBitmap != FALSE) == (m_hBitmap != nullptr))
 		return TRUE;
 
 	// Delete any existing stuff.
 	Free();
 	m_uFlags = 0;
+
+	if (width == 0 || height == 0 || width > 0x7fffffffu || height > 0x7fffffffu ||
+		(bpp != 1 && bpp != 4 && bpp != 8 && bpp != 16 && bpp != 24 && bpp != 32))
+	{
+		IW::Logging::Warn(_T("Invalid DIB dimensions or pixel depth"));
+		return FALSE;
+	}
 
 	// Allocate memory for the header.
 
@@ -57,7 +66,7 @@ BOOL CDib::Create(unsigned width, unsigned height, unsigned bpp, BOOL bHBitmap)
 
 	if (width == 0 || height == 0 || m_nStorageWidth <= 0 || nSizeImage64 > (256ui64 << 20))
 	{
-		TRACE("Refusing an implausible DIB size");
+		IW::Logging::Warn(_T("Refusing an implausible DIB size"));
 		return FALSE;
 	}
 
@@ -105,6 +114,12 @@ BOOL CDib::Create(unsigned width, unsigned height, unsigned bpp, BOOL bHBitmap)
 		// NULL reference DC: this runs on the loader threads too, and the DC
 		// was taken on the UI thread's main window.
 		m_hBitmap = CreateDIBSection(nullptr, m_pBMI, DIB_RGB_COLORS, (LPVOID*)&m_pBits, nullptr, NULL);
+		if (!m_hBitmap || !m_pBits)
+		{
+			IW::Logging::LastError(_T("CreateDIBSection"));
+			Free();
+			return FALSE;
+		}
 	}
 	else
 	{

@@ -70,18 +70,16 @@ IW_TEST(StandaloneCodecsRetainAlphaAndNativeMetadataWithoutAnApplication)
 	auto native = iw::imaging::decode_document(file.path);
 	IW_CHECK(static_cast<bool>(native));
 	if (!native) return;
-	IW_CHECK_EQ(native.document.frame_count(), size_t{1});
-	IW_CHECK(native.document.frame_pixels().pixels == source.pixels);
-	const auto copy = native.document.clone();
-	IW_CHECK(copy.frame_pixels().pixels == source.pixels);
-	IW_CHECK(copy.frame(0).pixels.data() != native.document.frame(0).pixels.data());
-	for (size_t i = 0; i < native.document.metadata_count(); ++i)
+	IW_CHECK_EQ(native.document.frames.size(), size_t{1});
+	IW_CHECK(iw::imaging::frame_pixels(native).pixels == source.pixels);
+	const auto copy = native;
+	IW_CHECK(iw::imaging::frame_pixels(copy).pixels == source.pixels);
+	IW_CHECK(copy.document.frames[0].pixels.data() != native.document.frames[0].pixels.data());
+	IW_CHECK(copy.document.metadata == native.document.metadata);
+	for (size_t i = 0; i < native.document.metadata.size(); ++i)
 	{
-		const auto original = native.document.metadata(i);
-		const auto cloned = copy.metadata(i);
-		IW_CHECK_EQ(original.type, cloned.type);
-		IW_CHECK(std::ranges::equal(original.bytes, cloned.bytes));
-		if (!original.bytes.empty()) IW_CHECK(original.bytes.data() != cloned.bytes.data());
+		const auto& original = native.document.metadata[i].bytes;
+		if (!original.empty()) IW_CHECK(original.data() != copy.document.metadata[i].bytes.data());
 	}
 }
 
@@ -96,7 +94,7 @@ IW_TEST(DecodeCancellationAndMemoryLimitsAreDistinctFailures)
 	IW_CHECK(tooLarge.error == iw::imaging::ImageError::resource_limit);
 	const auto nativeTooLarge = iw::imaging::decode_document(file.path, limit);
 	IW_CHECK(nativeTooLarge.error == iw::imaging::ImageError::resource_limit);
-	IW_CHECK_EQ(nativeTooLarge.document.frame_count(), size_t{0});
+	IW_CHECK(nativeTooLarge.document.frames.empty());
 	iw::imaging::DecodeOptions stopped;
 	stopped.cancelled = [] { return true; };
 	IW_CHECK(iw::imaging::decode(file.path, stopped).error == iw::imaging::ImageError::cancelled);
@@ -118,23 +116,24 @@ IW_TEST(CommonEditsAndSimdRetainTheirNeutralResults)
 	IW_CHECK(scalar == dispatched);
 }
 
-IW_TEST(NativeFrameViewsValidateStrideAndPreservePaletteAlpha)
+IW_TEST(PixelRowsValidateStrideAndPreservePaletteAlpha)
 {
 	const std::uint8_t bytes[] = {0x90, 0, 0, 0, 0x18, 0, 0, 0};
 	const std::uint32_t palette[] = {0xff112233, 0x80445566, 0x00778899, 0xffaabbcc};
-	iw::imaging::FrameView frame;
+	libfiles::pixel_rows frame;
 	frame.width = 3;
 	frame.height = 2;
 	frame.stride = 4;
-	frame.format = iw::imaging::PixelStorage::indexed2;
+	frame.storage = libfiles::document_storage::indexed2;
+	frame.bottom_up = true;
 	frame.pixels = bytes;
-	frame.paletteBgra = {reinterpret_cast<const std::uint8_t*>(palette), sizeof(palette)};
-	const auto decoded = iw::imaging::pixels_from_frame(frame);
+	frame.palette = palette;
+	const auto decoded = iw::imaging::pixels_from_rows(frame);
 	IW_CHECK(decoded.pixels == std::vector<std::uint32_t>({palette[0], palette[1], palette[2],
 		palette[2], palette[1], palette[0]}));
 	frame.stride = 3;
 	bool rejected{};
-	try { (void)iw::imaging::pixels_from_frame(frame); }
+	try { (void)iw::imaging::pixels_from_rows(frame); }
 	catch (const std::invalid_argument&) { rejected = true; }
 	IW_CHECK(rejected);
 }
@@ -181,16 +180,15 @@ IW_TEST(TiledTiffDecodingRetainsTheRasterRatherThanReturningABlankPage)
 	const auto decoded = iw::imaging::decode_document(file.path);
 	IW_CHECK(static_cast<bool>(decoded));
 	if (!decoded) return;
-	const auto pixels = decoded.document.frame_pixels();
+	const auto pixels = iw::imaging::frame_pixels(decoded);
 	IW_CHECK_EQ(pixels.width, 19);
 	IW_CHECK_EQ(pixels.height, 17);
 	IW_CHECK(std::ranges::all_of(pixels.pixels, [](std::uint32_t pixel) { return pixel == 0xff1f3d65; }));
 	bool retainedProfile{};
-	for (size_t i = 0; i < decoded.document.metadata_count(); ++i)
+	for (const auto& metadata : decoded.document.metadata)
 	{
-		const auto metadata = decoded.document.metadata(i);
-		IW_CHECK(metadata.kind != iw::imaging::MetadataKind::icc);
-		if (metadata.kind == iw::imaging::MetadataKind::sourceProfile)
+		IW_CHECK(metadata.kind != libfiles::document_metadata::icc);
+		if (metadata.kind == libfiles::document_metadata::source_icc)
 			retainedProfile = std::ranges::equal(metadata.bytes, sourceProfile);
 	}
 	IW_CHECK(retainedProfile);
@@ -251,9 +249,9 @@ namespace
 		return bytes;
 	}
 
-	bool solid(const iw::imaging::Document& document, const std::size_t frame, const std::uint32_t colour)
+	bool solid(const iw::imaging::DocumentResult& document, const std::size_t frame, const std::uint32_t colour)
 	{
-		const auto pixels = document.frame_pixels(frame);
+		const auto pixels = iw::imaging::frame_pixels(document, frame);
 		return !pixels.pixels.empty() &&
 			std::ranges::all_of(pixels.pixels, [colour](const std::uint32_t pixel) { return pixel == colour; });
 	}
@@ -307,7 +305,7 @@ IW_TEST(WebPAndWindowsCodecLoadersServeNativeDocuments)
 		if (!decoded) IW::Test::Detail::Print(" extension %ls: %ls (error %d)\n",
 			extension, decoded.message.c_str(), static_cast<int>(decoded.error));
 		IW_CHECK(static_cast<bool>(decoded));
-		if (decoded) IW_CHECK(decoded.document.frame_pixels().pixels == source.pixels);
+		if (decoded) IW_CHECK(iw::imaging::frame_pixels(decoded).pixels == source.pixels);
 	}
 
 	TemporaryImage png;
@@ -326,7 +324,7 @@ IW_TEST(WebPAndWindowsCodecLoadersServeNativeDocuments)
 	IW_CHECK(!iw::imaging::native_supports_extension(L".ico"));
 	const auto decoded = iw::imaging::decode_document(icon, L".ico");
 	IW_CHECK(static_cast<bool>(decoded));
-	if (decoded) IW_CHECK(decoded.document.frame_pixels().pixels == source.pixels);
+	if (decoded) IW_CHECK(iw::imaging::frame_pixels(decoded).pixels == source.pixels);
 }
 
 IW_TEST(WebPThumbnailsKeepTheNativeRoundingAndSourceDimensions)
@@ -358,9 +356,9 @@ IW_TEST(DamageAfterACompleteGifFrameKeepsTheCompleteFrames)
 		const auto decoded = iw::imaging::decode_document(bytes, L".gif");
 		IW_CHECK(static_cast<bool>(decoded));
 		if (!decoded) return;
-		IW_CHECK_EQ(decoded.document.frame_count(), frames);
-		IW_CHECK(solid(decoded.document, 0, red));
-		if (frames > 1) IW_CHECK(solid(decoded.document, 1, green));
+		IW_CHECK_EQ(decoded.document.frames.size(), frames);
+		IW_CHECK(solid(decoded, 0, red));
+		if (frames > 1) IW_CHECK(solid(decoded, 1, green));
 		IW_CHECK_EQ(decoded.warnings.empty(), !warned);
 	};
 	check(gif, 2, false);
@@ -406,8 +404,8 @@ IW_TEST(DamagedLaterTiffDirectoryKeepsTheCompletePages)
 	const auto decoded = iw::imaging::decode_document(tiff, L".tif");
 	IW_CHECK(static_cast<bool>(decoded));
 	if (!decoded) return;
-	IW_CHECK_EQ(decoded.document.frame_count(), size_t{1});
-	IW_CHECK(solid(decoded.document, 0, 0xff1f3d65));
+	IW_CHECK_EQ(decoded.document.frames.size(), size_t{1});
+	IW_CHECK(solid(decoded, 0, 0xff1f3d65));
 	IW_CHECK(!decoded.warnings.empty());
 }
 
@@ -433,7 +431,7 @@ IW_TEST(BmpHeadersNeedOnlyAValidPixelOffset)
 	const auto decodes = [](const std::vector<std::uint8_t>& bytes)
 	{
 		const auto decoded = iw::imaging::decode_document(bytes, L".bmp");
-		return decoded && solid(decoded.document, 0, 0xff1f3d65);
+		return decoded && solid(decoded, 0, 0xff1f3d65);
 	};
 	IW_CHECK(decodes(bmp));
 	auto oversized = bmp;
@@ -458,7 +456,7 @@ IW_TEST(NativeDecodesStopWhenCancelledPartWayThroughThePixels)
 	options.cancelled = [&polls] { return ++polls > 8; };
 	const auto decoded = iw::imaging::decode_document(file.path, options);
 	IW_CHECK(decoded.error == iw::imaging::ImageError::cancelled);
-	IW_CHECK_EQ(decoded.document.frame_count(), size_t{0});
+	IW_CHECK_EQ(decoded.document.frames.size(), size_t{0});
 	IW_CHECK(polls > 8);
 }
 

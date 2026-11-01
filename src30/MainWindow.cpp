@@ -684,6 +684,7 @@ namespace iw
 			collection_.clear();
 			canvas_.set_files({});
 		}
+		collection_.begin_load();
 		if (addHistory) history_.visit(folder_);
 		const auto title = std::format(L"{} - ImageWalker 3.0", folder_.filename().wstring());
 		if (!task_)
@@ -700,6 +701,7 @@ namespace iw
 		{
 			// The progress callback doubles as the cancellation check for a superseded scan.
 			std::stop_source cancellation;
+			std::error_code scanError;
 			auto items = files::scan_folder_items(folder, cancellation.get_token(),
 			                                      [this, weak, generation, &cancellation](const size_t entries,
 			                                                                              const size_t images)
@@ -714,12 +716,12 @@ namespace iw
 					                                      if (const auto self = weak.lock())
 						                                      self->report_scan_progress(generation, entries, images);
 				                                      });
-			                                      });
+			                                      }, &scanError);
 			if (cancellation.stop_requested()) return;
-			platform::queue_ui([weak, generation, folder, items = std::move(items)]() mutable
+			platform::queue_ui([weak, generation, folder, scanError, items = std::move(items)]() mutable
 			{
 				if (const auto self = weak.lock())
-					self->finish_folder_scan(generation, folder, std::move(items));
+					self->finish_folder_scan(generation, folder, std::move(items), scanError);
 			});
 		});
 		return true;
@@ -733,11 +735,18 @@ namespace iw
 	}
 
 	void MainWindow::finish_folder_scan(const std::uint64_t generation, const std::filesystem::path& folder,
-	                                    std::vector<files::FolderItem> items)
+	                                    std::vector<files::FolderItem> items, const std::error_code error)
 	{
 		if (generation != folderScanGeneration_ || !paths::equal(folder, folder_)) return;
-		collection_.set_items(std::move(items));
 		scanning_ = false;
+		if (error)
+		{
+			collection_.fail_load(error);
+			progressPercent_ = 100;
+			update_selection_status();
+			return;
+		}
+		collection_.set_items(std::move(items));
 		apply_collection_view();
 		probe_dimensions();
 	}
@@ -1063,6 +1072,14 @@ namespace iw
 	void MainWindow::update_selection_status()
 	{
 		if (task_) return;
+		if (collection_.load_state() == LoadState::failed)
+		{
+			const auto message = collection_.load_error().message();
+			statusText_ = std::format(L"Could not read {}: {}", folder_.wstring(),
+				std::wstring(message.begin(), message.end()));
+			update_status_surface();
+			return;
+		}
 		update_mode_bar();
 		const auto selected = canvas_.selected_paths().size();
 		size_t images = 0;

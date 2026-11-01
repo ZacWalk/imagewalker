@@ -22,6 +22,11 @@
 // attacker-controlled.
 static constexpr tmsize_t kMaxTiffStripBytes = 256 * 1024 * 1024;
 
+struct TiffOutput
+{
+	IW::IStreamOut& stream;
+	bool failed = false;
+};
 
 /////////////////////////////////////////////////////////////////////
 // FILE Read Proc functions for the tiff lib
@@ -30,7 +35,7 @@ static constexpr tmsize_t kMaxTiffStripBytes = 256 * 1024 * 1024;
 
 static toff_t _TiffSeekProc(thandle_t fd, toff_t off, int whence)
 {
-	auto pStreamIn = reinterpret_cast<IW::IStreamIn*>(fd);
+	auto& output = *static_cast<TiffOutput*>(fd);
 	IW::IStreamCommon::ePosition pos;
 
 	switch (whence)
@@ -48,8 +53,13 @@ static toff_t _TiffSeekProc(thandle_t fd, toff_t off, int whence)
 	}
 
 	const auto offset = static_cast<std::int64_t>(off);
-	if (offset < LONG_MIN || offset > LONG_MAX) return static_cast<toff_t>(-1);
-	const DWORD result = pStreamIn->Seek(pos, static_cast<LONG>(offset));
+	if (offset < LONG_MIN || offset > LONG_MAX)
+	{
+		output.failed = true;
+		return static_cast<toff_t>(-1);
+	}
+	const DWORD result = output.stream.Seek(pos, static_cast<LONG>(offset));
+	if (result == INVALID_SET_FILE_POINTER) output.failed = true;
 	return result == INVALID_SET_FILE_POINTER ? static_cast<toff_t>(-1) : result;
 }
 
@@ -60,8 +70,7 @@ static int _TiffCloseProc(thandle_t fd)
 
 static toff_t _TiffSizeProc(thandle_t fd)
 {
-	auto pStream = reinterpret_cast<IW::IStreamIn*>(fd);
-	return pStream->GetFileSize();
+	return static_cast<TiffOutput*>(fd)->stream.GetFileSize();
 }
 
 static int _TiffDummyMapProc(thandle_t fd, tdata_t* pbase, toff_t* psize)
@@ -84,12 +93,20 @@ static tsize_t _WriteReadProc(thandle_t fd, tdata_t pBuf, tsize_t size)
 
 static tsize_t _WriteWriteProc(thandle_t fd, tdata_t pBuf, tsize_t size)
 {
-	auto pStreamOut = static_cast<IW::IStreamOut*>(fd);
-
-	DWORD dwWrite;
-	pStreamOut->Write(pBuf, static_cast<DWORD>(size), &dwWrite);
-
-	return dwWrite;
+	auto& output = *static_cast<TiffOutput*>(fd);
+	if (size < 0 || static_cast<std::uint64_t>(size) > MAXDWORD)
+	{
+		output.failed = true;
+		return -1;
+	}
+	DWORD written{};
+	if (!output.stream.Write(pBuf, static_cast<DWORD>(size), &written) ||
+		written != static_cast<DWORD>(size))
+	{
+		output.failed = true;
+		return -1;
+	}
+	return written;
 };
 
 
@@ -185,8 +202,12 @@ void _TiffErrorHandlerFunc(const char* module, const char* fmt, va_list args)
 // through the API rather than by defining the globals.
 static void InstallTiffHandlers()
 {
-	TIFFSetWarningHandler(_TiffWarningHandlerFunc);
-	TIFFSetErrorHandler(_TiffErrorHandlerFunc);
+	static std::once_flag installed;
+	std::call_once(installed, []
+	{
+		TIFFSetWarningHandler(_TiffWarningHandlerFunc);
+		TIFFSetErrorHandler(_TiffErrorHandlerFunc);
+	});
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -256,6 +277,7 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 	CString str;
 	str.Format(IW::Text::ENCODING_FMT, static_cast<LPCTSTR>(GetTitle()));
 	pStatus->SetStatusMessage(str);
+	if (imageIn.IsEmpty() || pStatus->QueryCancel()) return false;
 
 	// handle standard nWidth/nHeight/bpp stuff
 	m_hTiffOut = nullptr;
@@ -263,13 +285,31 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 
 	InstallTiffHandlers();
 
-	if (!(m_hTiffOut = TIFFClientOpen("MemSource", "w", pStreamOut,
+	TiffOutput output{*pStreamOut};
+	if (!(m_hTiffOut = TIFFClientOpen("MemSource", "w", &output,
 	                                  _WriteReadProc, _WriteWriteProc, _TiffSeekProc, _TiffCloseProc,
 	                                  _TiffSizeProc, _TiffDummyMapProc, _TiffDummyUnmapProc)))
 	{
 
 		return false;
 	}
+	struct Guard
+	{
+		TIFF*& file;
+		void close() { if (file) TIFFClose(file); file = nullptr; }
+		~Guard() { close(); }
+	} guard{m_hTiffOut};
+	const auto writeRow = [&](void* row, uint32 y, uint32 height)
+	{
+		if (pStatus->QueryCancel()) return false;
+		if (TIFFWriteScanline(m_hTiffOut, row, y, 0) != 1)
+		{
+			pStatus->SetError(L"The TIFF output could not be written completely.");
+			return false;
+		}
+		pStatus->Progress(y + 1, height);
+		return true;
+	};
 
 	int nPageCount = imageIn.GetPageCount();
 	int nPage = 0;
@@ -281,7 +321,9 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 
 		uint32 nHeight;
 		uint32 nWidth;
-		uint32 nRowsPerStrip = (1024 * 8) / IW::Max(1, pageIn->GetWidth() * pageIn->GetPixelFormat().ToBpp() / 8);
+		uint32 nRowsPerStrip = static_cast<uint32>((1024 * 8) /
+			(std::max)(std::uint64_t{1}, static_cast<std::uint64_t>(pageIn->GetWidth()) *
+				pageIn->GetPixelFormat().ToStorageBpp() / 8));
 
 		uint16 nBitsperSample;
 		uint16 nSamplesPerpixel = 1;
@@ -293,18 +335,24 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 		uint8* pBuf;
 
 		IW::PixelFormat pf = pageIn->GetPixelFormat();
+		const bool bHasAlpha = pf.HasAlpha() ||
+			(pf.HasPalette() && (pageIn->GetFlags() & IW::PageFlags::HasTransparent));
 
 		nWidth = pageIn->GetWidth();
 		nHeight = pageIn->GetHeight();
 
 
-		switch (pf._pf)
+		if (bHasAlpha)
+		{
+			nBitsperSample = 8;
+			nSamplesPerpixel = 4;
+		}
+		else switch (pf._pf)
 		{
 		case IW::PixelFormat::PF1:
 		case IW::PixelFormat::PF2:
 		case IW::PixelFormat::PF4:
 		case IW::PixelFormat::PF8:
-		case IW::PixelFormat::PF8Alpha:
 		case IW::PixelFormat::PF8GrayScale:
 			nSamplesPerpixel = 1;
 			nBitsperSample = static_cast<uint16>(pf.ToBpp());
@@ -312,19 +360,10 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 
 		case IW::PixelFormat::PF555:
 		case IW::PixelFormat::PF565:
-			nBitsperSample = 5;
-			nSamplesPerpixel = 3;
-			break;
-
 		case IW::PixelFormat::PF24:
+		case IW::PixelFormat::PF32:
 			nBitsperSample = 8;
 			nSamplesPerpixel = 3;
-			break;
-
-		case IW::PixelFormat::PF32:
-		case IW::PixelFormat::PF32Alpha:
-			nBitsperSample = 8;
-			nSamplesPerpixel = 4;
 			break;
 
 		default:
@@ -334,7 +373,9 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 		}
 
 
-		nPhotometric = CheckPhotometric(*pageIn, nBitsperSample * nSamplesPerpixel);
+		nPhotometric = bHasAlpha || nSamplesPerpixel >= 3 ? PHOTOMETRIC_RGB :
+			pf == IW::PixelFormat::PF8GrayScale ? PHOTOMETRIC_MINISBLACK :
+			pf == IW::PixelFormat::PF1 ? CheckPhotometric(*pageIn, 1) : PHOTOMETRIC_PALETTE;
 
 		TIFFCreateDirectory(m_hTiffOut);
 
@@ -349,11 +390,10 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 		TIFFSetField(m_hTiffOut, TIFFTAG_ORIENTATION, ORIENTATION_TOPLEFT);
 		TIFFSetField(m_hTiffOut, TIFFTAG_ROWSPERSTRIP, TIFFDefaultStripSize(m_hTiffOut, IW::Max(1u, nRowsPerStrip)));
 
-		bool bHasAlpha = pf.HasAlpha();
 		if (bHasAlpha)
 		{
 			// EXTRASAMPLES is a counted array: libtiff reads a count *and* a pointer.
-			const uint16 extra = EXTRASAMPLE_ASSOCALPHA;
+			const uint16 extra = EXTRASAMPLE_UNASSALPHA;
 			TIFFSetField(m_hTiffOut, TIFFTAG_EXTRASAMPLES, static_cast<uint16>(1), &extra);
 		}
 
@@ -379,7 +419,8 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 			uint16 nColors = (1 << pageIn->GetPixelFormat().ToBpp());
 			auto pPal = (RGBQUAD*)pageIn->GetPalette();
 
-			r = static_cast<uint16*>(_TIFFmalloc(sizeof(uint16) * 3 * nColors));
+			IW::CBuffer<uint16> palette(static_cast<size_t>(3) * nColors);
+			r = palette;
 			g = r + nColors;
 			b = g + nColors;
 
@@ -392,7 +433,6 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 
 			TIFFSetField(m_hTiffOut, TIFFTAG_COLORMAP, r, g, b);
 
-			_TIFFfree(r);
 		}
 
 		// nCompression
@@ -400,7 +440,7 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 		switch (nBitsperSample * nSamplesPerpixel)
 		{
 		case 1:
-			nCompression = COMPRESSION_CCITTFAX4;
+			nCompression = nPhotometric == PHOTOMETRIC_PALETTE ? COMPRESSION_PACKBITS : COMPRESSION_CCITTFAX4;
 			break;
 
 		case 4:
@@ -425,7 +465,11 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 			nLineBytes = TIFFScanlineSize(m_hTiffOut);
 		}
 
-		pBuf = static_cast<uint8*>(_TIFFmalloc(nLineBytes));
+		if (nLineBytes <= 0 || nLineBytes > kMaxTiffStripBytes) return false;
+		IW::CBuffer<uint8> storage(static_cast<size_t>(nLineBytes));
+		pBuf = storage;
+		IW::CBuffer<COLORREF> colors(nSamplesPerpixel >= 3 ? nWidth : 0);
+		IW::ConstIImageSurfaceLockPtr lock = pageIn->GetSurfaceLock();
 
 		// read the DIB lines from bottom to top
 		// and save them in the TIF
@@ -437,13 +481,14 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 		switch (nBitsperSample * nSamplesPerpixel)
 		{
 		case 1:
+		case 2:
 		case 4:
 		case 8:
 			{
 				for (y = 0; y < nHeight; y++)
 				{
 					pBits = pageIn->GetBitmapLine(y);
-					TIFFWriteScanline(m_hTiffOut, (LPVOID)pBits, y, 0);
+					if (!writeRow(const_cast<uint8*>(pBits), y, nHeight)) return false;
 				}
 				break;
 			}
@@ -466,7 +511,7 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 						pBits += 2;
 					}
 
-					TIFFWriteScanline(m_hTiffOut, pBuf, y, 0);
+					if (!writeRow(pBuf, y, nHeight)) return false;
 				}
 
 				break;
@@ -476,19 +521,17 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 			{
 				for (y = 0; y < nHeight; y++)
 				{
-					pBits = pageIn->GetBitmapLine(y);
 					pBufTemp = pBuf;
-
+					lock->GetLine(colors, y, 0, nWidth);
 					for (x = 0; x < nWidth; x++)
 					{
-						pBufTemp[0] = pBits[2];
-						pBufTemp[1] = pBits[1];
-						pBufTemp[2] = pBits[0];
+						pBufTemp[0] = IW::GetB(colors[x]);
+						pBufTemp[1] = IW::GetG(colors[x]);
+						pBufTemp[2] = IW::GetR(colors[x]);
 						pBufTemp += 3;
-						pBits += 3;
 					}
 
-					TIFFWriteScanline(m_hTiffOut, pBuf, y, 0);
+					if (!writeRow(pBuf, y, nHeight)) return false;
 				}
 
 				break;
@@ -498,20 +541,27 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 			{
 				for (y = 0; y < nHeight; y++)
 				{
-					pBits = pageIn->GetBitmapLine(y);
 					pBufTemp = pBuf;
-
+					lock->GetLine(colors, y, 0, nWidth);
 					for (x = 0; x < nWidth; x++)
 					{
-						pBufTemp[0] = pBits[2];
-						pBufTemp[1] = pBits[1];
-						pBufTemp[2] = pBits[0];
-						pBufTemp[3] = pBits[3];
+						auto pixel = colors[x];
+						if (pf.HasPalette())
+						{
+							const auto index = pixel & 0xff;
+							pixel = pageIn->GetPalette()[index];
+							if (!pf.HasAlpha()) pixel |= 0xff000000;
+							if ((pageIn->GetFlags() & IW::PageFlags::HasTransparent) &&
+								index == pageIn->GetTransparent()) pixel &= 0x00ffffff;
+						}
+						pBufTemp[0] = IW::GetB(pixel);
+						pBufTemp[1] = IW::GetG(pixel);
+						pBufTemp[2] = IW::GetR(pixel);
+						pBufTemp[3] = IW::GetA(pixel);
 						pBufTemp += 4;
-						pBits += 4;
 					}
 
-					TIFFWriteScanline(m_hTiffOut, pBuf, y, 0);
+					if (!writeRow(pBuf, y, nHeight)) return false;
 				}
 
 				break;
@@ -519,18 +569,15 @@ bool CLoadTiff::Write(const CString& strType, IW::IStreamOut* pStreamOut, const 
 
 		default:
 			assert(0); //Unknown depth?
-			break;
+			return false;
 		}
 
-		_TIFFfree(pBuf);
-
-		TIFFWriteDirectory(m_hTiffOut);
+		if (pStatus->QueryCancel() || !TIFFWriteDirectory(m_hTiffOut)) return false;
 	}
 
-
-	TIFFClose(m_hTiffOut);
-
-	return true;
+	const bool flushed = TIFFFlush(m_hTiffOut) != 0;
+	guard.close();
+	return flushed && !output.failed;
 }
 
 

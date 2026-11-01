@@ -44,10 +44,8 @@ int CLoadGif::WriteFunction(GifFileType* pGifFile, const GifByteType* pBytesOut,
 	auto pStreamOut = static_cast<IW::IStreamOut*>(pGifFile->UserData);
 	assert(pStreamOut);
 
-	DWORD dwQtyWrite;
-	pStreamOut->Write(pBytesOut, nAmount, &dwQtyWrite);
-
-	return dwQtyWrite;
+	DWORD dwQtyWrite{};
+	return pStreamOut->Write(pBytesOut, nAmount, &dwQtyWrite) ? dwQtyWrite : 0;
 }
 
 bool CLoadGif::Write(IW::IStreamOut* pStreamOut, IW::IStreamIn* pStreamIn, const IW::Image& imageIn,
@@ -103,7 +101,7 @@ bool CLoadGif::Write(IW::IStreamOut* pStreamOut, IW::IStreamIn* pStreamIn, const
 
 		// Comment blocks must be smaller the 256
 		// So write in bits
-		int nLengthRemaining = static_cast<int>(comment.GetSize());
+		int nLengthRemaining = static_cast<int>(comment.GetDataSize());
 		auto pStr = reinterpret_cast<LPCSTR>(comment.GetData());
 
 		while (nLengthRemaining > 0)
@@ -246,6 +244,7 @@ bool CLoadGif::Write(const CString& str, IW::IStreamOut* pStreamOut, const IW::I
 	CString strStatus;
 	strStatus.Format(IW::Text::ENCODING_FMT, static_cast<LPCTSTR>(GetTitle()));
 	pStatus->SetStatusMessage(strStatus);
+	if (imageIn.IsEmpty() || pStatus->QueryCancel()) return false;
 
 	if (imageIn.HasMetaData(IW::MetaDataTypes::GIF_IMAGE))
 	{
@@ -267,7 +266,7 @@ bool CLoadGif::Write(const CString& str, IW::IStreamOut* pStreamOut, const IW::I
 	if (!pageIn.GetPixelFormat().HasPalette())
 	{
 		IW::Image imageQuantize;
-		IW::Quantize(image, imageQuantize, pStatus);
+		if (!IW::Quantize(image, imageQuantize, pStatus)) return false;
 		image = imageQuantize;
 		pageIn = image.GetFirstPage();
 	}
@@ -277,7 +276,10 @@ bool CLoadGif::Write(const CString& str, IW::IStreamOut* pStreamOut, const IW::I
 		return false;
 
 	if ((pOutputColorMap2 = MakeMapObject(nColorMapSize, nullptr)) == nullptr)
+	{
+		FreeMapObject(pOutputColorMap1);
 		return false;
+	}
 
 	IW::LPCCOLORREF pRGB = pageIn.GetPalette();
 
@@ -350,7 +352,7 @@ bool CLoadGif::Write(const CString& str, IW::IStreamOut* pStreamOut, const IW::I
 
 		// Comment blocks must be smaller the 256
 		// So write in bits
-		int nLengthRemaining = static_cast<int>(comment.GetSize());
+		int nLengthRemaining = static_cast<int>(comment.GetDataSize());
 		auto pStr = reinterpret_cast<LPCSTR>(comment.GetData());
 
 		while (nLengthRemaining > 0)
@@ -369,9 +371,29 @@ bool CLoadGif::Write(const CString& str, IW::IStreamOut* pStreamOut, const IW::I
 	for (IW::Image::PageList::const_iterator page = image.Pages.begin(); page != image.Pages.end(); ++page)
 	{
 		DWORD dw = page->GetFlags();
+		const IW::PixelFormat pfPage = page->GetPixelFormat();
 
 		int nTimeDelay = page->GetTimeDelay() / 10;
 		int nTransparentPixel = page->GetTransparent();
+		if (pfPage.HasAlpha())
+		{
+			int transparent = (dw & IW::PageFlags::HasTransparent) ? nTransparentPixel : -1;
+			for (int index = 0; index < pfPage.NumberOfPaletteEntries(); ++index)
+			{
+				const auto alpha = IW::GetA(page->GetPalette()[index]);
+				if ((alpha != 0 && alpha != 255) || (alpha == 0 && transparent >= 0 && transparent != index))
+				{
+					pStatus->SetError(L"GIF output cannot represent this palette's alpha values.");
+					return false;
+				}
+				if (alpha == 0) transparent = index;
+			}
+			if (transparent >= 0)
+			{
+				dw |= IW::PageFlags::HasTransparent;
+				nTransparentPixel = transparent;
+			}
+		}
 
 		// Add a graphic control extension if
 		// the image is multi paged
@@ -394,17 +416,19 @@ bool CLoadGif::Write(const CString& str, IW::IStreamOut* pStreamOut, const IW::I
 
 		// If we have multiple pages
 		// then we have multiple color maps
-		const IW::PixelFormat pfPage = page->GetPixelFormat();
-
 		// A later page can be a narrower format than the first, and the map was
 		// sized from the first -- reading it at that count runs off the palette.
 		if (!pfPage.HasPalette())
 			return false;
 
-		const int nPageColors = IW::Min(pfPage.NumberOfPaletteEntries(), nColorMapSize);
+		const int nPageColors = pfPage.NumberOfPaletteEntries();
+		if (pOutputColorMap2->ColorCount != nPageColors)
+		{
+			FreeMapObject(pOutputColorMap2);
+			pOutputColorMap2 = MakeMapObject(nPageColors, nullptr);
+			if (!pOutputColorMap2) return false;
+		}
 		IW::LPCCOLORREF pagePalette = page->GetPalette();
-
-		IW::MemZero(pOutputColorMap2->Colors, nColorMapSize * sizeof(GifColorType));
 
 		for (int i = 0; i < nPageColors; i++)
 		{
@@ -417,7 +441,8 @@ bool CLoadGif::Write(const CString& str, IW::IStreamOut* pStreamOut, const IW::I
 		// If the palettes are the same then dont need it
 		ColorMapObject* pOutputColorMap = nullptr;
 
-		if (memcmp(pOutputColorMap1->Colors, pOutputColorMap2->Colors, nColorMapSize * 3) != 0)
+		if (nPageColors != nColorMapSize ||
+			memcmp(pOutputColorMap1->Colors, pOutputColorMap2->Colors, nColorMapSize * sizeof(GifColorType)) != 0)
 		{
 			pOutputColorMap = pOutputColorMap2;
 		}
@@ -464,13 +489,21 @@ bool CLoadGif::Write(const CString& str, IW::IStreamOut* pStreamOut, const IW::I
 					}
 					break;
 				}
+			case IW::PixelFormat::PF2:
+				{
+					for (xx = 0; xx < page->GetWidth(); xx++)
+						p[xx] = static_cast<BYTE>((pLineSrc[xx >> 2] >> ((3 - (xx & 3)) * 2)) & 3);
+					break;
+				}
 			case IW::PixelFormat::PF8:
+			case IW::PixelFormat::PF8Alpha:
 				{
 					IW::MemCopy(p, pLineSrc, page->GetWidth());
 					break;
 				}
 			default:
 				assert(FALSE);
+				return false;
 			}
 
 			if (EGifPutLine(GifFile, p, page->GetWidth()) == GIF_ERROR)

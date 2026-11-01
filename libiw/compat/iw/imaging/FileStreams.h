@@ -583,6 +583,7 @@ namespace IW
 	protected:
 		IW::CFilePath _pathTempFileName;
 		IW::CFilePath _pathRealFileName;
+		DWORD _writeError = NO_ERROR;
 
 	public:
 		CFileTemp()
@@ -594,12 +595,44 @@ namespace IW
 			Abort();
 		}
 
+		bool Write(LPCVOID bytes, DWORD count, LPDWORD written = nullptr) override
+		{
+			DWORD actual{};
+			bool success = false;
+			if (_writeError == NO_ERROR)
+			{
+				success = CFile::Write(bytes, count, &actual);
+				if (!success)
+				{
+					_writeError = GetLastError();
+					if (_writeError == NO_ERROR) _writeError = ERROR_WRITE_FAULT;
+				}
+				else if (actual != count) _writeError = ERROR_WRITE_FAULT;
+			}
+			if (written) *written = actual;
+			return success && _writeError == NO_ERROR;
+		}
+
+		bool Flush() override
+		{
+			if (_writeError != NO_ERROR) return false;
+			if (CFile::Flush()) return true;
+			_writeError = GetLastError();
+			if (_writeError == NO_ERROR) _writeError = ERROR_WRITE_FAULT;
+			return false;
+		}
+
 		bool Close(IW::IStatus *pStatus)
 		{
 			if (_hFile == INVALID_HANDLE_VALUE || !m_bCloseOnDelete)
-				return true;
+				return _writeError == NO_ERROR;
 
-			::FlushFileBuffers(_hFile);
+			if (!Flush())
+			{
+				if (pStatus) pStatus->SetError(FormatOsError(_writeError));
+				Abort();
+				return false;
+			}
 			CFile::Close(pStatus);
 
 			const DWORD dwError = Commit();
@@ -700,6 +733,8 @@ namespace IW
 
 		bool Open(const CString &strFileName, DWORD dwAccess, DWORD dwShareMode, DWORD dwCreateFlag)
 		{
+			Abort();
+			_writeError = NO_ERROR;
 			_pathRealFileName = strFileName;
 
 			// The temp must share a volume with the destination or ReplaceFile
