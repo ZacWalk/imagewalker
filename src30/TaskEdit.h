@@ -36,7 +36,7 @@ namespace iw
 		tasks::TaskRunner::AnalyzeFunction make_analyzer() override;
 		tasks::RunOptions build_run_options() override { return {}; }
 		std::vector<platform::ToolbarItem> toolbar_items() override;
-		void draw_content(const ui::CanvasRenderer& renderer, recti bounds) override;
+		void draw_content(const ui::CanvasRenderer& renderer, app::recti bounds) override;
 		bool content_mouse(platform::MouseMessage message, const platform::MouseInput& input) override;
 		bool content_key(const platform::KeyInput& input) override;
 		bool content_dragging() const override { return cropDrag_ != edits::CropHandle::none || cornerDrag_ >= 0; }
@@ -49,7 +49,7 @@ namespace iw
 		enum class Leaving { save, discard, cancel };
 
 		void load_photo();
-		void rebuild_preview(sizei pane);
+		void rebuild_preview(app::sizei pane);
 		void read_controls();
 		void write_controls();
 		void persist_options();
@@ -64,8 +64,8 @@ namespace iw
 		void set_status_for_photo();
 		void undo(bool redo);
 		void finish_drag(bool cancel = false);
-		sizei original_size() const;
-		recti displayed_crop() const;
+		app::sizei original_size() const;
+		app::recti displayed_crop() const;
 		bool dirty() const { return !edits_.empty(); }
 
 		std::filesystem::path path_;
@@ -89,11 +89,11 @@ namespace iw
 		bool perspectiveHandles_{};
 		edits::CropHandle cropDrag_{edits::CropHandle::none};
 		int cornerDrag_{-1};
-		pointi dragStart_;
-		recti dragCrop_;
+		app::pointi dragStart_;
+		app::recti dragCrop_;
 		edits::ImageEdits beforeDrag_;
-		recti imageBounds_;
-		recti photoBounds_;
-		recti stripBounds_;
+		app::recti imageBounds_;
+		app::recti photoBounds_;
+		app::recti stripBounds_;
 	};
 }

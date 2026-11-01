@@ -4,8 +4,11 @@
 #pragma once
 
 #ifndef RC_INVOKED
-#include <libiw/Color.h>
-#include "util_geometry.h"
+#include <map>
+#include <platform.h>
+#include <libdesktop/system.h>
+#include <iw/imaging/Color.h>
+#include "Geometry.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -29,7 +32,7 @@ namespace iw::platform
 
 	struct BitmapResource
 	{
-		sizei size;
+		app::sizei size;
 		std::vector<std::uint32_t> pixels;
 		bool hasAlpha{};
 	};
@@ -100,8 +103,8 @@ namespace iw::platform
 
 	struct MouseInput
 	{
-		pointi point;
-		pointi screenPoint;
+		app::pointi point;
+		app::pointi screenPoint;
 		bool leftButton{};
 		bool control{};
 		bool shift{};
@@ -120,7 +123,7 @@ namespace iw::platform
 	struct GestureInput
 	{
 		GestureKind kind{};
-		pointi point;
+		app::pointi point;
 		std::uint64_t argument{};
 		bool begin{};
 		bool end{};
@@ -129,7 +132,7 @@ namespace iw::platform
 	struct FileDrop
 	{
 		std::vector<std::filesystem::path> files;
-		pointi point;
+		app::pointi point;
 	};
 
 	namespace TextFormat
@@ -177,18 +180,18 @@ namespace iw::platform
 	{
 	public:
 		virtual ~DrawContext() = default;
-		virtual recti clip_rect() const = 0;
-		virtual void fill(recti rect, color value) = 0;
-		virtual void blend_fill(recti rect, color value) = 0;
-		virtual void text(std::wstring_view value, recti rect, color textColor,
+		virtual app::recti clip_rect() const = 0;
+		virtual void fill(app::recti rect, color value) = 0;
+		virtual void blend_fill(app::recti rect, color value) = 0;
+		virtual void text(std::wstring_view value, app::recti rect, color textColor,
 		                  std::uint32_t format, const FontPtr& font = {}) = 0;
-		virtual sizei measure_text(std::wstring_view value, std::uint32_t format,
+		virtual app::sizei measure_text(std::wstring_view value, std::uint32_t format,
 		                           const FontPtr& font = {}) = 0;
-		virtual void image(std::span<const std::uint32_t> pixels, sizei source,
-		                   recti destination, bool alpha) = 0;
-		virtual void focus(recti rect) = 0;
-		virtual void outline(recti rect, color value, int width = 1) = 0;
-		virtual void clip(recti rect) = 0;
+		virtual void image(std::span<const std::uint32_t> pixels, app::sizei source,
+		                   app::recti destination, bool alpha) = 0;
+		virtual void focus(app::recti rect) = 0;
+		virtual void outline(app::recti rect, color value, int width = 1) = 0;
+		virtual void clip(app::recti rect) = 0;
 		virtual void reset_clip() = 0;
 	};
 
@@ -196,7 +199,7 @@ namespace iw::platform
 	{
 	public:
 		virtual ~MeasureContext() = default;
-		virtual sizei measure_text(std::wstring_view value, std::uint32_t format,
+		virtual app::sizei measure_text(std::wstring_view value, std::uint32_t format,
 		                           const FontPtr& font = {}) const = 0;
 	};
 
@@ -210,7 +213,7 @@ namespace iw::platform
 	{
 		std::string className;
 		std::wstring title;
-		recti bounds;
+		app::recti bounds;
 		bool child{};
 		bool visible{true};
 		bool clipChildren{true};
@@ -224,7 +227,7 @@ namespace iw::platform
 
 	struct WindowPlacement
 	{
-		recti normalBounds;
+		app::recti normalBounds;
 		bool maximized{};
 	};
 
@@ -277,11 +280,11 @@ namespace iw::platform
 		virtual NativeHandle native_handle() const = 0;
 		virtual void set_reactor(FrameReactorPtr reactor) = 0;
 		virtual WindowFramePtr create_child(FrameReactorPtr reactor, const WindowOptions& options) = 0;
-		virtual recti client_rect() const = 0;
-		virtual void move(recti bounds) = 0;
+		virtual app::recti client_rect() const = 0;
+		virtual void move(app::recti bounds) = 0;
 		virtual void show(bool visible) = 0;
 		virtual void invalidate() = 0;
-		virtual void invalidate(recti bounds) = 0;
+		virtual void invalidate(app::recti bounds) = 0;
 		virtual void set_focus() = 0;
 		virtual bool has_focus() const = 0;
 		virtual void set_capture() = 0;
@@ -292,8 +295,8 @@ namespace iw::platform
 		virtual void stop_timer() = 0;
 		virtual void accept_file_drops(bool accept = true) = 0;
 		virtual void set_cursor(CursorShape cursor) = 0;
-		virtual pointi screen_to_client(pointi point) const = 0;
-		virtual pointi client_to_screen(pointi point) const = 0;
+		virtual app::pointi screen_to_client(app::pointi point) const = 0;
+		virtual app::pointi client_to_screen(app::pointi point) const = 0;
 		virtual void set_title(std::wstring_view title) = 0;
 		virtual void set_fullscreen(bool fullscreen) = 0;
 		virtual void set_maximized(bool maximized) = 0;
@@ -318,12 +321,17 @@ namespace iw::platform
 		{
 		}
 
-		virtual void size(const WindowFramePtr&, sizei, MeasureContext&)
+		virtual void size(const WindowFramePtr&, app::sizei, MeasureContext&)
 		{
 		}
 	};
 
 	WindowFramePtr create_top_level_frame(FrameReactorPtr reactor, const WindowOptions& options);
+	// Binds the frame supplied by libdesktop's app_init callback.  The adapter keeps
+	// ImageWalker's event model local while the actual window remains pf::owned.
+	void bind_main_frame(const pf::window_frame_ptr& frame);
+	void shutdown_runtime();
+	pf::window_frame_ptr native_frame(const WindowFramePtr& frame);
 	FontPtr create_message_font(unsigned int dpi);
 	enum class BitmapAsset
 	{
@@ -333,7 +341,7 @@ namespace iw::platform
 	BitmapResource load_bitmap_resource(BitmapAsset asset);
 	color system_color(SystemColor value);
 	color calc_hande_color(bool hover, bool selected, bool checked);
-	sizei drag_threshold();
+	app::sizei drag_threshold();
 
 	// One value per 24-pixel tile of Res\ToolbarSymbols.bmp, in strip order: the value is the
 	// toolbar image index, so a tile without a value shifts every glyph after it.
@@ -400,7 +408,8 @@ namespace iw::platform
 		static PopupItem separator_item();
 	};
 
-	void show_popup_menu(const WindowFramePtr& owner, pointi screenPoint, std::span<const PopupItem> items);
+	void show_popup_menu(const WindowFramePtr& owner, app::pointi screenPoint, std::span<const PopupItem> items);
+	void set_frame_menu(const WindowFramePtr& owner, std::vector<Menu> menus);
 
 	enum class ToolbarItemKind { command, menu, separator };
 
@@ -442,7 +451,7 @@ namespace iw::platform
 		                             std::function<void(const std::filesystem::path&)> selected) = 0;
 		virtual void set_status(StatusInfo status) = 0;
 		virtual void set_thumbnail_size(int value, std::function<void(int)> changed) = 0;
-		virtual recti layout(recti client, bool fullscreen) = 0;
+		virtual app::recti layout(app::recti client, bool fullscreen) = 0;
 		virtual void set_dpi(unsigned int dpi) = 0;
 		virtual void refresh() = 0;
 	};
@@ -460,7 +469,7 @@ namespace iw::platform
 	{
 	public:
 		virtual ~ShellTree() = default;
-		virtual void set_bounds(recti bounds) = 0;
+		virtual void set_bounds(app::recti bounds) = 0;
 		virtual void show(bool visible) = 0;
 		virtual void set_focus() = 0;
 		virtual bool has_focus() const = 0;
@@ -553,7 +562,7 @@ namespace iw::platform
 	{
 	public:
 		virtual ~TextInput() = default;
-		virtual void set_bounds(recti bounds) = 0;
+		virtual void set_bounds(app::recti bounds) = 0;
 		virtual void show(bool visible) = 0;
 		virtual void set_focus() = 0;
 		virtual bool has_focus() const = 0;
@@ -718,8 +727,5 @@ namespace iw::platform
 
 	// Pumps messages until the window closes, then requests exit_token, stops the background
 	// queues and joins their threads.
-	int run_ui_loop(const WindowFramePtr& window);
 }
-
-int imagewalker_main(int showCommand, std::span<const std::wstring_view> arguments);
 #endif

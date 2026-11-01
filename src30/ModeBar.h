@@ -60,22 +60,22 @@ namespace iw
 		platform::MessageResult mouse(const platform::WindowFramePtr& frame, platform::MouseMessage message,
 		                              const platform::MouseInput& input) override;
 		void paint(const platform::WindowFramePtr& frame, platform::DrawContext& draw) override;
-		void size(const platform::WindowFramePtr& frame, sizei extent,
+		void size(const platform::WindowFramePtr& frame, app::sizei extent,
 		          platform::MeasureContext& measure) override;
 
 		int metric(const int value) const { return ui::scale_metric(value, dpi_); }
 		void layout();
-		void draw_button(const ui::CanvasRenderer& renderer, const Button& button, recti bounds,
+		void draw_button(const ui::CanvasRenderer& renderer, const Button& button, app::recti bounds,
 		                 bool hot) const;
-		void draw_glyph(const ui::CanvasRenderer& renderer, Glyph glyph, recti bounds, color value) const;
-		const Button* button_at(pointi point) const;
+		void draw_glyph(const ui::CanvasRenderer& renderer, Glyph glyph, app::recti bounds, color value) const;
+		const Button* button_at(app::pointi point) const;
 		void invalidate();
 
 		platform::WindowFramePtr frame_;
 		std::vector<Button> modes_;
 		std::vector<Button> shortcuts_;
-		std::vector<recti> modeBounds_;
-		std::vector<recti> shortcutBounds_;
+		std::vector<app::recti> modeBounds_;
+		std::vector<app::recti> shortcutBounds_;
 		std::function<void(const Button&)> commandHandler_;
 		std::function<void(const Button&)> removeHandler_;
 		unsigned int dpi_{96};

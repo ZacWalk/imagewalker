@@ -7,31 +7,31 @@
 
 namespace iw::ui
 {
-	void CanvasRenderer::fill(const recti rect, const color value) const
+	void CanvasRenderer::fill(const app::recti rect, const color value) const
 	{
 		draw_.fill(rect, value);
 	}
 
-	void CanvasRenderer::blend_fill(const recti rect, const color value) const
+	void CanvasRenderer::blend_fill(const app::recti rect, const color value) const
 	{
 		draw_.blend_fill(rect, value);
 	}
 
-	void CanvasRenderer::text(const std::wstring_view value, const recti rect, const color textColor,
+	void CanvasRenderer::text(const std::wstring_view value, const app::recti rect, const color textColor,
 	                          const std::uint32_t format) const
 	{
 		draw_.text(value, rect, textColor, format, font_);
 	}
 
-	sizei CanvasRenderer::measure_text(const std::wstring_view value, const std::uint32_t format) const
+	app::sizei CanvasRenderer::measure_text(const std::wstring_view value, const std::uint32_t format) const
 	{
 		return draw_.measure_text(value, format, font_);
 	}
 
-	void CanvasRenderer::image(const ArgbImage& imageValue, const recti destination) const
+	void CanvasRenderer::image(const ArgbImage& imageValue, const app::recti destination) const
 	{
 		static thread_local ResampleCache cache;
-		const recti visible = destination.intersection(draw_.clip_rect());
+		const app::recti visible = destination.intersection(draw_.clip_rect());
 		if (visible.is_empty() || destination.width <= 0 || destination.height <= 0) return;
 		const double scaleX = static_cast<double>(imageValue.width) / destination.width;
 		const double scaleY = static_cast<double>(imageValue.height) / destination.height;
@@ -44,12 +44,12 @@ namespace iw::ui
 		if (!pixels.empty()) draw_.image(pixels, visible.extent(), visible, imageValue.alpha);
 	}
 
-	void CanvasRenderer::focus(const recti rect) const
+	void CanvasRenderer::focus(const app::recti rect) const
 	{
 		draw_.focus(rect);
 	}
 
-	void CanvasRenderer::outline(const recti rect, const color value, const int width) const
+	void CanvasRenderer::outline(const app::recti rect, const color value, const int width) const
 	{
 		draw_.outline(rect, value, width);
 	}
@@ -68,7 +68,7 @@ namespace iw::ui
 		     platform::system_color(platform::SystemColor::shadow));
 	}
 
-	void CanvasRenderer::clip(const recti rect) const
+	void CanvasRenderer::clip(const app::recti rect) const
 	{
 		draw_.clip(rect);
 	}

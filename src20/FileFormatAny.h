@@ -1,7 +1,7 @@
 #pragma once
 #include "ViewModelItems.h"
 #include "ImagingStreams.h"
-#include "iw/imaging/FileFormatAny.h"
+#include "iw/legacy/FileFormatAny.h"
 
 class CLoadAny : public CLoadAnyCore
 {

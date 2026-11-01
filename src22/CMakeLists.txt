@@ -39,24 +39,19 @@ set(IW22_SOURCES
 )
 
 # CMake's RelWithDebInfo downgrades /O2's implied /Ob2 to /Ob1, which limits
-# inlining to functions the source marked inline -- and /Ob governs LTCG's
-# cross-module inlining too, so calls into libiw's line converters would stay
-# out of line even with /GL on. libiw makes the same replacement for its own
-# sources. The preset builds RelWithDebInfo, so this is the release config.
+# inlining to functions the source marked inline. The preset builds
+# RelWithDebInfo, so this is the release config.
 # Replaced rather than appended: appending /Ob2 leaves both on the command line
 # and every compile then reports D9025. Directory scope, so 2.2 only.
 string(REPLACE "/Ob1" "/Ob2" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
 
 add_executable(imagewalker22 WIN32 ${IW22_SOURCES} ImageWalker.rc)
-target_include_directories(imagewalker22 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/libiw/compat")
+target_include_directories(imagewalker22 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(imagewalker22 PRIVATE UNICODE _UNICODE)
 target_precompile_headers(imagewalker22 PRIVATE StdAfx.h)
 
-# /GL + /LTCG on the optimised configs. The views and tools here call libiw's
-# surface locks and line converters, and libiw is compiled with /GL too, so
-# whole-program optimisation is what lets those calls inline across the
-# application and library boundary. Debug is left alone: /GL makes the link slow
-# and the stepping worse for no benefit at /Od.
+# /GL + /LTCG on the optimised configs. Debug is left alone: /GL makes the link
+# slow and stepping worse for no benefit.
 set_target_properties(imagewalker22 PROPERTIES
     INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO ON
     INTERPROCEDURAL_OPTIMIZATION_RELEASE ON
@@ -64,13 +59,14 @@ set_target_properties(imagewalker22 PROPERTIES
 
 target_link_libraries(imagewalker22 PRIVATE
     iw::flags
-    iw::libiw
+    iw_legacy
     iw::jpeg
     iw::png
     iw::tiff
     iw::gif
     iw::zlib
     iw::hunspell
+    libfiles::libfiles
 )
 
 # The app embeds its own manifest as resource 1.

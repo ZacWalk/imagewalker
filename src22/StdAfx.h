@@ -39,11 +39,11 @@ extern CAppModule _Module;
 // only after the app headers makes the debug front end fall over with an
 // internal compiler error inside xcall_once.h.
 #include <mutex>
-#include <libiw/Pixel.h>
+#include <iw/imaging/Pixel.h>
 
 #include "iw/buffer.h"
 
-#include "iw/imaging/UtilMemory.h"
+#include "iw/legacy/UtilMemory.h"
 
 #include <WinInet.h>
 #include <ShlObj.h>
@@ -73,16 +73,17 @@ extern CAppModule _Module;
 
 #include "resource.h"
 #include "Ver.h"
-#include "iw/imaging/UtilStrings.h"
+#include "iw/legacy/UtilStrings.h"
 #include "UtilCore.h"
 // ColorButton lives in include/ and takes these from whichever app includes it.
 #define COLORBUTTON_HIGHLIGHT     IW::Style::Color::Highlight
 #define COLORBUTTON_HIGHLIGHTTEXT IW::Style::Color::HighlightText
 
 #include "UtilShell.h"
-#include "iw/imaging/FileStreams.h"
-#include "iw/imaging/UtilSerialize.h"
-#include "iw/imaging/Imaging.h"
+#include "iw/legacy/FileStreams.h"
+#include "iw/legacy/UtilSerialize.h"
+#include "iw/legacy/Imaging.h"
+#include "iw/legacy/Legacy.h"
 #include "ViewRender.h"
 #include "UtilThreads.h"
 #include "ViewModelItems.h"

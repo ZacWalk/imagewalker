@@ -4,9 +4,9 @@ Development requirements for all five applications.
 
 - Each is a standalone x64 executable with one entry-point file and one test
   file.
-- Link `libiw` statically for image loading and manipulation. Keep UI,
-  resources, settings, worker scheduling and final file publication in the
-  application. See [libiw-plan.md](libiw-plan.md).
+- Use the shared inline imaging headers and dependent libraries directly for image
+  loading and manipulation. Keep UI, resources, settings, worker scheduling
+  and final file publication in the application. See [libiw-plan.md](libiw-plan.md).
 - Debug executables end in `d`; binaries, settings and logs all live in `exe\`.
 - Keep version resources in each application's directory: `ImageWalker.rc` for
   1.0, `Ver.h` and `ImageWalker.rc` for 2.x, and `app.rc` for 3.0.

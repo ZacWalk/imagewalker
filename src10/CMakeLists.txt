@@ -29,9 +29,13 @@ target_precompile_headers(imagewalker10 PRIVATE StdAfx.h)
 
 target_link_libraries(imagewalker10 PRIVATE
     iw::flags
-    iw::libiw
+    iw_imaging
     iw::jpeg
     iw::png
+    iw::gif
+    iw::tiff
+    iw::zlib
+    libfiles::libfiles
 )
 
 # The app embeds its own manifest as resource 1.

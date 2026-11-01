@@ -1,7 +1,7 @@
 #pragma once
 #include "Files.h"
 #include "EditGeometry.h"
-#include <libiw/ImageEdits.h>
+#include <iw/imaging/ImageEdits.h>
 namespace iw::edits
 {
 	// Draft snapshots only; saving establishes a new baseline and clears this history.
@@ -25,13 +25,13 @@ namespace iw::edits
 	class PreviewSource
 	{
 	public:
-		bool update(const files::DecodedImage& source, sizei pane);
+		bool update(const files::DecodedImage& source, app::sizei pane);
 		void reset() { image_ = {}; pane_ = {}; }
 		const files::DecodedImage& image() const { return image_; }
 
 	private:
 		files::DecodedImage image_;
-		sizei pane_;
+		app::sizei pane_;
 	};
 
 }

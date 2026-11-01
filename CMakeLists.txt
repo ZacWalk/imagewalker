@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(imagewalker-all
-        DESCRIPTION "Standalone x64 ImageWalker applications with the libiw imaging library"
+        DESCRIPTION "Standalone x64 ImageWalker applications with shared imaging sources"
         LANGUAGES C CXX)
 
 if(NOT MSVC)
@@ -50,6 +50,23 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib" CACHE PATH "" FORCE
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib" CACHE PATH "" FORCE)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" CACHE PATH "" FORCE)
 
+# libdesktop system and core are consumed by the shared imaging headers. Declare
+# the dependency before any consumer targets so their public usage
+# requirements, including include paths, remain target-owned.
+include(FetchContent)
+if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_LIBDESKTOP
+   AND EXISTS "${PROJECT_SOURCE_DIR}/../libdesktop/CMakeLists.txt")
+    set(FETCHCONTENT_SOURCE_DIR_LIBDESKTOP "${PROJECT_SOURCE_DIR}/../libdesktop" CACHE PATH
+        "A libdesktop checkout to build instead of the published revision")
+endif()
+set(LIBDESKTOP_SYSTEM ON CACHE BOOL
+    "Build libdesktop-system for ImageWalker" FORCE)
+FetchContent_Declare(libdesktop
+    GIT_REPOSITORY https://github.com/ZacWalk/libdesktop.git
+    GIT_TAG        31aae322af6e0696a9597726705b1121bd31580b
+    EXCLUDE_FROM_ALL)
+FetchContent_MakeAvailable(libdesktop)
+
 # Settings shared by the WTL app targets (1.0 through 2.3). Deliberately NOT
 # applied to third-party, nor to 3.0, which is modern code held to strict
 # conformance.
@@ -61,8 +78,9 @@ target_compile_features(iw_flags INTERFACE cxx_std_20)
 # rewrite ~1100 inherited-member references.
 # Dependency recipes can replace cached CMAKE_CXX_FLAGS; keep destructor
 # unwinding explicit rather than relying on the compiler's default flags.
-# Codec callbacks that unwind through C frames are compiled inside libiw,
-# which selects /EHs independently of the application targets.
+# Codec callbacks that unwind through C frames are compiled in the shared
+# application-owned imaging objects, which select /EHs independently of the
+# historical application targets.
 target_compile_options(iw_flags INTERFACE
     /EHsc
     /permissive /Zc:__cplusplus /utf-8 /W4 /MP
@@ -92,8 +110,7 @@ target_include_directories(iw_flags INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/inclu
 target_include_directories(iw_flags INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include/wtl")
 target_link_libraries(iw_flags INTERFACE
     comctl32 shlwapi gdi32 user32 ole32 oleaut32 uuid advapi32 shell32 comdlg32 winspool htmlhelp
-    dbghelp version  # iw/crashreport.h
-)
+    dbghelp version)  # iw/crashreport.h
 
 # Keeps the ~100 third-party targets out of the way in the VS solution tree.
 set(CMAKE_FOLDER "third-party")
@@ -101,7 +118,8 @@ add_subdirectory(third-party)
 
 unset(CMAKE_FOLDER)
 
-add_subdirectory(libiw)
+# Header-only shared imaging and its standalone regression consumers.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/imagewalker-imaging.cmake")
 
 # One directory per release. 3.0 brings its own compiler settings; the rest
 # share iw::flags.
@@ -113,12 +131,27 @@ foreach(ver IN LISTS IW_VERSIONS)
     endif()
 endforeach()
 
+# 3.0 still uses the historical help-file declaration, but not the retired
+# layout/geometry helpers. Keep that one compatibility header available without
+# making include/core part of the modern imaging interface.
+if(TARGET imagewalker30)
+    target_include_directories(imagewalker30 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/core")
+endif()
+
 # One place decides what lands in exe/, so the naming cannot drift per app:
 # imagewalker<ver>.exe for release, imagewalker<ver>d.exe for debug. The apps
 # derive their .ini and .log names from the exe, so a debug and a release build
 # in the same directory keep separate settings and separate logs.
 foreach(ver IN LISTS IW_VERSIONS)
     if(TARGET imagewalker${ver})
+        # Application-scoped test runs include the shared imaging checks; make
+        # their executable a build dependency so a focused run is never
+        # reported as "not run" merely because it was not selected as a build
+        # target.
+        if(TARGET imagewalker_imaging_tests)
+            add_dependencies(imagewalker${ver} imagewalker_imaging_tests)
+        endif()
         set_target_properties(imagewalker${ver} PROPERTIES
             OUTPUT_NAME "imagewalker${ver}"
             DEBUG_POSTFIX d

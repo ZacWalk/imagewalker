@@ -2,16 +2,13 @@
 // Implements non-UI file enumeration, metadata, and image decoding services.
 
 #include "Platform.h"
-#include "PlatformWin32.h"
 #include "Files.h"
+#include "DesktopServices.h"
 
 #include "Media.h"
 #include "Paths.h"
-#include <libiw/Codec.h>
+#include <iw/imaging/Codec.h>
 
-#include <objbase.h>
-#include <wincodec.h>
-#include <wincodecsdk.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -20,7 +17,6 @@
 #include <cwctype>
 #include <format>
 #include <fstream>
-#include <intrin.h>
 #include <numeric>
 #include <set>
 
@@ -40,58 +36,49 @@ namespace iw::files
 
 			~TemporaryOutput()
 			{
-				if (path_.empty()) return;
-				std::error_code error;
-				std::filesystem::remove(path_, error);
-				if (error == std::errc::permission_denied &&
-					SetFileAttributesW(path_.c_str(), FILE_ATTRIBUTE_NORMAL))
+				if (path_.is_empty()) return;
+				auto result = ::platform::delete_file(path_);
+				if (result.failed())
 				{
-					error.clear();
-					std::filesystem::remove(path_, error);
+					::platform::make_file_writable(path_);
+					result = ::platform::delete_file(path_);
 				}
-				if (error) platform::write_diagnostic(L"Unable to remove an incomplete temporary output.\n");
+				if (result.failed()) platform::write_diagnostic(L"Unable to remove an incomplete temporary output.\n");
 			}
 
 			std::error_code create(const std::filesystem::path& destination)
 			{
 				for (int attempt = 0; attempt < 16; ++attempt)
 				{
-					GUID id{};
-					if (FAILED(CoCreateGuid(&id))) return std::make_error_code(std::errc::io_error);
-					wchar_t text[40]{};
-					if (!StringFromGUID2(id, text, static_cast<int>(std::size(text))))
-						return std::make_error_code(std::errc::io_error);
-					auto candidate = native_path(destination.parent_path() /
-						(std::wstring(L".iw30-") + text + L".tmp"));
-					const HANDLE file = CreateFileW(candidate.c_str(), GENERIC_WRITE, 0, nullptr,
-						CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
-					if (file != INVALID_HANDLE_VALUE)
+					const auto candidate = ::platform::temp_file(".tmp", desktop::folder_path(destination.parent_path()));
+					const auto file = ::platform::open_file(candidate, ::platform::file_open_mode::create_new);
+					if (file)
 					{
-						CloseHandle(file);
-						path_ = std::move(candidate);
+						path_ = candidate;
 						return {};
 					}
-					const auto error = GetLastError();
-					if (error != ERROR_FILE_EXISTS && error != ERROR_ALREADY_EXISTS)
-						return {static_cast<int>(error), std::system_category()};
+					const auto attributes = ::platform::file_attributes(candidate);
+					if (!attributes.exists())
+						return desktop::attributes_error(attributes);
 				}
 				return std::make_error_code(std::errc::file_exists);
 			}
 
-			const std::filesystem::path& path() const { return path_; }
+			std::filesystem::path path() const { return ::platform::to_stream_path(path_); }
+			const df::file_path& desktop_path() const { return path_; }
 
 			std::error_code commit(const std::filesystem::path& destination, const bool overwrite)
 			{
 				// Publish only a complete output; an unreviewed destination wins a racing create.
-				if (!MoveFileExW(path_.c_str(), native_path(destination).c_str(),
-					MOVEFILE_WRITE_THROUGH | (overwrite ? MOVEFILE_REPLACE_EXISTING : 0)))
-					return {static_cast<int>(GetLastError()), std::system_category()};
+				const auto result = ::platform::move_file(
+					path_, desktop::file_path(destination), !overwrite);
+				if (result.failed()) return desktop::operation_error(result);
 				path_.clear();
 				return {};
 			}
 
 		private:
-			std::filesystem::path path_;
+			df::file_path path_;
 		};
 
 		ItemKind classify_extension(const std::wstring& extension)
@@ -145,29 +132,20 @@ namespace iw::files
 	std::optional<FileSnapshot> snapshot_file(const std::filesystem::path& path)
 	{
 		if (path.empty()) return std::nullopt;
-		const HANDLE file = CreateFileW(native_path(path).c_str(), FILE_READ_ATTRIBUTES,
-			FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-			FILE_FLAG_BACKUP_SEMANTICS, nullptr);
-		if (file == INVALID_HANDLE_VALUE)
+		std::error_code directoryError;
+		const bool directory = std::filesystem::is_directory(native_path(path), directoryError);
+		const auto attributes = directory
+			                        ? ::platform::file_attributes(desktop::folder_path(path))
+			                        : ::platform::file_attributes(desktop::file_path(path));
+		if (!attributes.exists())
 		{
-			const DWORD error = GetLastError();
-			if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) return FileSnapshot{};
+			if (attributes.confirmed_missing()) return FileSnapshot{};
 			return std::nullopt;
 		}
-		BY_HANDLE_FILE_INFORMATION information{};
-		const bool read = GetFileInformationByHandle(file, &information) != FALSE;
-		CloseHandle(file);
-		if (!read) return std::nullopt;
-		const auto combine = [](const DWORD high, const DWORD low)
-		{
-			return (static_cast<std::uint64_t>(high) << 32) | low;
-		};
+		if (!attributes.identity.valid) return std::nullopt;
 		return FileSnapshot{
-			true, (information.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0,
-			(information.dwFileAttributes & FILE_ATTRIBUTE_READONLY) != 0, information.dwVolumeSerialNumber,
-			combine(information.nFileIndexHigh, information.nFileIndexLow),
-			combine(information.nFileSizeHigh, information.nFileSizeLow),
-			combine(information.ftLastWriteTime.dwHighDateTime, information.ftLastWriteTime.dwLowDateTime)
+			true, directory, attributes.is_readonly, attributes.is_reparse,
+			attributes.identity.volume, attributes.identity.index, attributes.size, attributes.modified
 		};
 	}
 
@@ -458,20 +436,22 @@ namespace iw::files
 		                                    std::filesystem::path& nativeDestination)
 		{
 			nativeDestination = native_path(destination);
-			std::error_code error;
-			if (std::filesystem::exists(nativeDestination, error) && !overwrite)
+			const auto destinationAttributes = ::platform::file_attributes(desktop::file_path(destination));
+			if (destinationAttributes.exists() && !overwrite)
 				return std::make_error_code(std::errc::file_exists);
-			if (error) return error;
-			const auto folder = nativeDestination.parent_path();
-			error.clear();
+			if (!destinationAttributes.exists() && !destinationAttributes.confirmed_missing())
+				return desktop::attributes_error(destinationAttributes);
+			const auto folder = destination.parent_path();
 			if (!folder.empty())
 			{
-				const bool exists = std::filesystem::exists(folder, error);
-				if (error) return error;
-				if (!exists)
+				const auto folderAttributes = ::platform::file_attributes(desktop::folder_path(folder));
+				if (!folderAttributes.exists())
 				{
-					std::filesystem::create_directories(folder, error);
-					if (error) return error;
+					if (!folderAttributes.confirmed_missing())
+						return desktop::attributes_error(folderAttributes);
+					if (const auto created = ::platform::create_folder(desktop::folder_path(folder));
+					    created.failed())
+						return desktop::operation_error(created);
 				}
 			}
 			return {};
@@ -486,10 +466,10 @@ namespace iw::files
 		if (paths::equal(source, destination)) return std::make_error_code(std::errc::invalid_argument);
 		TemporaryOutput output;
 		if (const auto error = output.create(destination)) return error;
-		std::error_code error;
-		std::filesystem::copy_file(native_path(source), output.path(),
-			std::filesystem::copy_options::overwrite_existing, error);
-		if (error) return error;
+		if (const auto copied = ::platform::copy_file(
+			    desktop::file_path(source), output.desktop_path(), false, false);
+		    copied.failed())
+			return desktop::operation_error(copied);
 		if (beforeCommit && !beforeCommit()) return std::make_error_code(std::errc::operation_canceled);
 		return output.commit(destination, overwrite);
 	}
@@ -499,19 +479,17 @@ namespace iw::files
 	{
 		std::filesystem::path nativeDestination;
 		if (const auto prepared = prepare_destination(destination, overwrite, nativeDestination)) return prepared;
-		const auto nativeSource = native_path(source);
 		if (paths::equal(source, destination)) return std::make_error_code(std::errc::invalid_argument);
 		if (beforeCommit && !beforeCommit()) return std::make_error_code(std::errc::operation_canceled);
-		if (MoveFileExW(nativeSource.c_str(), nativeDestination.c_str(),
-			MOVEFILE_WRITE_THROUGH | (overwrite ? MOVEFILE_REPLACE_EXISTING : 0)))
-			return {};
-		const auto moveError = GetLastError();
-		if (moveError != ERROR_NOT_SAME_DEVICE)
-			return {static_cast<int>(moveError), std::system_category()};
+		const auto moved = ::platform::move_file(
+			desktop::file_path(source), desktop::file_path(destination), !overwrite, false);
+		if (moved.success()) return {};
+		const auto moveError = desktop::operation_error(moved);
+		if (moveError != std::errc::cross_device_link) return moveError;
 		auto error = copy_file_to(source, destination, overwrite, beforeCommit);
 		if (error) return error;
-		std::filesystem::remove(nativeSource, error);
-		return error;
+		const auto removed = ::platform::delete_file(desktop::file_path(source));
+		return removed.success() ? std::error_code{} : desktop::operation_error(removed);
 	}
 
 	std::filesystem::path create_original_backup(const std::filesystem::path& path)
@@ -585,11 +563,7 @@ namespace iw::files
 
 		std::wstring wide(const std::string& utf8)
 		{
-			const int length = utf8.empty() ? 0 : MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
-			if (length <= 0) return {};
-			std::wstring result(static_cast<size_t>(length), L'\0');
-			MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), result.data(), length);
-			return result;
+			return ::platform::utf8_to_utf16(utf8);
 		}
 
 		// As EXIF writes a date, "YYYY:MM:DD HH:MM:SS", by the camera's clock whatever zone the file states, as

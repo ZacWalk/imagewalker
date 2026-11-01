@@ -3,6 +3,7 @@
 
 #include "TaskRename.h"
 
+#include "DesktopServices.h"
 #include "Paths.h"
 
 #include <algorithm>
@@ -12,7 +13,6 @@
 #include <limits>
 #include <set>
 #include <stdexcept>
-#include <windows.h>
 
 namespace iw
 {
@@ -57,50 +57,42 @@ namespace iw::rename
 		{
 			bool valid{};
 			bool exists{};
-			DWORD attributes{};
-			DWORD volume{};
-			DWORD indexHigh{};
-			DWORD indexLow{};
+			bool directory{};
+			bool readOnly{};
+			bool reparse{};
+			std::uint64_t volume{};
+			std::uint64_t index{};
 			std::uint64_t size{};
 			std::uint64_t modified{};
 
 			static Snapshot read(const std::filesystem::path& path)
 			{
 				Snapshot result;
-				const HANDLE handle = CreateFileW(files::native_path(path).c_str(), FILE_READ_ATTRIBUTES,
-					FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-					FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-				if (handle == INVALID_HANDLE_VALUE)
-				{
-					const auto error = GetLastError();
-					result.valid = error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND;
-					return result;
-				}
-				BY_HANDLE_FILE_INFORMATION info{};
-				result.valid = GetFileInformationByHandle(handle, &info) != FALSE;
-				CloseHandle(handle);
-				result.exists = true;
-				result.attributes = info.dwFileAttributes;
-				result.volume = info.dwVolumeSerialNumber;
-				result.indexHigh = info.nFileIndexHigh;
-				result.indexLow = info.nFileIndexLow;
-				result.size = static_cast<std::uint64_t>(info.nFileSizeHigh) << 32 | info.nFileSizeLow;
-				result.modified = static_cast<std::uint64_t>(info.ftLastWriteTime.dwHighDateTime) << 32 |
-					info.ftLastWriteTime.dwLowDateTime;
+				const auto snapshot = files::snapshot_file(path);
+				if (!snapshot) return result;
+				result.valid = true;
+				result.exists = snapshot->exists;
+				result.directory = snapshot->directory;
+				result.readOnly = snapshot->readOnly;
+				result.reparse = snapshot->reparse;
+				result.volume = snapshot->volume;
+				result.index = snapshot->identity;
+				result.size = snapshot->size;
+				result.modified = snapshot->modified;
 				return result;
 			}
 
 			bool same(const Snapshot& current) const
 			{
 				return valid && current.valid && exists == current.exists && (!exists ||
-					(attributes == current.attributes && volume == current.volume &&
-					 indexHigh == current.indexHigh && indexLow == current.indexLow &&
+					(directory == current.directory && readOnly == current.readOnly &&
+					 reparse == current.reparse && volume == current.volume && index == current.index &&
 					 size == current.size && modified == current.modified));
 			}
 
 			bool writable_item() const
 			{
-				return valid && exists && !(attributes & (FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_REPARSE_POINT));
+				return valid && exists && !readOnly && !reparse;
 			}
 		};
 
@@ -358,7 +350,7 @@ namespace iw::rename
 					}
 					throw std::runtime_error("A companion destination was taken after review.");
 				}
-				if (!current.writable_item() || (current.attributes & FILE_ATTRIBUTE_DIRECTORY) ||
+				if (!current.writable_item() || current.directory ||
 					!staging.stage(target, mutatedPaths))
 					throw std::runtime_error("The approved replacement could not be staged.");
 				replaced.push_back(staging.actual(target));
@@ -434,7 +426,7 @@ namespace iw::rename
 			const auto parent = canonical_parent(sources[index]);
 			row.source = parent.empty() ? sources[index] : parent / sources[index].filename();
 			const auto sourceState = Snapshot::read(row.source);
-			const bool directory = (sourceState.attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+			const bool directory = sourceState.directory;
 			if (!directory) row.sidecars = files::sidecar_paths(row.source);
 			auto review = std::make_shared<Reviewed>();
 			review->parent = parent;
@@ -518,7 +510,7 @@ namespace iw::rename
 						{
 							disk = true;
 							protectedSource |= allSources.contains(target.native());
-							inaccessible |= !state.writable_item() || (state.attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+							inaccessible |= !state.writable_item() || state.directory;
 						}
 					}
 					return disk || duplicate || inaccessible;
@@ -528,7 +520,7 @@ namespace iw::rename
 					if (policy == tasks::CollisionPolicy::autoRename)
 					{
 						const auto sourceState = Snapshot::read(row.source);
-						const bool directory = (sourceState.attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+						const bool directory = sourceState.directory;
 						const auto stem = directory ? proposed[index].filename().wstring() : proposed[index].stem().wstring();
 						const auto extension = directory ? L"" : proposed[index].extension().wstring();
 						bool found = false;
@@ -691,7 +683,7 @@ namespace iw::rename
 						if (!reviewed->sourceState[index].same(Snapshot::read(reviewed->sources[index])))
 							state->aborted = true;
 					PathSet companions;
-					if (!(reviewed->sourceState.front().attributes & FILE_ATTRIBUTE_DIRECTORY))
+					if (!reviewed->sourceState.front().directory)
 						for (const auto& sidecar : files::sidecar_paths(item.source)) companions.insert(sidecar.native());
 					PathSet expected;
 					for (const auto& sidecar : item.sidecars) expected.insert(sidecar.native());
@@ -711,7 +703,7 @@ namespace iw::rename
 				for (size_t index = 0; index < reviewed->sources.size(); ++index)
 					if (!reviewed->sourceState[index].same(Snapshot::read(state->staging.actual(reviewed->sources[index]))))
 						valid = false;
-				if (!(reviewed->sourceState.front().attributes & FILE_ATTRIBUTE_DIRECTORY) &&
+				if (!reviewed->sourceState.front().directory &&
 					paths::equal(state->staging.actual(row.source), row.source))
 				{
 					PathSet current, expected;

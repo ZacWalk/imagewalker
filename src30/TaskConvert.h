@@ -30,7 +30,7 @@ namespace iw
 
 	// Preserves aspect ratio and only ever scales down: a photo already inside the limit is
 	// returned unchanged. A limit of zero means no limit.
-	sizei limited_output_size(int width, int height, int limit);
+	app::sizei limited_output_size(int width, int height, int limit);
 
 	class TaskConvert final : public TaskView
 	{

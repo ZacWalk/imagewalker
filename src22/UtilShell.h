@@ -21,7 +21,7 @@
 #include <ShlObj.h>
 #include <ShlwApi.h> // For PathIsUrl function
 
-#include "iw/imaging/UtilBase.h"
+#include "iw/legacy/UtilBase.h"
 #include "iw/shell.h"
 
 namespace IW

@@ -5,8 +5,9 @@ Follow these rules when building the historical applications on modern
 
 - MSVC compiles the WTL trees as C++20 with `/permissive`.
 - ImageWalker 1.0 is MBCS. ImageWalker 2.0, 2.2 and 2.3 are Unicode.
-- Convert 1.0 paths explicitly at its imaging adapter. Keep the public
-  `libiw` API free of `TCHAR`, ATL/WTL types and application precompiled headers.
+- Convert 1.0 paths explicitly at its imaging adapter. Keep the modern
+  `include/iw/imaging` API free of `TCHAR`, ATL/WTL types and application
+  precompiled headers; historical adapters stay under `include/iw/legacy`.
 - STL headers precede ATL, WTL and application headers in each precompiled
   header. `<wininet.h>` precedes `<shlobj.h>`.
 - CMake source lists preserve extension case and match one original translation

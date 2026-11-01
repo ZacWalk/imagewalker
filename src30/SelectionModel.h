@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "util_layout.h"
+#include "AppLayout.h"
 #include <algorithm>
 #include <functional>
 #include <vector>
@@ -56,7 +56,7 @@ namespace iw::ui
 			for (const int id : hitIds) set_selected(id, true);
 		}
 
-		void marquee(const std::vector<Element>& items, const recti area)
+		void marquee(const std::vector<Element>& items, const app::recti area)
 		{
 			std::vector<int> hits;
 			hits.reserve(items.size());

@@ -10,8 +10,8 @@
 
 #include "ViewModelImage.h"
 #include "ViewMetadataList.h"
-#include "iw/imaging/Metadata.h"
-#include "iw/imaging/MetadataExif.h"
+#include "iw/legacy/Metadata.h"
+#include "iw/legacy/MetadataExif.h"
 #include "ViewTabCtrl.h"
 
 

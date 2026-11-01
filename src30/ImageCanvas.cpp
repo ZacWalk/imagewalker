@@ -21,10 +21,10 @@ namespace iw
 			return kind == files::ItemKind::image || kind == files::ItemKind::video;
 		}
 
-		std::array<recti, 6> media_detail_columns(const recti bounds)
+		std::array<app::recti, 6> media_detail_columns(const app::recti bounds)
 		{
 			constexpr std::array weights{28, 20, 14, 12, 14, 12};
-			std::array<recti, 6> columns{};
+			std::array<app::recti, 6> columns{};
 			int consumed = 0;
 			int weight = 0;
 			for (size_t index = 0; index < columns.size(); ++index)
@@ -127,7 +127,7 @@ namespace iw
 		displayedKind_ = item == items_.end()
 			                 ? files::classify(path, std::filesystem::is_directory(files::native_path(path)))
 			                 : item->kind;
-		const recti client = frame_ ? frame_->client_rect() : recti{};
+		const app::recti client = frame_ ? frame_->client_rect() : app::recti{};
 		const int width = primaryView_.bounds.width > 0
 			                  ? primaryView_.bounds.width
 			                  : (std::max)(1, client.width);
@@ -330,17 +330,17 @@ namespace iw
 		invalidate();
 	}
 
-	bool ImageCanvas::image_hit(const pointi point) const
+	bool ImageCanvas::image_hit(const app::pointi point) const
 	{
 		return !collage_active() && displayed_image() && primaryView_.bounds.contains(point);
 	}
 
-	bool ImageCanvas::comparison_hit(const pointi point) const
+	bool ImageCanvas::comparison_hit(const app::pointi point) const
 	{
 		return fullscreen_ && !comparisonImage_.pixels.empty() && comparisonView_.bounds.contains(point);
 	}
 
-	bool ImageCanvas::inspect_hit(const pointi point) const
+	bool ImageCanvas::inspect_hit(const app::pointi point) const
 	{
 		const bool comparison = comparison_hit(point);
 		if (!comparison && !image_hit(point)) return false;
@@ -372,7 +372,7 @@ namespace iw
 		return value.zoom.effective_scale(value.bounds);
 	}
 
-	recti ImageCanvas::image_destination(const double scale, const bool comparison) const
+	app::recti ImageCanvas::image_destination(const double scale, const bool comparison) const
 	{
 		const auto& value = view(comparison);
 		const bool quick = quickZoom_ && activeComparison_ == comparison;
@@ -390,7 +390,7 @@ namespace iw
 		return {x, y, width, height};
 	}
 
-	void ImageCanvas::set_zoom(const double scale, const pointi focus)
+	void ImageCanvas::set_zoom(const double scale, const app::pointi focus)
 	{
 		const bool comparison = fullscreen_ && activeComparison_;
 		if (comparison && comparisonImage_.pixels.empty()) return;
@@ -407,12 +407,12 @@ namespace iw
 		invalidate();
 	}
 
-	void ImageCanvas::zoom_at(const double factor, const pointi focus)
+	void ImageCanvas::zoom_at(const double factor, const app::pointi focus)
 	{
 		step_zoom(factor >= 1.0 ? 1 : -1, focus);
 	}
 
-	void ImageCanvas::step_zoom(const int direction, const pointi focus)
+	void ImageCanvas::step_zoom(const int direction, const app::pointi focus)
 	{
 		const bool comparison = fullscreen_ && activeComparison_;
 		if ((comparison && comparisonImage_.pixels.empty()) ||
@@ -440,7 +440,7 @@ namespace iw
 
 	void ImageCanvas::reset_zoom(const double scale)
 	{
-		const recti bounds = active_view().bounds;
+		const app::recti bounds = active_view().bounds;
 		set_zoom(scale, {bounds.x + bounds.width / 2, bounds.y + bounds.height / 2});
 		active_view().zoom.set_center(0.5, 0.5);
 		invalidate();
@@ -453,11 +453,11 @@ namespace iw
 		invalidate();
 	}
 
-	void ImageCanvas::begin_quick_zoom(const pointi point)
+	void ImageCanvas::begin_quick_zoom(const app::pointi point)
 	{
 		activeComparison_ = comparison_hit(point);
 		if (!image_hit(point) && !activeComparison_) return;
-		const recti fittedImage = image_destination(fit_scale(activeComparison_), activeComparison_);
+		const app::recti fittedImage = image_destination(fit_scale(activeComparison_), activeComparison_);
 		if (!fittedImage.contains(point)) return;
 		quickZoomScale_ = 1.0;
 		quickZoomX_ = std::clamp(static_cast<double>(point.x - fittedImage.x) /
@@ -473,7 +473,7 @@ namespace iw
 		invalidate();
 	}
 
-	void ImageCanvas::begin_inspect_candidate(const pointi point)
+	void ImageCanvas::begin_inspect_candidate(const app::pointi point)
 	{
 		if (!inspect_hit(point)) return;
 		activeComparison_ = comparison_hit(point);
@@ -485,7 +485,7 @@ namespace iw
 	{
 		if (!quickZoom_) return;
 		auto& value = active_view();
-		const recti bounds = value.bounds;
+		const app::recti bounds = value.bounds;
 		value.zoom.set_explicit(quickZoomScale_, bounds,
 		                        {bounds.x + bounds.width / 2, bounds.y + bounds.height / 2});
 		value.zoom.set_center(quickZoomX_, quickZoomY_);
@@ -496,10 +496,10 @@ namespace iw
 		invalidate();
 	}
 
-	void ImageCanvas::update_quick_zoom(const pointi point)
+	void ImageCanvas::update_quick_zoom(const app::pointi point)
 	{
 		if (!quickZoom_) return;
-		const recti bounds = active_view().bounds;
+		const app::recti bounds = active_view().bounds;
 		quickZoomX_ = std::clamp(static_cast<double>(point.x - bounds.x) /
 		                         (std::max)(1, bounds.width), 0.0, 1.0);
 		quickZoomY_ = std::clamp(static_cast<double>(point.y - bounds.y) /
@@ -940,13 +940,13 @@ namespace iw
 	void ImageCanvas::arrange_collage()
 	{
 		if (collage_.empty()) return;
-		std::vector<sizei> dimensions;
+		std::vector<app::sizei> dimensions;
 		dimensions.reserve(collage_.size());
 		for (const auto& cell : collage_)
-			dimensions.push_back(cell.source.width > 0 && cell.source.height > 0 ? cell.source : sizei{4, 3});
+			dimensions.push_back(cell.source.width > 0 && cell.source.height > 0 ? cell.source : app::sizei{4, 3});
 		const auto cells = ui::layout_collage(primaryView_.bounds, dimensions);
 		for (size_t index = 0; index < collage_.size(); ++index)
-			collage_[index].bounds = index < cells.size() ? cells[index] : recti{};
+			collage_[index].bounds = index < cells.size() ? cells[index] : app::recti{};
 		queue_collage();
 	}
 
@@ -1025,8 +1025,8 @@ namespace iw
 			items_[target.index].height = image.originalHeight;
 		}
 		target.source = image.originalWidth > 0
-			                ? sizei{image.originalWidth, image.originalHeight}
-			                : sizei{image.width, image.height};
+			                ? app::sizei{image.originalWidth, image.originalHeight}
+			                : app::sizei{image.width, image.height};
 		target.image = std::move(image);
 		target.state = ThumbnailState::resident;
 		invalidate_image_pane();
@@ -1037,7 +1037,7 @@ namespace iw
 		const int gap = metric(4);
 		for (const auto& cell : collage_)
 		{
-			const recti frame{
+			const app::recti frame{
 				cell.bounds.x + gap / 2, cell.bounds.y + gap / 2,
 				cell.bounds.width - gap, cell.bounds.height - gap
 			};
@@ -1325,7 +1325,7 @@ namespace iw
 
 	void ImageCanvas::zoom(const double factor)
 	{
-		const recti bounds = active_view().bounds;
+		const app::recti bounds = active_view().bounds;
 		step_zoom(factor >= 1.0 ? 1 : -1, {bounds.x + bounds.width / 2, bounds.y + bounds.height / 2});
 	}
 
@@ -1430,7 +1430,7 @@ namespace iw
 		return 0;
 	}
 
-	void ImageCanvas::size(const platform::WindowFramePtr& frame, const sizei extent,
+	void ImageCanvas::size(const platform::WindowFramePtr& frame, const app::sizei extent,
 	                       platform::MeasureContext&)
 	{
 		frame_ = frame;
@@ -1449,7 +1449,7 @@ namespace iw
 		case InputEvent::leftButtonDown:
 			{
 				if (frame_) frame_->set_focus();
-				const pointi point = mouse.point;
+				const app::pointi point = mouse.point;
 				const bool control = mouse.control;
 				const bool shift = mouse.shift;
 				if (stripHeaderBounds_.contains(point))
@@ -1610,7 +1610,7 @@ namespace iw
 			}
 		case InputEvent::rightButtonDown:
 			{
-				const pointi point = mouse.point;
+				const app::pointi point = mouse.point;
 				if (mouse.shift && (image_hit(point) || comparison_hit(point)))
 				{
 					activeComparison_ = comparison_hit(point);
@@ -1645,7 +1645,7 @@ namespace iw
 				if (panningImage_)
 				{
 					const int ramp = metric(120);
-					const pointi offset{
+					const app::pointi offset{
 						ui::ZoomModel::accelerated_pan_offset(x - imageDragOrigin_.x, ramp),
 						ui::ZoomModel::accelerated_pan_offset(y - imageDragOrigin_.y, ramp)
 					};
@@ -1697,7 +1697,7 @@ namespace iw
 				}
 				if (draggingSplitter_)
 				{
-					const recti client = frame_ ? frame_->client_rect() : recti{};
+					const app::recti client = frame_ ? frame_->client_rect() : app::recti{};
 					const int minimumPane = metric(180);
 					const int physicalPosition = std::clamp(
 						x, minimumPane, (std::max)(minimumPane, client.width - minimumPane));
@@ -1709,7 +1709,7 @@ namespace iw
 				if (draggingMarquee_)
 				{
 					marqueeCurrent_ = {x, y};
-					const recti area{
+					const app::recti area{
 						(std::min)(marqueeStart_.x, marqueeCurrent_.x),
 						(std::min)(marqueeStart_.y, marqueeCurrent_.y), std::abs(marqueeCurrent_.x - marqueeStart_.x),
 						std::abs(marqueeCurrent_.y - marqueeStart_.y)
@@ -1754,7 +1754,7 @@ namespace iw
 			{
 				selectingZoom_ = false;
 				if (frame_) frame_->release_capture();
-				const recti selection{
+				const app::recti selection{
 					(std::min)(zoomSelectionStart_.x, zoomSelectionCurrent_.x),
 					(std::min)(zoomSelectionStart_.y, zoomSelectionCurrent_.y),
 					std::abs(zoomSelectionCurrent_.x - zoomSelectionStart_.x),
@@ -1762,9 +1762,9 @@ namespace iw
 				};
 				if (selection.width >= metric(8) && selection.height >= metric(8))
 				{
-					const pointi center{selection.x + selection.width / 2, selection.y + selection.height / 2};
+					const app::pointi center{selection.x + selection.width / 2, selection.y + selection.height / 2};
 					const auto& active = active_view();
-					const recti bounds = active.bounds;
+					const app::recti bounds = active.bounds;
 					const double scale = active.zoom.effective_scale(active.bounds) *
 						(std::min)(static_cast<double>(bounds.width) / selection.width,
 						           static_cast<double>(bounds.height) / selection.height);
@@ -1810,7 +1810,7 @@ namespace iw
 			return 0;
 		case InputEvent::wheel:
 			{
-				const pointi point = mouse.point;
+				const app::pointi point = mouse.point;
 				if (fullscreen_ && !immersive_zoom() && itemsViewport_.contains({point.x, point.y}))
 				{
 					stripOffset_ = std::clamp(stripOffset_ - mouse.wheelDelta / 120 * 96,
@@ -1857,7 +1857,7 @@ namespace iw
 				const bool control = key.control;
 				const bool shift = key.shift;
 				const bool activeFit = active_view().zoom.is_effectively_fit(active_view().bounds);
-				const recti activeBounds = active_view().bounds;
+				const app::recti activeBounds = active_view().bounds;
 				if (quickZoom_ && key.key == platform::KeyCode::space)
 				{
 					commit_quick_zoom();
@@ -1872,7 +1872,7 @@ namespace iw
 				}
 				if (control && key.character == L'1')
 				{
-					const pointi center{
+					const app::pointi center{
 						activeBounds.x + activeBounds.width / 2,
 						activeBounds.y + activeBounds.height / 2
 					};
@@ -1992,7 +1992,7 @@ namespace iw
 	void ImageCanvas::paint(const platform::WindowFramePtr& frame, platform::DrawContext& draw)
 	{
 		frame_ = frame;
-		const recti client = frame->client_rect();
+		const app::recti client = frame->client_rect();
 		const int clientWidth = client.width;
 		const int clientHeight = client.height;
 		rebuild_layout();
@@ -2011,7 +2011,7 @@ namespace iw
 				               : primaryView_.zoom.effective_scale(primaryView_.bounds);
 			if (primaryView_.zoom.is_fit() && !(quickZoom_ && !activeComparison_))
 				scale = fit_scale();
-			const recti destination = image_destination(scale, false);
+			const app::recti destination = image_destination(scale, false);
 			const bool alpha = displayedKind_ != files::ItemKind::image &&
 				typeIconAlpha_[static_cast<size_t>(displayedKind_)];
 			renderer.image({image->width, image->height, image->pixels, alpha, imageGeneration_}, destination);
@@ -2020,7 +2020,7 @@ namespace iw
 		{
 			if (primaryView_.sourceWidth > 0 && primaryView_.sourceHeight > 0)
 			{
-				const recti placeholder = primaryView_.zoom.destination(primaryView_.bounds);
+				const app::recti placeholder = primaryView_.zoom.destination(primaryView_.bounds);
 				renderer.fill(placeholder, platform::system_color(platform::SystemColor::face));
 				renderer.outline(placeholder, platform::system_color(platform::SystemColor::shadow));
 			}
@@ -2039,7 +2039,7 @@ namespace iw
 				               ? quickZoomScale_
 				               : comparisonView_.zoom.effective_scale(comparisonView_.bounds);
 			if (comparisonView_.zoom.is_fit() && !(quickZoom_ && activeComparison_)) scale = fit_scale(true);
-			const recti destination = image_destination(scale, true);
+			const app::recti destination = image_destination(scale, true);
 			renderer.image({comparisonImage_.width, comparisonImage_.height, comparisonImage_.pixels,
 			                false, comparisonGeneration_},
 			               destination);
@@ -2089,9 +2089,9 @@ namespace iw
 			                              : std::abs(feedbackScale - 1.0) < 0.0005
 			                              ? L"100% (1:1)"
 			                              : std::format(L"{}%", static_cast<int>(std::lround(feedbackScale * 100.0)));
-		const sizei zoomTextSize = renderer.measure_text(zoomText);
+		const app::sizei zoomTextSize = renderer.measure_text(zoomText);
 		const int feedbackPadding = metric(7);
-		recti zoomBadge{
+		app::recti zoomBadge{
 			feedbackView.bounds.right() - zoomTextSize.width - feedbackPadding * 2 - metric(8),
 			feedbackView.bounds.y + metric(8), zoomTextSize.width + feedbackPadding * 2,
 			(std::max)(metric(24), zoomTextSize.height + feedbackPadding)
@@ -2107,7 +2107,7 @@ namespace iw
 			constexpr std::wstring_view improvingText = L"Improving...";
 			const int qualityWidth = (std::max)(zoomBadge.width,
 			                                    renderer.measure_text(improvingText).width + feedbackPadding * 2);
-			const recti qualityBadge{
+			const app::recti qualityBadge{
 				zoomBadge.right() - qualityWidth, zoomBadge.bottom() + metric(4), qualityWidth, metric(22)
 			};
 			renderer.blend_fill(qualityBadge, color{245, 245, 245, 220});
@@ -2119,7 +2119,7 @@ namespace iw
 
 	void ImageCanvas::rebuild_layout()
 	{
-		const recti client = frame_ ? frame_->client_rect() : recti{};
+		const app::recti client = frame_ ? frame_->client_rect() : app::recti{};
 		const int width = (std::max)(0, client.width);
 		const int height = (std::max)(0, client.height);
 		rootElement_ = {};
@@ -2222,12 +2222,12 @@ namespace iw
 				imagePane_.x, imagePane_.y, halfWidth, (std::max)(0, imagePane_.height - metric(8))
 			};
 			comparisonView_.bounds = comparing
-				                         ? recti{
+				                         ? app::recti{
 					                         imagePane_.x + halfWidth, imagePane_.y,
 					                         (std::max)(0, imagePane_.width - halfWidth),
 					                         (std::max)(0, imagePane_.height - metric(8))
 				                         }
-				                         : recti{};
+				                         : app::recti{};
 			propertyFlow_ = {};
 			stripHeaderBounds_ = {itemsViewport_.x, itemsViewport_.y, itemsViewport_.width, metric(32)};
 			stripToggleBounds_ = {
@@ -2273,7 +2273,7 @@ namespace iw
 			                               : metric(8) + propertyRows * metric(26) +
 			                               (std::max)(0, propertyRows - 1) * metric(2);
 		const int propertiesHeight = properties_.empty() ? 0 : metric(34) + propertyListHeight;
-		const recti proposedFitBounds{
+		const app::recti proposedFitBounds{
 			imagePane_.x + metric(12), imagePane_.y + metric(12),
 			(std::max)(0, imagePane_.width - metric(24)),
 			(std::max)(0, imagePane_.height - propertiesHeight - metric(24))
@@ -2288,7 +2288,7 @@ namespace iw
 			                                            metric(32));
 		imageContentHeight_ = imageSectionHeight + propertiesHeight;
 		imageScroll_.layout(imagePane_, imageContentHeight_, imageScroll_.offset, metric(12), metric(28));
-		const recti imageViewport = imageScroll_.viewport(imagePane_);
+		const app::recti imageViewport = imageScroll_.viewport(imagePane_);
 		primaryView_.bounds = {
 			imageViewport.x + metric(12), imagePane_.y - imageScroll_.offset + metric(12),
 			(std::max)(0, imageViewport.width - metric(24)), (std::max)(0, imageSectionHeight - metric(24))
@@ -2353,7 +2353,7 @@ namespace iw
 			itemFlow_.children.push_back(std::move(item));
 		}
 
-		const auto arrangeItems = [this](const recti viewport)
+		const auto arrangeItems = [this](const app::recti viewport)
 		{
 			if (mode_ == ItemMode::details)
 			{
@@ -2411,21 +2411,21 @@ namespace iw
 
 	int ImageCanvas::splitter_x() const { return splitterBounds_.x + splitterBounds_.width / 2; }
 
-	recti ImageCanvas::item_rect(const int index) const
+	app::recti ImageCanvas::item_rect(const int index) const
 	{
 		if (fullscreen_)
 		{
 			const auto item = std::ranges::find(itemFlow_.children, index, &ui::Element::id);
-			return item == itemFlow_.children.end() ? recti{} : item->bounds;
+			return item == itemFlow_.children.end() ? app::recti{} : item->bounds;
 		}
 		return index >= 0 && index < static_cast<int>(itemFlow_.children.size())
 			       ? itemFlow_.children[index].bounds
-			       : recti{};
+			       : app::recti{};
 	}
 
 	void ImageCanvas::invalidate_item(const int index) const
 	{
-		const recti bounds = item_rect(index);
+		const app::recti bounds = item_rect(index);
 		if (frame_ && !bounds.is_empty()) frame_->invalidate(bounds);
 	}
 
@@ -2434,7 +2434,7 @@ namespace iw
 		if (frame_ && !primaryView_.bounds.is_empty()) frame_->invalidate(primaryView_.bounds);
 	}
 
-	int ImageCanvas::hit_test_item(const pointi point) const
+	int ImageCanvas::hit_test_item(const app::pointi point) const
 	{
 		if ((!fullscreen_ && mode_ == ItemMode::single) || !itemsViewport_.contains(point)) return -1;
 		const auto* hit = ui::FlexBox::hit_test(itemFlow_, point);
@@ -2475,7 +2475,7 @@ namespace iw
 
 	void ImageCanvas::ensure_visible(const int index)
 	{
-		const recti item = item_rect(index);
+		const app::recti item = item_rect(index);
 		if (fullscreen_)
 		{
 			if (item.x < itemsViewport_.x) stripOffset_ -= itemsViewport_.x - item.x;
@@ -2725,8 +2725,8 @@ namespace iw
 			return L"\x25C7";
 		};
 		const auto paintPanel = [&](const std::wstring& title, const std::vector<Property>& rows,
-		                            const recti available, const bool rightAligned, const bool expanded,
-			                            recti& toggle, recti& header, const std::uint8_t opacity,
+		                            const app::recti available, const bool rightAligned, const bool expanded,
+			                            app::recti& toggle, app::recti& header, const std::uint8_t opacity,
 			                            const bool fullWidth = false)
 		{
 			const int headerHeight = metric(34);
@@ -2745,7 +2745,7 @@ namespace iw
 			const int rowCount = (static_cast<int>(rows.size()) + columns - 1) / columns;
 			const int panelHeight = headerHeight + (expanded ? rowCount * rowHeight + metric(6) : 0);
 			const int x = rightAligned ? available.right() - panelWidth : available.x;
-			const recti panel{x, available.bottom() - panelHeight, panelWidth, panelHeight};
+			const app::recti panel{x, available.bottom() - panelHeight, panelWidth, panelHeight};
 			header = {panel.x, panel.y, panel.width, headerHeight};
 			renderer.blend_fill(panel, colors::light_gray.with_alpha(opacity));
 			toggle = {panel.right() - headerHeight, panel.y, headerHeight, headerHeight};
@@ -2781,7 +2781,7 @@ namespace iw
 		};
 		if (fullscreen_)
 		{
-			const auto paintSummary = [&](const int index, const recti bounds)
+			const auto paintSummary = [&](const int index, const app::recti bounds)
 			{
 				if (index < 0 || index >= static_cast<int>(items_.size())) return;
 				const auto& item = items_[index];
@@ -2813,13 +2813,13 @@ namespace iw
 					});
 				const bool primary = index == fullscreenSelection_.focus();
 				const bool expanded = primary ? propertiesExpanded_ : comparisonPropertiesExpanded_;
-				recti& toggle = primary ? propertyToggleBounds_ : comparisonPropertyToggleBounds_;
-				recti& header = primary ? propertyHeaderBounds_ : comparisonPropertyHeaderBounds_;
-				const recti client = frame_ ? frame_->client_rect() : recti{};
-				const recti available = !thumbnailsExpanded_
-					? recti{primary ? 0 : client.width / 2, 0,
+				app::recti& toggle = primary ? propertyToggleBounds_ : comparisonPropertyToggleBounds_;
+				app::recti& header = primary ? propertyHeaderBounds_ : comparisonPropertyHeaderBounds_;
+				const app::recti client = frame_ ? frame_->client_rect() : app::recti{};
+				const app::recti available = !thumbnailsExpanded_
+					? app::recti{primary ? 0 : client.width / 2, 0,
 					        fullscreenSelection_.secondary() >= 0 ? client.width / 2 : client.width, client.height}
-					: recti{bounds.x, bounds.y, bounds.width, bounds.height};
+					: app::recti{bounds.x, bounds.y, bounds.width, bounds.height};
 				paintPanel(item.path.filename().wstring(), rows, available, !primary, expanded, toggle, header, 210);
 				if (!thumbnailsExpanded_)
 				{
@@ -2849,7 +2849,7 @@ namespace iw
 			                           : path_.empty()
 			                           ? L"Properties"
 			                           : path_.filename().wstring();
-		const recti available{
+		const app::recti available{
 			propertyFlow_.bounds.x, propertyFlow_.bounds.y - metric(34),
 			propertyFlow_.bounds.width, propertyFlow_.bounds.height + metric(34)
 		};
@@ -2904,7 +2904,7 @@ namespace iw
 			const std::wstring label = fields[index] == sortField_
 				                           ? std::wstring(labels[index]) + L" ^"
 				                           : labels[index];
-			recti text = columns[index];
+			app::recti text = columns[index];
 			text.x += index == 0 ? metric(8) : metric(6);
 			text.width = (std::max)(0, text.width - metric(12));
 			renderer.text(label, text, platform::system_color(platform::SystemColor::buttonText),
@@ -2921,7 +2921,7 @@ namespace iw
 	{
 		for (int index = 0; index < static_cast<int>(files_.size()); ++index)
 		{
-			const recti row = item_rect(index);
+			const app::recti row = item_rect(index);
 			if (!row.intersects(itemsViewport_)) continue;
 			const bool selected = active_selection().contains(index);
 			renderer.fill(row, platform::system_color(selected
@@ -2938,7 +2938,7 @@ namespace iw
 				               {columns[0].x + metric(4), row.y + metric(4), metric(32), metric(32)});
 			const color textColor = platform::system_color(
 				selected ? platform::SystemColor::highlightText : platform::SystemColor::windowText);
-			recti name = columns[0];
+			app::recti name = columns[0];
 			name.x += metric(42);
 			name.width = (std::max)(0, name.width - metric(48));
 			renderer.text(item.path.filename().wstring(), name, textColor,
@@ -2951,7 +2951,7 @@ namespace iw
 				item.hasDuration ? media::duration_text(item.duration) : std::wstring{}};
 			for (size_t column = 1; column < columns.size(); ++column)
 			{
-				recti text = columns[column];
+				app::recti text = columns[column];
 				text.x += metric(6);
 				text.width = (std::max)(0, text.width - metric(12));
 				renderer.text(values[column - 1], text, textColor,
@@ -2966,7 +2966,7 @@ namespace iw
 	{
 		for (int index = 0; index < static_cast<int>(files_.size()); ++index)
 		{
-			const recti tile = item_rect(index);
+			const app::recti tile = item_rect(index);
 			if (!tile.intersects(itemsViewport_)) continue;
 			const bool selected = active_selection().contains(index);
 			renderer.fill(tile, platform::system_color(selected
@@ -2974,7 +2974,7 @@ namespace iw
 				                                           : index == hoverIndex_
 				                                           ? platform::SystemColor::face
 				                                           : platform::SystemColor::window));
-			const recti imageArea{
+			const app::recti imageArea{
 				tile.x + metric(8), tile.y + metric(8), tile.width - metric(16), tile.height - metric(39)
 			};
 			const auto& thumb = thumbnails_[index];
@@ -3001,7 +3001,7 @@ namespace iw
 			{
 				renderer.fill(imageArea, platform::system_color(platform::SystemColor::face));
 			}
-			const recti text{
+			const app::recti text{
 				tile.x + metric(5), tile.bottom() - metric(27), tile.width - metric(10), metric(23)
 			};
 			const auto name = files_[index].filename().wstring();

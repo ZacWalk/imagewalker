@@ -14,18 +14,6 @@
 
 
 //////////////////////////////////////////////////////////////////////
-//
-// Here's the routine that will replace the standard error_exit method:
-
-
-METHODDEF(void) ima_jpeg_error_exit(j_common_ptr cinfo)
-{
-	char sz[JMSG_LENGTH_MAX];
-	(*cinfo->err->format_message)(cinfo, sz);
-	throw IW::invalid_file(sz);
-}
-
-//////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
 
@@ -78,26 +66,8 @@ bool CToolJpeg::OnApplyOptions()
 
 void CToolJpeg::OnProcess(IStatus* pStatus)
 {
-	// Initialize the JPEG decompression object with default error handling.
-	m_srcinfo.err = jpeg_std_error(&m_jsrcerr);
-	m_jsrcerr.error_exit = ima_jpeg_error_exit;
-	jpeg_create_decompress(&m_srcinfo);
-
-	// Initialize the JPEG compression object with default error handling.
-	m_dstinfo.err = jpeg_std_error(&m_jdsterr);
-	m_jdsterr.error_exit = ima_jpeg_error_exit;
-	jpeg_create_compress(&m_dstinfo);
-
-	// Set Options
 	SetTransformOptions();
-	ApplyCompressorSwitches(&m_dstinfo);
-	m_jsrcerr.trace_level = m_jdsterr.trace_level;
-	m_srcinfo.mem->max_memory_to_use = m_dstinfo.mem->max_memory_to_use;
-
 	IterateItems(this);
-
-	jpeg_destroy_compress(&m_dstinfo);
-	jpeg_destroy_decompress(&m_srcinfo);
 }
 
 void CToolJpeg::OnComplete()
@@ -136,46 +106,28 @@ bool CToolJpeg::StartFolder(IW::Folder* pFolder, IStatus* pStatus)
 
 void CToolJpeg::SetTransformOptions()
 {
-	m_copyoption = JCOPYOPT_ALL;
-
-	m_transformoption.transform = JXFORM_NONE;
-	m_transformoption.trim = m_bDropEdge;
-	m_transformoption.force_grayscale = m_bGreyScale;
-	m_transformoption.crop = FALSE;
-	m_transformoption.crop_width_set = JCROP_UNSET;
-	m_transformoption.crop_height_set = JCROP_UNSET;
-	m_transformoption.crop_xoffset_set = JCROP_UNSET;
-	m_transformoption.crop_yoffset_set = JCROP_UNSET;
+	m_transform = JXFORM_NONE;
 
 	if (m_bMirrorLR)
 	{
-		m_transformoption.transform = JXFORM_FLIP_H;
+		m_transform = JXFORM_FLIP_H;
 	}
 	else if (m_bMirrorTB)
 	{
-		m_transformoption.transform = JXFORM_FLIP_V;
+		m_transform = JXFORM_FLIP_V;
 	}
 	else if (m_bRotate90)
 	{
-		m_transformoption.transform = JXFORM_ROT_90;
+		m_transform = JXFORM_ROT_90;
 	}
 	else if (m_bRotate180)
 	{
-		m_transformoption.transform = JXFORM_ROT_180;
+		m_transform = JXFORM_ROT_180;
 	}
 	else if (m_bRotate270)
 	{
-		m_transformoption.transform = JXFORM_ROT_270;
+		m_transform = JXFORM_ROT_270;
 	}
-}
-
-// jpeg_copy_critical_parameters takes these from the source, so they have to be
-// put back afterwards. Doing it by re-running the whole switch parse also reset
-// the transform, which by then had the file's own orientation folded into it.
-void CToolJpeg::ApplyCompressorSwitches(j_compress_ptr cinfo)
-{
-	cinfo->err->trace_level = 0;
-	cinfo->optimize_coding = m_bOptimize ? TRUE : FALSE;
 }
 
 
@@ -195,8 +147,6 @@ bool CToolJpeg::StartItem(IW::FolderItem* pItem, IStatus* pStatus)
 		return true;
 	}
 
-	bool bRet = false;
-
 	try
 	{
 		IW::FolderStreamIn streamIn(pItem);
@@ -210,96 +160,29 @@ bool CToolJpeg::StartItem(IW::FolderItem* pItem, IStatus* pStatus)
 			return true;
 		}
 
-		// Specify data source for decompression
-		jpeg_iw_src(&m_srcinfo, &streamIn, nullptr);
-
-		// Enable saving of extra markers that we want to copy
-		jcopy_markers_setup(&m_srcinfo, m_copyoption);
-
-		// Read file header
-		if (JPEG_HEADER_OK != jpeg_read_header(&m_srcinfo, TRUE))
-		{
-			pStatus->SetError(App.LoadString(IDS_FAILEDTOLOAD));
-			jpeg_abort((j_common_ptr)&m_srcinfo);
-			return true;
-		}
-
-		// One turn, however the camera stored the picture: the orientation tag is
-		// folded into the transform and then cleared.
-		SetTransformOptions();
-		jtransform_normalise_exif_orientation(&m_srcinfo, &m_transformoption);
-
-		// Any space needed by a transform option must be requested before
-		// jpeg_read_coefficients so that memory allocation will be done right.
-		jtransform_request_workspace(&m_srcinfo, &m_transformoption);
-
-		// Read source file as DCT coefficients
-		src_coef_arrays = jpeg_read_coefficients(&m_srcinfo);
-
-		// Initialize destination compression parameters from source values
-		jpeg_copy_critical_parameters(&m_srcinfo, &m_dstinfo);
-
-		// Adjust destination parameters if required by transform options;
-		// also find out which set of coefficient arrays will hold the output.
-		dst_coef_arrays = jtransform_adjust_parameters(&m_srcinfo, &m_dstinfo,
-		                                               src_coef_arrays,
-		                                               &m_transformoption);
-
-		ApplyCompressorSwitches(&m_dstinfo);
-
-		// Select simple progressive mode.
-		if (m_bProgressive)
-		{
-			jpeg_simple_progression(&m_dstinfo);
-		}
-
-		// Specify data destination for compression
-		jpeg_iw_dest(&m_dstinfo, &streamOut);
-
-		// Start compressor (note no image data is actually written here)
-		jpeg_write_coefficients(&m_dstinfo, dst_coef_arrays);
-
-		// Copy to the output file any extra markers that we want to preserve
-		jcopy_markers_execute(&m_srcinfo, &m_dstinfo, m_copyoption);
-
 		pStatus->SetStatusMessage(App.LoadString(IDS_JPEGTRANSFORM));
-
-		// Execute image transformation, if any 
-		jtransform_execute_transform(
-			&m_srcinfo, &m_dstinfo,
-			src_coef_arrays,
-			&m_transformoption,
-			pStatus);
-
-		streamIn.Close(pStatus);
-
-		// A cancel leaves the coefficient arrays half filled, so the output must be
-		// thrown away rather than kept.
-		if (pStatus->QueryCancel())
+		IW::JpegTransformRequest request;
+		request.transform = m_transform;
+		request.trim = m_bDropEdge;
+		request.forceGrayscale = m_bGreyScale;
+		request.optimizeCoding = m_bOptimize;
+		request.progressive = m_bProgressive;
+		const auto result = IW::TransformJpegStream(streamIn, streamOut, request, pStatus);
+		if (result != JpegTransformResult::Done || pStatus->QueryCancel())
 		{
 			streamOut.Abort();
-			jpeg_abort((j_common_ptr)&m_dstinfo);
-			jpeg_abort((j_common_ptr)&m_srcinfo);
-			return false;
+			if (result == JpegTransformResult::NotJpeg)
+				pStatus->SetError(App.LoadString(IDS_FAILEDTOLOAD));
+			return result != JpegTransformResult::Failed;
 		}
 
-		jpeg_finish_compress(&m_dstinfo);
-		jpeg_finish_decompress(&m_srcinfo);
-
-		bRet = streamOut.Close(pStatus);
+		return streamIn.Close(pStatus) && streamOut.Close(pStatus);
 	}
-	catch (std::exception& e)
+	catch (const std::exception& error)
 	{
-		CString strError(e.what());
-		pStatus->SetError(strError);
-		ATLTRACE(_T("Exception in CToolJpeg::StartItem %s"), static_cast<LPCTSTR>(strError));
-
-		// Finish compression and release memory 
-		jpeg_abort((j_common_ptr)&m_dstinfo);
-		jpeg_abort((j_common_ptr)&m_srcinfo);
+		pStatus->SetError(CString(error.what()));
+		return false;
 	}
-
-	return bRet;
 }
 
 bool CToolJpeg::EndItem()

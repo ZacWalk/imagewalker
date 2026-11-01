@@ -195,7 +195,7 @@ namespace iw
 			}
 			else if (message == platform::MouseMessage::move && draggingTreeSplitter_)
 			{
-				const pointi contentPoint = contentFrame_->screen_to_client(frame->client_to_screen(input.point));
+				const app::pointi contentPoint = contentFrame_->screen_to_client(frame->client_to_screen(input.point));
 				const int width = (std::max)(0, contentPoint.x - treeSplitterDragOffset_);
 				folderTreeWidth_ = std::clamp(ui::unscale_metric(width, dpi_), 140, 1000);
 				on_size();
@@ -218,7 +218,7 @@ namespace iw
 				hoveringTreeSplitter_, draggingTreeSplitter_, false));
 	}
 
-	void MainWindow::size(const platform::WindowFramePtr& frame, const sizei,
+	void MainWindow::size(const platform::WindowFramePtr& frame, const app::sizei,
 	                      platform::MeasureContext&)
 	{
 		if (frame == treeSplitterFrame_)
@@ -301,7 +301,7 @@ namespace iw
 			apply_collection_view();
 			probe_dimensions();
 		});
-		canvas_.set_context_menu_handler([this](const pointi point) { show_file_menu(point); });
+		canvas_.set_context_menu_handler([this](const app::pointi point) { show_file_menu(point); });
 		canvas_.set_drop_handler([this](const std::vector<std::filesystem::path>& paths)
 		{
 			import_dropped_files(paths);
@@ -634,9 +634,9 @@ namespace iw
 	void MainWindow::on_size()
 	{
 		if (!chrome_ || !contentFrame_) return;
-		const recti content = chrome_->layout(frame_->client_rect(), !task_ && (fullscreen_ || zoomMode_));
+		const app::recti content = chrome_->layout(frame_->client_rect(), !task_ && (fullscreen_ || zoomMode_));
 		contentFrame_->move(content);
-		const recti contentClient = contentFrame_->client_rect();
+		const app::recti contentClient = contentFrame_->client_rect();
 		const int contentWidth = (std::max)(0, contentClient.width);
 		const int paneHeight = (std::max)(0, contentClient.height);
 		const bool showModes = !fullscreen_ && (!zoomMode_ || task_) && showModeBar_;
@@ -1039,7 +1039,7 @@ namespace iw
 	void MainWindow::layout_center()
 	{
 		if (!centerFrame_) return;
-		const recti bounds = centerFrame_->client_rect();
+		const app::recti bounds = centerFrame_->client_rect();
 		if (task_) task_->set_bounds(bounds);
 		if (canvas_.frame()) canvas_.frame()->move(bounds);
 	}

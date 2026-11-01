@@ -24,7 +24,7 @@ namespace iw
 		std::vector<Column> review_columns() const override { return {}; }
 		tasks::TaskRunner::AnalyzeFunction make_analyzer() override { return {}; }
 		tasks::RunOptions build_run_options() override { return {}; }
-		void draw_content(const ui::CanvasRenderer& renderer, recti bounds) override;
+		void draw_content(const ui::CanvasRenderer& renderer, app::recti bounds) override;
 		void layout_hosted_controls() override;
 		void control_activated(ui::Control& control) override;
 		bool content_key(const platform::KeyInput& input) override;

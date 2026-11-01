@@ -1,9 +1,9 @@
 #include "DiagnosticLog.h"
+#include "DesktopServices.h"
 
-#include <windows.h>
 #include <algorithm>
+#include <chrono>
 #include <format>
-#include <limits>
 #include <mutex>
 #include <string>
 
@@ -12,7 +12,7 @@ namespace iw::diagnostics
 	struct LogFile::Impl
 	{
 		std::mutex mutex;
-		HANDLE file = INVALID_HANDLE_VALUE;
+		::platform::file_ptr file;
 	};
 
 	LogFile::LogFile() : impl_(std::make_unique<Impl>()) {}
@@ -21,78 +21,55 @@ namespace iw::diagnostics
 	std::error_code LogFile::open(const std::filesystem::path& path)
 	{
 		std::lock_guard lock(impl_->mutex);
-		if (impl_->file != INVALID_HANDLE_VALUE) return std::make_error_code(std::errc::device_or_resource_busy);
-		impl_->file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
-			FILE_ATTRIBUTE_NORMAL, nullptr);
-		if (impl_->file == INVALID_HANDLE_VALUE)
-			return {static_cast<int>(GetLastError()), std::system_category()};
+		if (impl_->file) return std::make_error_code(std::errc::device_or_resource_busy);
+		impl_->file = ::platform::open_file(desktop::file_path(path),
+		                                    ::platform::file_open_mode::create_exclusive);
+		if (!impl_->file) return std::make_error_code(std::errc::io_error);
 		return {};
 	}
 
 	std::error_code LogFile::write(const std::wstring_view text)
 	{
-		if (text.size() > static_cast<size_t>((std::numeric_limits<int>::max)()))
-			return std::make_error_code(std::errc::value_too_large);
-		const int size = static_cast<int>(text.size());
-		const int length = size ? WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(), size,
-			nullptr, 0, nullptr, nullptr) : 0;
-		if (size && length == 0) return {static_cast<int>(GetLastError()), std::system_category()};
-		std::string bytes(static_cast<size_t>(length), '\0');
-		if (length && !WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text.data(), size,
-			bytes.data(), length, nullptr, nullptr))
-			return {static_cast<int>(GetLastError()), std::system_category()};
-
-		SYSTEMTIME now{};
-		GetSystemTime(&now);
+		auto bytes = ::platform::utf16_to_utf8(text);
+		const auto now = std::chrono::system_clock::now();
+		const auto milliseconds = std::chrono::floor<std::chrono::milliseconds>(now);
+		const auto seconds = std::chrono::floor<std::chrono::seconds>(milliseconds);
+		const auto days = std::chrono::floor<std::chrono::days>(seconds);
+		const std::chrono::year_month_day date{days};
+		const std::chrono::hh_mm_ss time{seconds - days};
+		const auto millisecond = static_cast<int>(
+			milliseconds.time_since_epoch().count() % std::chrono::milliseconds::period::den);
 		bytes.insert(0, std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z ",
-			now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond, now.wMilliseconds));
+			static_cast<int>(date.year()), static_cast<unsigned>(date.month()),
+			static_cast<unsigned>(date.day()), time.hours().count(), time.minutes().count(),
+			time.seconds().count(), millisecond));
 		if (bytes.empty() || bytes.back() != '\n') bytes.push_back('\n');
 		std::lock_guard lock(impl_->mutex);
-		if (impl_->file == INVALID_HANDLE_VALUE) return std::make_error_code(std::errc::bad_file_descriptor);
-		size_t offset = 0;
-		while (offset < bytes.size())
-		{
-			DWORD written = 0;
-			if (!WriteFile(impl_->file, bytes.data() + offset, static_cast<DWORD>(bytes.size() - offset), &written, nullptr))
-				return {static_cast<int>(GetLastError()), std::system_category()};
-			if (!written) return std::make_error_code(std::errc::io_error);
-			offset += written;
-		}
-		if (!FlushFileBuffers(impl_->file)) return {static_cast<int>(GetLastError()), std::system_category()};
+		if (!impl_->file) return std::make_error_code(std::errc::bad_file_descriptor);
+		if (impl_->file->write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size()) != bytes.size() ||
+			!impl_->file->flush())
+			return std::make_error_code(std::errc::io_error);
 		return {};
 	}
 
 	void LogFile::close()
 	{
 		std::lock_guard lock(impl_->mutex);
-		if (impl_->file == INVALID_HANDLE_VALUE) return;
-		if (!CloseHandle(impl_->file)) OutputDebugStringW(L"ImageWalker: cannot close diagnostic log.\n");
-		impl_->file = INVALID_HANDLE_VALUE;
+		impl_->file.reset();
 	}
 
 	std::filesystem::path log_path(std::error_code& error)
 	{
 		error.clear();
-		std::wstring path(260, L'\0');
-		while (path.size() <= 32768)
+		const auto running = ::platform::running_app_path();
+		if (running.is_empty())
 		{
-			const DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
-			if (!length)
-			{
-				error = {static_cast<int>(GetLastError()), std::system_category()};
-				return {};
-			}
-			if (length < path.size())
-			{
-				path.resize(length);
-				auto result = std::filesystem::path(path);
-				result.replace_extension(L".log");
-				return result;
-			}
-			path.resize((std::min)(path.size() * 2, size_t{32769}));
+			error = std::make_error_code(std::errc::io_error);
+			return {};
 		}
-		error = std::make_error_code(std::errc::filename_too_long);
-		return {};
+		auto result = ::platform::to_stream_path(running);
+		result.replace_extension(L".log");
+		return result;
 	}
 
 	LogFile& run_log()
@@ -116,7 +93,7 @@ namespace iw::diagnostics
 	Session::Session()
 	{
 		const auto path = log_path(error_);
-		if (!error_) error_ = open_run_log(run_log(), path, GetCurrentProcessId());
+		if (!error_) error_ = open_run_log(run_log(), path, ::platform::process_id());
 		if (!error_) error_ = run_log().write(L"ImageWalker 3.0 starting");
 	}
 
@@ -125,7 +102,7 @@ namespace iw::diagnostics
 		if (!error_)
 		{
 			if (run_log().write(L"ImageWalker 3.0 exiting"))
-				OutputDebugStringW(L"ImageWalker: unable to finish the diagnostic log.\n");
+				::platform::trace(std::string("ImageWalker: unable to finish the diagnostic log."));
 		}
 		run_log().close();
 	}

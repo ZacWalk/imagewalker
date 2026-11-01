@@ -9,8 +9,9 @@ framework and language-mode suppressions:
 - `C4996`, while retained historical CRT calls are compiled deliberately.
 
 Use `/permissive-`, `/W4` and no suppressions for ImageWalker 3.0.
-Apply that same policy to modern `libiw` sources. Limit the library's legacy
-warning exceptions to its native-page compatibility sources, not its consumers.
+Apply that same policy to modern shared imaging sources. Limit the historical
+compatibility warning exceptions to their object source list, not their
+consumers.
 
 ## Policy
 

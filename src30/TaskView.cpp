@@ -147,7 +147,7 @@ namespace iw
 		invalidate();
 	}
 
-	void TaskView::set_bounds(const recti bounds)
+	void TaskView::set_bounds(const app::recti bounds)
 	{
 		if (frame_) frame_->move(bounds);
 	}
@@ -591,11 +591,11 @@ namespace iw
 	void TaskView::layout(const ui::CanvasRenderer& renderer)
 	{
 		if (!frame_) return;
-		const recti client = frame_->client_rect();
+		const app::recti client = frame_->client_rect();
 		const int panel = (std::min)(metric(panelWidth), (std::max)(metric(160), client.width / 2));
 		const int gap = metric(8);
 		const int statusHeight = metric(24);
-		const recti panelArea{gap, gap, panel - gap * 2, client.height - gap * 2};
+		const app::recti panelArea{gap, gap, panel - gap * 2, client.height - gap * 2};
 		// The panel is laid out at its scrolled position, so hit testing and drawing agree.
 		panelBounds_ = {
 			panelArea.x, panelArea.y - panelScroll_.offset,
@@ -617,7 +617,7 @@ namespace iw
 		const int thumbnailTop = panelBounds_.y + panel_.content_height() + gap;
 		thumbnailBounds_ = {panelBounds_.x, thumbnailTop, panelBounds_.width, thumbnailRows};
 
-		const recti right{panel, gap, (std::max)(0, client.width - panel - gap), client.height - gap * 2};
+		const app::recti right{panel, gap, (std::max)(0, client.width - panel - gap), client.height - gap * 2};
 		reviewHeaderBounds_ = {right.x, right.y, right.width, metric(22)};
 		statusBounds_ = {right.x, right.bottom() - statusHeight, right.width, statusHeight};
 		reviewBounds_ = {
@@ -646,7 +646,7 @@ namespace iw
 
 	void TaskView::draw_panel(const ui::CanvasRenderer& renderer) const
 	{
-		const recti clip{
+		const app::recti clip{
 			panelBounds_.x, metric(8), panelBounds_.width + metric(12),
 			panelScroll_.viewportExtent > 0 ? panelScroll_.viewportExtent : panelBounds_.height
 		};
@@ -660,10 +660,10 @@ namespace iw
 			for (const auto& thumbnail : thumbnails_)
 			{
 				if (x + edge > thumbnailBounds_.right()) break;
-				const recti cell{x, thumbnailBounds_.y, edge, edge};
+				const app::recti cell{x, thumbnailBounds_.y, edge, edge};
 				if (thumbnail.width > 0 && thumbnail.height > 0)
 				{
-					const recti fitted = ui::fit_centered({thumbnail.width, thumbnail.height}, cell);
+					const app::recti fitted = ui::fit_centered({thumbnail.width, thumbnail.height}, cell);
 					renderer.image({thumbnail.width, thumbnail.height, thumbnail.pixels, false, 0}, fitted);
 				}
 				else
@@ -694,20 +694,20 @@ namespace iw
 
 		renderer.fill(reviewHeaderBounds_, face);
 		renderer.outline(reviewHeaderBounds_, shadow);
-		const recti viewport = reviewScroll_.viewport(reviewBounds_);
+		const app::recti viewport = reviewScroll_.viewport(reviewBounds_);
 		renderer.fill(viewport, window);
 
 		int totalWeight = 0;
 		for (const auto& column : columns_) totalWeight += (std::max)(1, column.weight);
 		if (!totalWeight) return;
 
-		const auto columnRect = [&](const recti row, const size_t index)
+		const auto columnRect = [&](const app::recti row, const size_t index)
 		{
 			int offset = 0;
 			for (size_t scan = 0; scan < index; ++scan)
 				offset += row.width * (std::max)(1, columns_[scan].weight) / totalWeight;
 			const int width = row.width * (std::max)(1, columns_[index].weight) / totalWeight;
-			return recti{row.x + offset + metric(4), row.y, (std::max)(0, width - metric(8)), row.height};
+			return app::recti{row.x + offset + metric(4), row.y, (std::max)(0, width - metric(8)), row.height};
 		};
 
 		for (size_t index = 0; index < columns_.size(); ++index)
@@ -732,7 +732,7 @@ namespace iw
 		for (size_t index = first; index < last; ++index)
 		{
 			const auto& row = plan_.rows[index];
-			const recti bounds{
+			const app::recti bounds{
 				viewport.x, viewport.y + static_cast<int>(index) * height - reviewScroll_.offset,
 				viewport.width, height
 			};
@@ -773,7 +773,7 @@ namespace iw
 		              platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
 	}
 
-	void TaskView::draw_content(const ui::CanvasRenderer& renderer, recti)
+	void TaskView::draw_content(const ui::CanvasRenderer& renderer, app::recti)
 	{
 		draw_review(renderer);
 	}
@@ -811,7 +811,7 @@ namespace iw
 	{
 		if (frame != frame_) return;
 		const ui::CanvasRenderer renderer(draw, platform::create_message_font(dpi_));
-		const recti client = frame_->client_rect();
+		const app::recti client = frame_->client_rect();
 		renderer.fill(client, platform::system_color(platform::SystemColor::window));
 		layout(renderer);
 		draw_panel(renderer);
@@ -819,7 +819,7 @@ namespace iw
 		draw_status(renderer);
 	}
 
-	void TaskView::size(const platform::WindowFramePtr& frame, sizei, platform::MeasureContext&)
+	void TaskView::size(const platform::WindowFramePtr& frame, app::sizei, platform::MeasureContext&)
 	{
 		if (frame == frame_) invalidate();
 	}

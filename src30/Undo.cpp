@@ -3,6 +3,7 @@
 
 #include "Undo.h"
 
+#include "DesktopServices.h"
 #include "Files.h"
 #include "Paths.h"
 #include "Platform.h"
@@ -11,12 +12,11 @@
 #include <array>
 #include <atomic>
 #include <format>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <stdexcept>
 #include <utility>
-#include <windows.h>
-#include <bcrypt.h>
 
 namespace iw::undo
 {
@@ -25,16 +25,6 @@ namespace iw::undo
 		std::atomic<History*> configuredHistory{};
 		std::once_flag liveHistoryInitialization;
 		std::unique_ptr<History> liveHistory;
-
-		struct Handle
-		{
-			HANDLE value{INVALID_HANDLE_VALUE};
-			explicit Handle(HANDLE handle = INVALID_HANDLE_VALUE) : value(handle) {}
-			~Handle() { if (value != INVALID_HANDLE_VALUE) CloseHandle(value); }
-			Handle(const Handle&) = delete;
-			Handle& operator=(const Handle&) = delete;
-			Handle(Handle&& other) noexcept : value(std::exchange(other.value, INVALID_HANDLE_VALUE)) {}
-		};
 
 		[[noreturn]] void fail(const char* message) { throw std::runtime_error(message); }
 
@@ -46,11 +36,10 @@ namespace iw::undo
 
 		std::wstring unique_id()
 		{
-			GUID id{};
-			wchar_t text[40]{};
-			if (FAILED(CoCreateGuid(&id)) || !StringFromGUID2(id, text, static_cast<int>(std::size(text))))
-				fail("Cannot allocate a unique recovery name.");
-			return text;
+			const auto temporary = ::platform::temp_file(".tmp");
+			const auto path = ::platform::to_stream_path(temporary);
+			if (path.empty()) fail("Cannot allocate a unique recovery name.");
+			return path.stem().wstring();
 		}
 
 		struct Less
@@ -97,25 +86,11 @@ namespace iw::undo
 			}
 			for (auto part = absolute; !part.empty();)
 			{
-				Handle probe(CreateFileW(files::native_path(part).c_str(), FILE_READ_ATTRIBUTES,
-					FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-					FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-				if (probe.value == INVALID_HANDLE_VALUE)
+				if (const auto state = files::snapshot_file(part))
 				{
-					const auto error = GetLastError();
-					if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
-						throw std::filesystem::filesystem_error("Cannot inspect an undo path or parent", part,
-							std::error_code(static_cast<int>(error), std::system_category()));
+					if (state->reparse) fail("Undo does not follow symbolic links or reparse points.");
 				}
-				else
-				{
-					BY_HANDLE_FILE_INFORMATION info{};
-					if (!GetFileInformationByHandle(probe.value, &info))
-						throw std::filesystem::filesystem_error("Cannot inspect undo path attributes", part,
-							std::error_code(static_cast<int>(GetLastError()), std::system_category()));
-					if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
-						fail("Undo does not follow symbolic links or reparse points.");
-				}
+				else fail("Cannot inspect an undo path or parent.");
 				if (paths::equal(part, root)) break;
 				const auto parent = part.parent_path();
 				if (parent == part) break;
@@ -125,39 +100,11 @@ namespace iw::undo
 
 		std::array<unsigned char, 32> digest_file(const std::filesystem::path& path)
 		{
-			Handle file(CreateFileW(files::native_path(path).c_str(), GENERIC_READ,
-				FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-				FILE_FLAG_SEQUENTIAL_SCAN | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-			if (file.value == INVALID_HANDLE_VALUE) fail("Cannot lock a file for undo verification.");
-			BCRYPT_ALG_HANDLE algorithm{};
-			if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0)
-				fail("Cannot create the undo content verifier.");
-			struct Algorithm
-			{
-				BCRYPT_ALG_HANDLE value;
-				~Algorithm() { BCryptCloseAlgorithmProvider(value, 0); }
-			} algorithmOwner{algorithm};
-			BCRYPT_HASH_HANDLE hash{};
-			if (BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0) < 0)
-				fail("Cannot initialize the undo content verifier.");
-			struct Hash
-			{
-				BCRYPT_HASH_HANDLE value;
-				~Hash() { BCryptDestroyHash(value); }
-			} hashOwner{hash};
-			std::array<unsigned char, 65536> buffer{};
-			DWORD read{};
-			do
-			{
-				if (!ReadFile(file.value, buffer.data(), static_cast<DWORD>(buffer.size()), &read, nullptr))
-					fail("Cannot read a file for undo verification.");
-				if (read && BCryptHashData(hash, buffer.data(), read, 0) < 0)
-					fail("Cannot verify file content.");
-			} while (read);
-			std::array<unsigned char, 32> result{};
-			if (BCryptFinishHash(hash, result.data(), static_cast<ULONG>(result.size()), 0) < 0)
-				fail("Cannot finish verifying file content.");
-			return result;
+			const auto lock = ::platform::open_file_lock(desktop::file_path(path),
+				::platform::file_lock_mode::read);
+			const auto digest = ::platform::file_sha256(lock);
+			if (!digest) fail("Cannot verify file content.");
+			return *digest;
 		}
 
 		Fingerprint fingerprint(const std::filesystem::path& path, const bool recursive = true)
@@ -168,11 +115,31 @@ namespace iw::undo
 			if (!root) fail("Cannot inspect a protected path.");
 			Fingerprint result{{{}, *root, {}}};
 			if (!root->exists) return result;
-			WIN32_FIND_DATAW name{};
-			const HANDLE found = FindFirstFileW(files::native_path(logicalRoot).c_str(), &name);
-			if (found == INVALID_HANDLE_VALUE) fail("Cannot verify a protected file name.");
-			FindClose(found);
-			result.front().actualName = name.cFileName;
+			result.front().actualName = logicalRoot.filename().wstring();
+			if (const auto parent = logicalRoot.parent_path();
+			    !parent.empty())
+			{
+				const auto entries = ::platform::iterate_file_items(desktop::folder_path(parent), true);
+				const auto expectedName = logicalRoot.filename().wstring();
+				for (const auto& entry : entries.files)
+				{
+					const auto candidate = ::platform::utf8_to_utf16(entry.name.sv());
+					if (paths::iequals(candidate, expectedName))
+					{
+						result.front().actualName = candidate;
+						break;
+					}
+				}
+				for (const auto& entry : entries.folders)
+				{
+					const auto candidate = ::platform::utf8_to_utf16(entry.name.sv());
+					if (paths::iequals(candidate, expectedName))
+					{
+						result.front().actualName = candidate;
+						break;
+					}
+				}
+			}
 			if (!root->directory) result.front().digest = digest_file(logicalRoot);
 			else if (recursive)
 			{
@@ -202,6 +169,7 @@ namespace iw::undo
 			for (size_t i = 0; i < a.size(); ++i)
 				if (a[i].relative != b[i].relative || a[i].snapshot.exists != b[i].snapshot.exists ||
 					a[i].snapshot.directory != b[i].snapshot.directory ||
+					a[i].snapshot.reparse != b[i].snapshot.reparse ||
 					a[i].snapshot.size != b[i].snapshot.size || a[i].digest != b[i].digest)
 					return false;
 			return true;
@@ -209,9 +177,8 @@ namespace iw::undo
 
 		void flush_file(const std::filesystem::path& path)
 		{
-			Handle file(CreateFileW(files::native_path(path).c_str(), GENERIC_WRITE, FILE_SHARE_READ,
-				nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
-			if (file.value == INVALID_HANDLE_VALUE || !FlushFileBuffers(file.value))
+			const auto file = ::platform::open_file(desktop::file_path(path), ::platform::file_open_mode::write);
+			if (!file || !file->flush())
 				fail("Cannot flush a recovery copy to disk; the operation was refused.");
 		}
 
@@ -223,9 +190,8 @@ namespace iw::undo
 				if (const auto error = files::copy_file_to(from, to, false))
 					throw std::system_error(error, "Cannot secure an undo copy");
 				// A read-only source may produce a read-only copy. Only our newly created copy changes.
-				const DWORD attributes = GetFileAttributesW(files::native_path(to).c_str());
-				if (attributes == INVALID_FILE_ATTRIBUTES ||
-					!SetFileAttributesW(files::native_path(to).c_str(), attributes & ~FILE_ATTRIBUTE_READONLY))
+				if (const auto writable = ::platform::make_file_writable(desktop::file_path(to));
+				    writable.failed())
 					fail("Cannot prepare the recovery copy for durable flushing.");
 				flush_file(to);
 			};
@@ -239,8 +205,9 @@ namespace iw::undo
 					const auto target = destination / expected[i].relative;
 					if (expected[i].snapshot.directory)
 					{
-						if (!std::filesystem::create_directory(files::native_path(target)))
-							fail("A folder appeared in the destination during recovery.");
+							if (const auto created = ::platform::create_folder(desktop::folder_path(target));
+							    created.failed())
+								fail("A folder appeared in the destination during recovery.");
 					}
 					else copy(source / expected[i].relative, target);
 				}
@@ -254,18 +221,9 @@ namespace iw::undo
 			for (auto member = original.rbegin(); member != original.rend(); ++member)
 			{
 				const auto target = member->relative.empty() ? path : path / member->relative;
-				Handle file(CreateFileW(files::native_path(target).c_str(), FILE_WRITE_ATTRIBUTES,
-					FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-					FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-				const FILETIME modified{static_cast<DWORD>(member->snapshot.modified),
-					static_cast<DWORD>(member->snapshot.modified >> 32)};
-				if (file.value == INVALID_HANDLE_VALUE || !SetFileTime(file.value, nullptr, nullptr, &modified))
-					fail("Content was restored, but the original timestamp could not be restored.");
-				auto attributes = GetFileAttributesW(files::native_path(target).c_str());
-				if (attributes == INVALID_FILE_ATTRIBUTES) fail("Cannot inspect restored file attributes.");
-				if (member->snapshot.readOnly) attributes |= FILE_ATTRIBUTE_READONLY;
-				else attributes &= ~FILE_ATTRIBUTE_READONLY;
-				if (!SetFileAttributesW(files::native_path(target).c_str(), attributes))
+				if (const auto result = ::platform::set_file_attributes(
+					    desktop::file_path(target), member->snapshot.modified, member->snapshot.readOnly);
+				    result.failed())
 					fail("Content was restored, but the original attributes could not be restored.");
 			}
 		}
@@ -273,17 +231,15 @@ namespace iw::undo
 		void write_record(const std::filesystem::path& folder, const std::wstring& text)
 		{
 			const auto path = folder / (L"record-" + unique_id() + L".txt");
-			Handle file(CreateFileW(files::native_path(path).c_str(), GENERIC_WRITE, FILE_SHARE_READ,
-				nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_WRITE_THROUGH, nullptr));
-			if (file.value == INVALID_HANDLE_VALUE) fail("Cannot create a durable undo recovery record.");
+			const auto file = ::platform::open_file(desktop::file_path(path), ::platform::file_open_mode::create_new);
+			if (!file) fail("Cannot create a durable undo recovery record.");
 			const std::wstring content = L"\ufeffImageWalker 3.0 recovery record (UTF-16)\r\n"
 				L"Automatic Undo is available only in the creating session. Never replay this record automatically.\r\n"
 				L"Recovery copies are retained without automatic deletion. Check current files before manual recovery.\r\n" + text;
 			const auto bytes = content.size() * sizeof(wchar_t);
-			if (bytes > MAXDWORD) fail("The recovery record is too large.");
-			DWORD written{};
-			if (!WriteFile(file.value, content.data(), static_cast<DWORD>(bytes), &written, nullptr) ||
-				written != bytes || !FlushFileBuffers(file.value))
+			if (bytes > (std::numeric_limits<std::uint64_t>::max)()) fail("The recovery record is too large.");
+			if (file->write(reinterpret_cast<const std::uint8_t*>(content.data()), bytes) != bytes ||
+				!file->flush())
 				fail("Cannot flush the undo recovery record; no new mutation is permitted.");
 		}
 
@@ -424,40 +380,36 @@ namespace iw::undo
 		}
 
 		// Renaming by the held handle, without replacement, closes the pathname identity race.
-		void rename_locked(const Handle& handle, const std::filesystem::path& destination)
+		void rename_locked(const ::platform::file_ptr& handle, const std::filesystem::path& destination)
 		{
-			const auto name = std::filesystem::absolute(destination).wstring();
-			const auto bytes = name.size() * sizeof(wchar_t);
-			if (bytes > MAXDWORD - sizeof(FILE_RENAME_INFO)) fail("A recovery path is too long.");
-			std::vector<unsigned char> buffer(sizeof(FILE_RENAME_INFO) + bytes);
-			auto* info = reinterpret_cast<FILE_RENAME_INFO*>(buffer.data());
-			info->ReplaceIfExists = FALSE;
-			info->RootDirectory = nullptr;
-			info->FileNameLength = static_cast<DWORD>(bytes);
-			std::copy(name.begin(), name.end(), info->FileName);
-			if (!SetFileInformationByHandle(handle.value, FileRenameInfo, info,
-				static_cast<DWORD>(buffer.size())))
-				throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
-					"Cannot move the verified completed file to recovery storage");
+			if (!handle) fail("Cannot move the verified completed file to recovery storage.");
+			const auto result = ::platform::move_file(handle, desktop::file_path(destination), true);
+			if (result.failed()) throw std::runtime_error(
+				"Cannot move the verified completed file to recovery storage");
 		}
 
 		void remove_empty_directory(const std::filesystem::path& path, const files::FileSnapshot& expected)
 		{
-			Handle directory(CreateFileW(files::native_path(path).c_str(), FILE_READ_ATTRIBUTES | DELETE,
-				FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-				FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-			if (directory.value == INVALID_HANDLE_VALUE) fail("Cannot lock the directory for removal.");
+			const auto directory = ::platform::open_file_lock(desktop::file_path(path));
+			if (!directory)
+			{
+				const auto native = ::platform::last_os_error();
+				if (native.empty()) fail("Cannot lock the directory for removal.");
+				throw std::runtime_error("Cannot lock the directory for removal: " + native);
+			}
 			no_links(path);
 			const auto current = files::snapshot_file(path);
 			if (!current || !current->exists || !current->directory || current->volume != expected.volume ||
 				current->identity != expected.identity || current->readOnly != expected.readOnly)
 				fail("The directory changed before removal; it was retained.");
-			// Unlike a pathname deletion, this targets the verified object and atomically refuses
-			// nonempty directories, including a child which arrives after acquiring the handle.
-			FILE_DISPOSITION_INFO remove{TRUE};
-			if (!SetFileInformationByHandle(directory.value, FileDispositionInfo, &remove, sizeof(remove)))
-				throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
-					"Directory retained (it may contain unrelated or conflicting files)");
+			if (const auto removed = ::platform::delete_file(directory); removed.failed())
+			{
+				std::string detail = "Directory retained (it may contain unrelated or conflicting files)";
+				if (!removed.error_message.empty()) detail += ": " + removed.error_message;
+				if (removed.error)
+					detail += std::format(" [{}:{}]", removed.error.category().name(), removed.error.value());
+				throw std::runtime_error(std::move(detail));
+			}
 		}
 	}
 
@@ -805,17 +757,14 @@ namespace iw::undo
 					return result;
 				}
 				{
-					Handle file(CreateFileW(files::native_path(source).c_str(), GENERIC_READ | DELETE,
-						FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+					const auto file = ::platform::open_file_lock(desktop::file_path(source));
 					const auto parent = files::snapshot_file(source.parent_path());
-					if (file.value == INVALID_HANDLE_VALUE || !parent || parent->volume != sourceParent->volume ||
+					if (!file || !parent || parent->volume != sourceParent->volume ||
 						parent->identity != sourceParent->identity || !batch.validate_before({source}, result.detail) ||
 						!batch.validate_completed({destination}, result.detail))
 						fail("The destination was copied, but the source or completed destination changed before source removal.");
-					FILE_DISPOSITION_INFO remove{TRUE};
-					if (!SetFileInformationByHandle(file.value, FileDispositionInfo, &remove, sizeof(remove)))
-						throw std::system_error(static_cast<int>(GetLastError()), std::system_category(),
-							"The destination was copied, but the source could not be removed");
+					if (const auto removed = ::platform::delete_file(file); removed.failed())
+						fail("The destination was copied, but the source could not be removed");
 				}
 				result.sourceRemoved = true;
 				if (!batch.completed(protectedPaths, {source}, result.detail))
@@ -916,8 +865,8 @@ namespace iw::undo
 				continue;
 			}
 			bool conflict = false;
-			std::vector<Handle> locks;
-			std::vector<Handle> contentLocks;
+			std::vector<::platform::file_ptr> locks;
+			std::vector<::platform::file_ptr> contentLocks;
 			std::map<size_t, std::filesystem::path> outputCopies;
 			try
 			{
@@ -946,17 +895,15 @@ namespace iw::undo
 							copy_tree(slot.path, output, slot.after);
 							outputCopies.emplace(index, output);
 						}
-						locks.emplace_back(CreateFileW(files::native_path(slot.path).c_str(), GENERIC_READ | DELETE,
-							FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-						if (locks.back().value == INVALID_HANDLE_VALUE) fail("Cannot lock a completed file against edits.");
+						locks.push_back(::platform::open_file_lock(desktop::file_path(slot.path)));
+						if (!locks.back()) fail("Cannot lock a completed file against edits.");
 						for (size_t child = 1; child < slot.after.size(); ++child)
 						{
 							if (slot.after[child].snapshot.directory) continue;
-							contentLocks.emplace_back(CreateFileW(
-								files::native_path(slot.path / slot.after[child].relative).c_str(), GENERIC_READ,
-								FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-								FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
-							if (contentLocks.back().value == INVALID_HANDLE_VALUE)
+							contentLocks.push_back(::platform::open_file_lock(
+								desktop::file_path(slot.path / slot.after[child].relative),
+								::platform::file_lock_mode::read));
+							if (!contentLocks.back())
 								fail("Cannot lock a completed folder's contents against edits.");
 						}
 						if (fingerprint(slot.path) != slot.after) fail("A completed file changed while Undo acquired its lock.");

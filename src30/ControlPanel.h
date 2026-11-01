@@ -6,7 +6,7 @@
 #include "CanvasRenderer.h"
 #include "Dpi.h"
 #include "Platform.h"
-#include "util_layout.h"
+#include "AppLayout.h"
 
 #include <functional>
 #include <string>
@@ -47,8 +47,8 @@ namespace iw::ui
 		std::vector<std::wstring> choices;
 		std::function<void()> changed;
 
-		recti bounds; // whole row, filled by layout
-		recti hit; // the part that responds to the mouse
+		app::recti bounds; // whole row, filled by layout
+		app::recti hit; // the part that responds to the mouse
 		std::vector<std::wstring> wrapped; // label lines, filled by layout
 	};
 
@@ -71,7 +71,7 @@ namespace iw::ui
 		std::vector<Control>& controls() { return controls_; }
 		const std::vector<Control>& controls() const { return controls_; }
 
-		void layout(recti bounds, const CanvasRenderer& renderer);
+		void layout(app::recti bounds, const CanvasRenderer& renderer);
 		void draw(const CanvasRenderer& renderer) const;
 		int content_height() const { return contentHeight_; }
 
@@ -79,9 +79,9 @@ namespace iw::ui
 		void set_activate_handler(std::function<void(Control&)> handler) { activate_ = std::move(handler); }
 		void set_invalidate_handler(std::function<void()> handler) { invalidate_ = std::move(handler); }
 
-		bool mouse_move(pointi point);
-		bool mouse_down(pointi point);
-		bool mouse_up(pointi point);
+		bool mouse_move(app::pointi point);
+		bool mouse_down(app::pointi point);
+		bool mouse_up(app::pointi point);
 		void mouse_leave();
 		bool dragging() const { return dragging_; }
 		int hot_id() const { return hotId_; }
@@ -93,7 +93,7 @@ namespace iw::ui
 		bool interactive() const { return interactive_; }
 
 		// The row a hosted edit control must occupy, or an empty rect when there is none.
-		recti text_bounds(int id) const;
+		app::recti text_bounds(int id) const;
 
 		void set_checked(int id, bool checked);
 		void set_value(int id, int value);
@@ -102,7 +102,7 @@ namespace iw::ui
 
 	private:
 		int metric(const int value) const { return scale_metric(value, dpi_); }
-		Control* control_at(pointi point);
+		Control* control_at(app::pointi point);
 		void apply_radio(const Control& chosen);
 		int slider_value_at(const Control& control, int x) const;
 		static bool focusable(const Control& control);

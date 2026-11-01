@@ -8,10 +8,10 @@
 
 #pragma once
 
-#include "iw/imaging/UtilBase.h"
-#include "iw/imaging/Imaging.h"
-#include "iw/imaging/UtilFileTime.h"
-#include "iw/imaging/CoreSupport.h"
+#include "iw/legacy/UtilBase.h"
+#include "iw/legacy/Imaging.h"
+#include "iw/legacy/UtilFileTime.h"
+#include "iw/legacy/CoreSupport.h"
 
 // Pre defs
 class _com_error;

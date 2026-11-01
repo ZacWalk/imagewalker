@@ -3,7 +3,7 @@ namespace iw::ui
 {
 namespace
 {
-		bool same_size(const sizei left, const sizei right)
+		bool same_size(const app::sizei left, const app::sizei right)
 		{
 			return left.width == right.width && left.height == right.height;
 		}
@@ -16,9 +16,9 @@ namespace
 
 }
 	std::span<const std::uint32_t> ResampleCache::resample(const std::span<const std::uint32_t> sourcePixels,
-	                                                      const sizei sourceSize,
+	                                                      const app::sizei sourceSize,
 	                                                      const SampleRect sourceRect,
-	                                                      const sizei destinationSize,
+	                                                      const app::sizei destinationSize,
 	                                                      const std::uint64_t cacheToken)
 	{
 		++clock_;

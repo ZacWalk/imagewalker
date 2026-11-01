@@ -5,37 +5,49 @@
 #include "MainWindow.h"
 #include "Tests.h"
 #include "DiagnosticLog.h"
-#include <libiw/Diagnostics.h>
+#include <iw/imaging/Diagnostics.h>
 #include "Undo.h"
 
 #include <filesystem>
+#include <thread>
+
+const std::string_view s_app_name = "ImageWalker30";
 
 namespace
 {
-	bool is_switch(const wchar_t* argument, const wchar_t* name)
-	{
-		return argument && (argument[0] == L'/' || argument[0] == L'-') &&
-			iw::platform::compare_ordinal_ignore_case(argument + 1, name) == 0;
-	}
+	std::shared_ptr<iw::MainWindow> main_window;
+	std::unique_ptr<iw::diagnostics::Session> diagnostic_session;
 }
 
-int imagewalker_main(const int showCommand, const std::span<const std::wstring_view> arguments)
+app_init_result app_init(const pf::window_frame_ptr& mainFrame,
+                         const std::span<const std::string_view> arguments)
 {
+	pf::config_set_app_name("imagewalker30");
 	std::filesystem::path initialPath;
 	bool runTests = false;
+	bool skipClipboardTests = false;
 	for (const auto argument : arguments)
 	{
-		if (is_switch(argument.data(), L"test")) runTests = true;
-		else if (initialPath.empty() && !argument.empty() && argument.front() != L'/' && argument.front() != L'-')
-			initialPath = argument;
+		if (argument == "/test" || argument == "--test" || argument == "-test" ||
+			(argument.size() > 1 && (argument.front() == '/' || argument.front() == '-') &&
+				pf::icmp(argument.substr(1), "test") == 0))
+			runTests = true;
+		else if (argument == "/test-no-clipboard" || argument == "--test-no-clipboard" ||
+		         argument == "-test-no-clipboard")
+		{
+			runTests = true;
+			skipClipboardTests = true;
+		}
+		else if (initialPath.empty() && !argument.empty() && argument.front() != '/' && argument.front() != '-')
+			initialPath = std::filesystem::path(pf::utf8_to_utf16(argument));
 	}
 
-	const iw::diagnostics::Session log;
+	diagnostic_session = std::make_unique<iw::diagnostics::Session>();
 	iw::imaging::set_diagnostic_sink([](std::wstring_view message)
 	{
 		iw::platform::write_diagnostic(message);
 	});
-	if (log.error())
+	if (diagnostic_session->error())
 	{
 		iw::platform::write_diagnostic(L"Unable to create the ImageWalker diagnostic log.\n");
 		if (!runTests)
@@ -45,19 +57,46 @@ int imagewalker_main(const int showCommand, const std::span<const std::wstring_v
 
 	if (runTests)
 	{
-		const iw::platform::Runtime runtime(iw::platform::RuntimeMode::multithreaded);
-		return runtime ? iw::tests::run_all() : 1;
+		// libdesktop's WinMain has already initialized the UI apartment.  The
+		// old standalone entry point needed its own MTA Runtime; re-entering COM
+		// here would report RPC_E_CHANGED_MODE and skip the suite.
+		int result = 1;
+		std::thread tests([&result, skipClipboardTests]
+		{
+			const iw::platform::Runtime runtime(iw::platform::RuntimeMode::multithreaded);
+			result = runtime ? iw::tests::run_all(skipClipboardTests) : 1;
+		});
+		tests.join();
+		diagnostic_session.reset();
+		return {false, result};
 	}
 
-	const iw::platform::Runtime runtime(iw::platform::RuntimeMode::userInterface);
-	if (!runtime) return 1;
-
+	iw::platform::bind_main_frame(mainFrame);
 	iw::undo::initialize_live_history();
-	auto mainWindow = std::make_shared<iw::MainWindow>(&iw::undo::history());
-	if (!mainWindow->create(showCommand, initialPath))
+	main_window = std::make_shared<iw::MainWindow>(&iw::undo::history());
+	if (!main_window->create(1, initialPath))
 	{
-		iw::platform::show_error(L"ImageWalker 3.0 could not create its main window.", L"ImageWalker 3.0");
-		return 1;
+		app_init_result failure;
+		failure.start_gui = false;
+		failure.exit_code = 1;
+		failure.error_message = "ImageWalker 3.0 could not create its main window.";
+		return failure;
 	}
-	return iw::platform::run_ui_loop(mainWindow->frame());
+
+	app_init_result result;
+	result.window.initial_client_size = {1280, 800};
+	result.window.minimum_client_size = {640, 480};
+	result.window.resizable = true;
+	return result;
+}
+
+void app_idle()
+{
+}
+
+void app_destroy()
+{
+	iw::platform::shutdown_runtime();
+	main_window.reset();
+	diagnostic_session.reset();
 }

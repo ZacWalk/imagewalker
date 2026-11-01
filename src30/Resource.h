@@ -3,7 +3,7 @@
 
 #pragma once
 
-#define IDI_APP                         100
+#define IDI_APP                         1
 #define IDC_ZOOM_CURSOR                  104
 #define IDB_TOOLBAR_SYMBOLS              105
 #define IDB_FILE_FOLDER                 107

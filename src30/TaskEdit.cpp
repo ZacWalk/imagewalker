@@ -77,7 +77,7 @@ namespace iw
 				static_cast<std::uint64_t>(image.width) * image.height <= image.pixels.size();
 		}
 
-		void draw_edge(const ui::CanvasRenderer& renderer, pointi from, const pointi to,
+		void draw_edge(const ui::CanvasRenderer& renderer, app::pointi from, const app::pointi to,
 			const color value, const int thickness)
 		{
 			// The renderer facade exposes filled rectangles, not native line primitives.
@@ -85,7 +85,7 @@ namespace iw
 			const int dx = std::abs(to.x - from.x), sx = from.x < to.x ? 1 : -1;
 			const int dy = -std::abs(to.y - from.y), sy = from.y < to.y ? 1 : -1;
 			int error = dx + dy;
-			pointi run = from;
+			app::pointi run = from;
 			for (;;)
 			{
 				const auto previous = from;
@@ -354,10 +354,10 @@ namespace iw
 			set_status(std::format(L"Loading {}...", path_.filename().wstring()));
 			return;
 		}
-		const sizei original{source_.originalWidth > 0 ? source_.originalWidth : source_.width,
+		const app::sizei original{source_.originalWidth > 0 ? source_.originalWidth : source_.width,
 			source_.originalHeight > 0 ? source_.originalHeight : source_.height};
-		const auto frame = edits::transformed_size(original, edits_);
-		const auto crop = edits::effective_crop(original, edits_);
+		const app::sizei frame = edits::transformed_size(original, edits_);
+		const app::recti crop = edits::effective_crop(original, edits_);
 		set_status(source_.width > 0
 			           ? std::format(L"{} - {} of {} - {} x {}{}", path_.filename().wstring(), index_ + 1,
 			                         targets_.size(), crop.width ? crop.width : frame.width,
@@ -366,10 +366,10 @@ namespace iw
 			           : std::format(L"{} could not be decoded.", path_.filename().wstring()));
 	}
 
-	void TaskEdit::rebuild_preview(const sizei pane)
+	void TaskEdit::rebuild_preview(const app::sizei pane)
 	{
 		const bool swaps = (edits_.rotation % 2) != 0;
-		previewSource_.update(source_, swaps ? sizei{pane.height, pane.width} : pane);
+		previewSource_.update(source_, swaps ? app::sizei{pane.height, pane.width} : pane);
 	}
 
 	void TaskEdit::controls_changed()
@@ -418,7 +418,7 @@ namespace iw
 		case idAutoDocument:
 			if (const auto corners = edits::detect_document(source_))
 			{
-				if (edits::perspective_size(original_size(), *corners).width < 2)
+				if (app::sizei{edits::perspective_size(original_size(), *corners)}.width < 2)
 				{
 					set_status(L"The detected perspective exceeds the supported image size. Adjust the corners manually.");
 					return;
@@ -539,7 +539,7 @@ namespace iw
 		return items;
 	}
 
-	void TaskEdit::draw_content(const ui::CanvasRenderer& renderer, const recti bounds)
+	void TaskEdit::draw_content(const ui::CanvasRenderer& renderer, const app::recti bounds)
 	{
 		imageBounds_ = {};
 		const color face = platform::system_color(platform::SystemColor::face);
@@ -563,7 +563,7 @@ namespace iw
 			for (size_t item = first; item < targets_.size(); ++item)
 			{
 				if (x + cell > stripBounds_.right()) break;
-				const recti tile{x, stripBounds_.y, cell, stripBounds_.height};
+				const app::recti tile{x, stripBounds_.y, cell, stripBounds_.height};
 				renderer.fill(tile, item == index_
 					? platform::system_color(platform::SystemColor::highlight) : face);
 				renderer.outline(tile, shadow);
@@ -607,7 +607,7 @@ namespace iw
 				platform::TextFormat::center | platform::TextFormat::singleLine);
 			return;
 		}
-		const recti fitted = ui::fit_centered({shown.width, shown.height}, {
+		const app::recti fitted = ui::fit_centered({shown.width, shown.height}, {
 			                                      photoBounds_.x + metric(8), photoBounds_.y + metric(8),
 			                                      (std::max)(1, photoBounds_.width - metric(16)),
 			                                      (std::max)(1, photoBounds_.height - metric(16))
@@ -617,17 +617,17 @@ namespace iw
 		imageBounds_ = fitted;
 		if (showResult_ || loading_ || saving_) return;
 		const auto highlight = platform::system_color(platform::SystemColor::highlight);
-		const auto handle = [&](const pointi p)
+		const auto handle = [&](const app::pointi p)
 		{
 			const int radius = metric(5);
-			const recti box{p.x - radius, p.y - radius, radius * 2 + 1, radius * 2 + 1};
+			const app::recti box{p.x - radius, p.y - radius, radius * 2 + 1, radius * 2 + 1};
 			renderer.fill(box, platform::system_color(platform::SystemColor::window));
 			renderer.outline(box, highlight, metric(2));
 		};
 		if (selectingCorners)
 		{
 			const auto corners = edits_.perspective.value_or(edits::whole_picture);
-			std::array<pointi, 4> points;
+			std::array<app::pointi, 4> points;
 			for (size_t i = 0; i < corners.size(); ++i)
 				points[i] = {fitted.x + static_cast<int>(std::lround(corners[i].x * (fitted.width - 1))),
 					fitted.y + static_cast<int>(std::lround(corners[i].y * (fitted.height - 1)))};
@@ -647,16 +647,16 @@ namespace iw
 		}
 	}
 
-	sizei TaskEdit::original_size() const
+	app::sizei TaskEdit::original_size() const
 	{
 		return {source_.originalWidth > 0 ? source_.originalWidth : source_.width,
 			source_.originalHeight > 0 ? source_.originalHeight : source_.height};
 	}
 
-	recti TaskEdit::displayed_crop() const
+	app::recti TaskEdit::displayed_crop() const
 	{
-		const auto frame = edits::transformed_size(original_size(), edits_);
-		const auto crop = edits::effective_crop(original_size(), edits_);
+		const app::sizei frame = edits::transformed_size(original_size(), edits_);
+		const app::recti crop = edits::effective_crop(original_size(), edits_);
 		if (frame.width <= 0 || frame.height <= 0 || imageBounds_.width <= 0 || imageBounds_.height <= 0)
 			return {};
 		const auto x = [&](const int p)
@@ -719,7 +719,7 @@ namespace iw
 						std::clamp(static_cast<double>(input.point.x - imageBounds_.x) / (imageBounds_.width - 1), 0.0, 1.0),
 						std::clamp(static_cast<double>(input.point.y - imageBounds_.y) / (imageBounds_.height - 1), 0.0, 1.0)};
 					if (edits::valid_quadrilateral(corners) &&
-						edits::perspective_size(original_size(), corners).width >= 2)
+						app::sizei{edits::perspective_size(original_size(), corners)}.width >= 2)
 					{
 						edits_.perspective = corners;
 						edits_.crop = {};
@@ -727,12 +727,14 @@ namespace iw
 				}
 				else if (imageBounds_.width > 0 && imageBounds_.height > 0)
 				{
-					const auto size = edits::transformed_size(original_size(), edits_);
-					const pointi delta{
+					const app::sizei size = edits::transformed_size(original_size(), edits_);
+					const app::pointi delta{
 						static_cast<int>(std::lround(static_cast<double>(input.point.x - dragStart_.x) * size.width / imageBounds_.width)),
 						static_cast<int>(std::lround(static_cast<double>(input.point.y - dragStart_.y) * size.height / imageBounds_.height))};
-					const auto moved = edits::drag_crop(dragCrop_, edits::crop_bounds(original_size(), edits_), cropDrag_, delta);
-					edits_.crop = moved == dragCrop_ ? beforeDrag_.crop : moved;
+					const auto moved = edits::drag_crop(dragCrop_,
+						app::recti{edits::crop_bounds(original_size(), edits_)}, cropDrag_, delta);
+					if (moved == dragCrop_) edits_.crop = beforeDrag_.crop;
+					else edits_.crop = static_cast<::recti>(moved);
 				}
 				set_status_for_photo();
 				invalidate();
@@ -747,7 +749,7 @@ namespace iw
 				const auto corners = edits_.perspective.value_or(edits::whole_picture);
 				for (size_t i = 0; i < corners.size(); ++i)
 				{
-					const pointi p{imageBounds_.x + static_cast<int>(std::lround(corners[i].x * (imageBounds_.width - 1))),
+					const app::pointi p{imageBounds_.x + static_cast<int>(std::lround(corners[i].x * (imageBounds_.width - 1))),
 						imageBounds_.y + static_cast<int>(std::lround(corners[i].y * (imageBounds_.height - 1)))};
 					if (std::abs(input.point.x - p.x) <= metric(9) && std::abs(input.point.y - p.y) <= metric(9))
 					{ cornerDrag_ = static_cast<int>(i); break; }

@@ -176,7 +176,7 @@ namespace iw
 		if (player_) player_->bounds(contentBounds_);
 	}
 
-	void TaskMedia::draw_content(const ui::CanvasRenderer& renderer, const recti bounds)
+	void TaskMedia::draw_content(const ui::CanvasRenderer& renderer, const app::recti bounds)
 	{
 		if (!player_)
 			renderer.text(playback_.error.empty() ? L"Opening media..." : playback_.error, bounds,

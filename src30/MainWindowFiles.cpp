@@ -40,7 +40,7 @@ namespace iw
 
 	std::vector<std::filesystem::path> MainWindow::selected_paths() const { return canvas_.selected_paths(); }
 
-	void MainWindow::show_file_menu(const pointi screenPoint)
+	void MainWindow::show_file_menu(const app::pointi screenPoint)
 	{
 		CommandContext context = build_command_context();
 		// The canvas context menu always targets the canvas selection, whatever holds focus.
@@ -1086,7 +1086,7 @@ namespace iw
 		platform::show_error(L"The transfer could not be completed.", move ? L"Move to folder" : L"Copy to folder", frame_);
 	}
 
-	void MainWindow::show_open_with_menu(const pointi screenPoint)
+	void MainWindow::show_open_with_menu(const app::pointi screenPoint)
 	{
 		if (task_active())
 		{

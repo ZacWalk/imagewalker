@@ -9,7 +9,7 @@ Follow [warnings.md](warnings.md) and validate with a full Debug and Release
 rebuild, not just incremental totals.
 
 - [ ] **MSVC 19.51 diagnostics.** Check the shared native imaging sources in
-      `libiw/src/legacy`, `src10/DibMemory.cpp` and the 2.x `UtilMd5.cpp`
+      `include/iw/legacy`, `src10/DibMemory.cpp` and the 2.x `UtilMd5.cpp`
       implementations for `C4189`, `C4244`, `C4458` and `C4459`.
       Validate with compiler 19.51.36260 or newer.
       Done when neither configuration emits these families and no suppression
@@ -24,7 +24,7 @@ rebuild, not just incremental totals.
       the command produces signed, timestamped zips whose executables pass
       `Get-AuthenticodeSignature`, and [build.md](build.md) documents it.
 
-## Common image engine
+## Shared imaging sources
 
 - [ ] **Optional native/Windows provider convergence.** The non-SDK readers
       are in libfiles. JPEG, PNG, GIF, TIFF and BMP still have a native
@@ -33,10 +33,11 @@ rebuild, not just incremental totals.
       Converge on one, for example by backing native storage with WIC or by
       decoding for display natively with libfiles, whose libjpeg-turbo has
       its SIMD.
-      This is outside the workspace refactor: the owner permits Windows SDK
-      providers to stay. If resumed, it is done when each format has one decoder, its display decode time is
-      measured against the current path on the same fixtures, and the backend
-      rule in `libiw/src/NativeCodec.h` and its tests are updated.
+      This is outside the source-target retirement: the owner permits Windows
+      SDK providers to stay. If resumed, it is done when each format has one
+      decoder, its display decode time is measured against the current path on
+      the same fixtures, and the backend rule in `include/iw/imaging/Codec.h` and
+      its tests are updated.
 - [ ] **Native TIFF grayscale strips.** The inherited native reader rejects
       MINISWHITE/MINISBLACK strips even when valid; the Windows display path
       is unaffected. Add native grayscale/monochrome fixtures in libfiles
@@ -47,17 +48,6 @@ rebuild, not just incremental totals.
       multiple of the JPEG block size. Done when such photos are shown exactly
       upright without a lossy save, with tests at non-multiple sizes for all
       eight orientations.
-
-## Shared libraries
-
-- [ ] **Optional: ImageWalker 3.0 on libdesktop.** `src30/Platform*` copies
-      the shape of libdesktop-core's `pf::` layer, and `include/core/util.h`,
-      `util_layout.h` and `util_geometry.h` overlap libdesktop-system's `df::`
-      and `str::`. Moving onto them is listed in libdesktop's
-      [todo](https://github.com/ZacWalk/libdesktop/blob/main/docs/todo.md).
-      Like provider convergence, it is optional. Done when 3.0 builds on
-      libdesktop with all its suites passing and `util_geometry` is no longer
-      part of libiw's public API.
 
 ## ImageWalker 3.0 features
 

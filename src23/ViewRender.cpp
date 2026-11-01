@@ -7,7 +7,7 @@
 // For more information on ImageWalker see www.ImageWalker.com
 
 #include "stdafx.h"
-#include "iw/imaging/ImagingBlitter.h"
+#include "iw/legacy/ImagingBlitter.h"
 #include "ViewRenderSurface.h"
 
 class MoodPalette

@@ -7,13 +7,12 @@
 | `src22` | ImageWalker 2.2 application and tests |
 | `src23` | ImageWalker 2.3 application and tests |
 | `src30` | ImageWalker 3.0 application and tests |
-| `libiw/include/libiw` | Application-independent public imaging API |
-| `libiw/src` | libfiles/SDK adapters, native encoders, metadata and image processing |
-| `libiw/compat/iw/imaging` | ATL-based interfaces for the 2.x adapters and the native-page backend |
-| `libiw/tests` | Standalone public/native engine tests and the dependency-boundary check |
+| `include/iw/imaging` | Modern, platform-independent inline imaging code and contracts |
+| `include/iw/legacy` | Header-only 2.x compatibility models and adapters |
+| `tests/imaging` | Shared imaging regression consumer and ownership/direct-dependency check |
 | `include/iw` | Header-only code shared by the four WTL applications |
 | `include/wtl` | Vendored WTL headers |
-| `include/core` | Header-only `util_layout.h`, `util_geometry.h`, `util.h` and `help_file.h`, shared by all five applications |
+| `include/core` | Historical WTL utility headers retained by the 1.x/2.x applications; not part of modern imaging or 3.0 geometry |
 | `include/iw/ColorButton.h` | Legacy colour control shared by the 2.x trees |
 | `third-party` | CMake recipes, versions and patches for the fetched dependencies |
 | `Help` | Compiled-help sources for all five applications, with separate 3.0 workflow topics |
@@ -33,18 +32,21 @@ generated output, settings and logs out of version control.
 
 ## Ownership
 
-Keep reusable UI, utility and test helpers header-only in `include/`. Put shared
-imaging implementations and their compatibility declarations in `libiw`; link
-its single static target into every application. Keep other translation units
-with their owning application. Follow [libiw-plan.md](libiw-plan.md) for the
-public API, codec selection and adapter boundaries.
+Keep reusable UI, utility and test helpers header-only in `include/`. Put
+imaging contracts and their inline definitions in `include/iw/imaging` and
+`include/iw/legacy`; compiled codec and platform mechanisms belong in libfiles
+and libdesktop. There is no shared application object library. Keep translation units with their owning
+application. Follow [libiw-plan.md](libiw-plan.md) for the public API, codec
+selection and adapter boundaries.
 
 Keep each application's resource script, manifest, icon, version identity,
 entry point and tests in its directory. Embed `ImageWalker.chm` in every
 resource script. Preserve independent builds of the 2.x applications; see
 [architecture-2x.md](architecture-2x.md).
 
-For ImageWalker 3.0, use `include/core/` and the public `libiw` headers, not the
-ATL compatibility headers or a WTL application. Keep codec acquisition in
-libfiles; `third-party/` pins that library and the application-owned Hunspell
-recipe. Place 3.0's help topics in the common `ImageWalker.chm`.
+For ImageWalker 3.0, use libdesktop's `pf::`/system contracts and
+`include/iw/imaging`, not the historical compatibility headers or WTL utility
+geometry. Keep ordinary codec acquisition in libfiles; the explicit Windows
+display adapter calls libdesktop-core's bitmap API. `third-party/` pins the
+library and the application-owned Hunspell recipe. Place 3.0's help topics in
+the common `ImageWalker.chm`.

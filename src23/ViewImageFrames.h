@@ -9,7 +9,7 @@
 #pragma once
 
 #include "ViewLayout.h"
-#include "iw/imaging/Metadata.h"
+#include "iw/legacy/Metadata.h"
 
 
 class FrameEditableText : 

@@ -74,7 +74,7 @@ namespace iw::ui
 		return found == controls_.end() ? nullptr : &*found;
 	}
 
-	void ControlPanel::layout(const recti bounds, const CanvasRenderer& renderer)
+	void ControlPanel::layout(const app::recti bounds, const CanvasRenderer& renderer)
 	{
 		const int lineHeight = (std::max)(metric(16), renderer.measure_text(L"Wg").height);
 		int y = bounds.y;
@@ -151,7 +151,7 @@ namespace iw::ui
 		contentHeight_ = y - bounds.y;
 	}
 
-	recti ControlPanel::text_bounds(const int id) const
+	app::recti ControlPanel::text_bounds(const int id) const
 	{
 		const auto* control = find(id);
 		if (!control) return {};
@@ -205,7 +205,7 @@ namespace iw::ui
 			case ControlKind::radio:
 				{
 					const int box = metric(checkSize);
-					const recti mark{
+					const app::recti mark{
 						control.bounds.x, control.bounds.y + (control.bounds.height - box) / 2, box, box
 					};
 					renderer.fill(mark, platform::calc_hande_color(hot, false, false));
@@ -236,7 +236,7 @@ namespace iw::ui
 						              control.bounds.x, control.bounds.y, control.bounds.width, lineHeight
 					              }, foreground,
 					              platform::TextFormat::left | platform::TextFormat::singleLine);
-					const recti track{
+					const app::recti track{
 						control.hit.x, control.hit.y + control.hit.height / 2 - metric(2),
 						control.hit.width, metric(4)
 					};
@@ -246,7 +246,7 @@ namespace iw::ui
 					const int travel = (std::max)(0, control.hit.width - metric(10));
 					const int offset = static_cast<int>(travel *
 						std::clamp(static_cast<long long>(control.value) - control.minimum, 0LL, span) / span);
-					const recti thumb{
+					const app::recti thumb{
 						control.hit.x + offset, control.hit.y + metric(2), metric(10),
 						control.hit.height - metric(4)
 					};
@@ -330,7 +330,7 @@ namespace iw::ui
 		}
 	}
 
-	Control* ControlPanel::control_at(const pointi point)
+	Control* ControlPanel::control_at(const app::pointi point)
 	{
 		if (!interactive_) return nullptr;
 		for (auto& control : controls_)
@@ -490,7 +490,7 @@ namespace iw::ui
 		if (invalidate_) invalidate_();
 	}
 
-	bool ControlPanel::mouse_move(const pointi point)
+	bool ControlPanel::mouse_move(const app::pointi point)
 	{
 		if (dragging_)
 		{
@@ -514,7 +514,7 @@ namespace iw::ui
 		return control != nullptr;
 	}
 
-	bool ControlPanel::mouse_down(const pointi point)
+	bool ControlPanel::mouse_down(const app::pointi point)
 	{
 		auto* control = control_at(point);
 		if (!control) return false;
@@ -564,7 +564,7 @@ namespace iw::ui
 		}
 	}
 
-	bool ControlPanel::mouse_up(const pointi)
+	bool ControlPanel::mouse_up(const app::pointi)
 	{
 		const bool wasDragging = dragging_ || pressedId_ != 0;
 		dragging_ = false;

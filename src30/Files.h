@@ -2,7 +2,7 @@
 // Declares non-UI file enumeration, metadata, and image decoding services.
 
 #pragma once
-#include <libiw/Codec.h>
+#include <iw/imaging/Codec.h>
 
 #include <cstdint>
 #include <filesystem>
@@ -67,6 +67,7 @@ namespace iw::files
 		bool exists{};
 		bool directory{};
 		bool readOnly{};
+		bool reparse{};
 		std::uint64_t volume{};
 		std::uint64_t identity{};
 		std::uint64_t size{};

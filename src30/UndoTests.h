@@ -509,8 +509,11 @@ namespace iw::tests
 			}
 			write(to / L"keep.bin", "unrelated user edit");
 			if (unrelatedChild) write(to / L"nested" / L"arrival.bin", "new user file");
-			reporter.check(merge->remove_directory(from / L"nested", error) && merge->remove_directory(from, error),
-				L"Move removes verified empty source directories by handle and records only successful removals");
+			const bool removedSourceDirectories =
+				merge->remove_directory(from / L"nested", error) && merge->remove_directory(from, error);
+			reporter.check(removedSourceDirectories,
+				(L"Move removes verified empty source directories by handle and records only successful removals: " +
+					error).c_str());
 			reporter.check(merge->completed(completedPaths, {}, error) && merge->finish(error),
 				L"finishing a merged transfer never captures untouched destination-tree contents");
 			report = mergeHistory.undo();

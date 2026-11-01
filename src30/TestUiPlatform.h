@@ -11,7 +11,7 @@ namespace iw::tests
 	public:
 		platform::FrameReactorPtr reactor;
 		std::vector<std::shared_ptr<RecordingFrame>> children;
-		recti bounds{0, 0, 1000, 700};
+		app::recti bounds{0, 0, 1000, 700};
 		std::wstring title;
 		bool visible{true};
 		bool focused{};
@@ -35,11 +35,11 @@ namespace iw::tests
 			children.push_back(child);
 			return child;
 		}
-		recti client_rect() const override { return {0, 0, bounds.width, bounds.height}; }
-		void move(recti value) override { bounds = value; }
+		app::recti client_rect() const override { return {0, 0, bounds.width, bounds.height}; }
+		void move(app::recti value) override { bounds = value; }
 		void show(bool value) override { visible = value; }
 		void invalidate() override { ++invalidations; }
-		void invalidate(recti) override { ++invalidations; }
+		void invalidate(app::recti) override { ++invalidations; }
 		void set_focus() override { focused = true; }
 		bool has_focus() const override { return focused; }
 		void set_capture() override {}
@@ -50,8 +50,8 @@ namespace iw::tests
 		void stop_timer() override {}
 		void accept_file_drops(bool) override {}
 		void set_cursor(platform::CursorShape) override {}
-		pointi screen_to_client(pointi value) const override { return value; }
-		pointi client_to_screen(pointi value) const override { return value; }
+		app::pointi screen_to_client(app::pointi value) const override { return value; }
+		app::pointi client_to_screen(app::pointi value) const override { return value; }
 		void set_title(std::wstring_view value) override { title = value; }
 		void set_fullscreen(bool value) override { fullscreen = value; ++fullscreenChanges; }
 		void set_maximized(bool value) override { maximized = value; }
@@ -60,7 +60,7 @@ namespace iw::tests
 		void close() override { ++closes; }
 		unsigned int dpi() const override { return 96; }
 
-		void mouse(platform::MouseMessage message, pointi point)
+		void mouse(platform::MouseMessage message, app::pointi point)
 		{
 			if (reactor)
 			{
@@ -95,7 +95,7 @@ namespace iw::tests
 			std::function<void(const std::filesystem::path&)>) override {}
 		void set_status(platform::StatusInfo value) override { status = std::move(value); }
 		void set_thumbnail_size(int, std::function<void(int)>) override {}
-		recti layout(recti client, bool fullscreen) override { fullscreenLayout = fullscreen; return client; }
+		app::recti layout(app::recti client, bool fullscreen) override { fullscreenLayout = fullscreen; return client; }
 		void set_dpi(unsigned int) override {}
 		void refresh() override { ++refreshes; }
 	};
@@ -103,9 +103,9 @@ namespace iw::tests
 	class RecordingTree final : public platform::ShellTree
 	{
 	public:
-		recti bounds;
+		app::recti bounds;
 		bool visible{true};
-		void set_bounds(recti value) override { bounds = value; }
+		void set_bounds(app::recti value) override { bounds = value; }
 		void show(bool value) override { visible = value; }
 		void set_focus() override {}
 		bool has_focus() const override { return false; }
@@ -159,7 +159,7 @@ namespace iw::tests
 		void fullscreen() { window->mode_bar_command({MainWindow::modeFullscreen}); }
 		void set_fullscreen(bool value) { window->set_fullscreen(value); }
 		void exit() { window->request_exit(); }
-		void resize(recti value) { root->move(value); window->on_size(); }
+		void resize(app::recti value) { root->move(value); window->on_size(); }
 		void information_progress() { window->update_information_progress(1, 2); }
 		bool fullscreen_state() const { return window->fullscreen_; }
 		bool can_undo() const { return window->can_undo_last_action(); }

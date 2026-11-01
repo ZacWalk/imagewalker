@@ -3,7 +3,7 @@
 #include <cmath>
 namespace iw::edits
 {
-	CropHandle crop_handle(const recti crop, const pointi point, const int radius)
+	CropHandle crop_handle(const app::recti crop, const app::pointi point, const int radius)
 	{
 		if (crop.width <= 0 || crop.height <= 0 || radius < 0) return CropHandle::none;
 		const bool l = std::abs(static_cast<long long>(point.x) - crop.x) <= radius;
@@ -21,7 +21,7 @@ namespace iw::edits
 		return crop.contains(point) ? CropHandle::move : CropHandle::none;
 	}
 
-	recti drag_crop(const recti initial, const recti bounds, const CropHandle handle, const pointi delta)
+	app::recti drag_crop(const app::recti initial, const app::recti bounds, const CropHandle handle, const app::pointi delta)
 	{
 		if (bounds.width <= 0 || bounds.height <= 0 || initial.width <= 0 || initial.height <= 0) return {};
 		const int width = (std::min)(initial.width, bounds.width), height = (std::min)(initial.height, bounds.height);

@@ -9,7 +9,7 @@
 #include "Platform.h"
 #include "TaskModel.h"
 #include "TaskRunner.h"
-#include "util_layout.h"
+#include "AppLayout.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -54,7 +54,7 @@ namespace iw
 		bool create(const platform::WindowFramePtr& parent, Host host);
 		platform::WindowFramePtr frame() const { return frame_; }
 		void set_dpi(unsigned int dpi);
-		void set_bounds(recti bounds);
+		void set_bounds(app::recti bounds);
 		void show(bool visible);
 		// After request_close succeeds, release both the native child and its reactor ownership.
 		bool dispose();
@@ -111,7 +111,7 @@ namespace iw
 		virtual bool uses_plan() const { return true; }
 
 		// The area beside the controls panel. The default draws the review list.
-		virtual void draw_content(const ui::CanvasRenderer& renderer, recti bounds);
+		virtual void draw_content(const ui::CanvasRenderer& renderer, app::recti bounds);
 		virtual bool content_mouse(platform::MouseMessage message, const platform::MouseInput& input);
 		virtual bool content_key(const platform::KeyInput& input);
 		virtual bool content_dragging() const { return false; }
@@ -141,7 +141,7 @@ namespace iw
 		unsigned int dpi_{96};
 		bool finished_{};
 		int modeId_{};
-		recti contentBounds_;
+		app::recti contentBounds_;
 
 	private:
 		struct Thumbnail
@@ -158,7 +158,7 @@ namespace iw
 		platform::MessageResult key(const platform::WindowFramePtr& frame, platform::KeyMessage message,
 		                            const platform::KeyInput& input) override;
 		void paint(const platform::WindowFramePtr& frame, platform::DrawContext& draw) override;
-		void size(const platform::WindowFramePtr& frame, sizei extent,
+		void size(const platform::WindowFramePtr& frame, app::sizei extent,
 		          platform::MeasureContext& measure) override;
 
 		void layout(const ui::CanvasRenderer& renderer);
@@ -176,11 +176,11 @@ namespace iw
 		ui::VerticalScroll panelScroll_;
 		std::vector<Thumbnail> thumbnails_;
 		std::uint64_t thumbnailGeneration_{};
-		recti panelBounds_;
-		recti thumbnailBounds_;
-		recti reviewBounds_;
-		recti reviewHeaderBounds_;
-		recti statusBounds_;
+		app::recti panelBounds_;
+		app::recti thumbnailBounds_;
+		app::recti reviewBounds_;
+		app::recti reviewHeaderBounds_;
+		app::recti statusBounds_;
 		std::wstring statusText_;
 		std::vector<Column> columns_;
 		size_t runningRow_{};

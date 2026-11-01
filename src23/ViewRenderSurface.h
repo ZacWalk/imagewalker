@@ -11,7 +11,7 @@
 #include "iw/logfile.h"
 
 
-#include "iw/imaging/RenderImage.h"
+#include "iw/legacy/RenderImage.h"
 
 class RenderSurface
 {

@@ -2,8 +2,8 @@
 #include "Dib.h"
 #include "LoadAny.h"
 #include "iw/logfile.h"
-#include <libiw/Document.h>
-#include <libiw/ImageEdits.h>
+#include <iw/imaging/Document.h>
+#include <iw/imaging/ImageEdits.h>
 
 // Members that ImageWalker 1.0's copy of dib.lib had and 1.05's does not. That library's
 // sources are not in the repository at any revision, so these are written from

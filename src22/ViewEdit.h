@@ -13,7 +13,7 @@
 
 #pragma once
 
-#include "iw/imaging/ImagingEdits.h"
+#include "iw/legacy/ImagingEdits.h"
 #include "ViewBackBuffer.h"
 #include "ViewSplitter.h"
 #include "ViewYesNoDlg.h"

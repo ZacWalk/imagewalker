@@ -11,7 +11,7 @@
 #include "UtilDelegate.h"
 #include "ViewModelImage.h"
 #include "ViewModelFolder.h"
-#include "iw/imaging/FileFormatList.h"
+#include "iw/legacy/FileFormatList.h"
 #include "ViewShellMenu.h"
 
 #define ID_HISTORY_BACK_FIRST              5000

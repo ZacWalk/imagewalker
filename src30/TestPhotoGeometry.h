@@ -5,7 +5,7 @@
 
 #include "ImageEdits.h"
 #include "TaskEdit.h"
-#include <libiw/WebPCodec.h>
+#include <iw/imaging/WebPCodec.h>
 
 #include <algorithm>
 #include <climits>
@@ -25,7 +25,7 @@ namespace iw::tests
 			task.targets_ = {task.path_};
 			task.imageBounds_ = {10, 10, 200, 160};
 		}
-		static bool mouse(TaskEdit& task, const platform::MouseMessage message, const pointi point, const bool down = false)
+		static bool mouse(TaskEdit& task, const platform::MouseMessage message, const app::pointi point, const bool down = false)
 		{
 			platform::MouseInput input;
 			input.point = point;
@@ -95,7 +95,7 @@ namespace iw::tests
 		reporter.check(edits::correct_perspective(malformed, trapezoid).pixels.empty(),
 			L"perspective validates the source buffer before sampling");
 		const edits::Quadrilateral amplified{{{0.49, 0}, {0.51, 0}, {1, 1}, {0, 1}}};
-		reporter.check(edits::perspective_size({100000, 500}, amplified).width == 0,
+		reporter.check(app::sizei{edits::perspective_size({100000, 500}, amplified)}.width == 0,
 			L"panoramic perspective amplification is rejected before a multi-gigabyte allocation");
 		files::DecodedImage thin;
 		thin.width = thin.originalWidth = 10000;
@@ -116,7 +116,7 @@ namespace iw::tests
 		edits::ImageEdits stack;
 		stack.perspective = trapezoid;
 		stack.rotation = 1;
-		stack.crop = {10, 20, 50, 60};
+		stack.crop = static_cast<::recti>(app::recti{10, 20, 50, 60});
 		stack.brightness = 20;
 		const auto saved = edits::apply(image, stack);
 		auto geometryOnly = stack;
@@ -138,7 +138,7 @@ namespace iw::tests
 			std::abs(previewResult.height * 2 - saved.height) <= 2,
 			L"preview and save share normalized perspective corners and full-resolution crop geometry");
 
-		const recti bounds{10, 20, 100, 80}, crop{30, 40, 40, 30};
+		const app::recti bounds{10, 20, 100, 80}, crop{30, 40, 40, 30};
 		reporter.check(edits::crop_handle(crop, {30, 40}, 4) == edits::CropHandle::topLeft &&
 			edits::crop_handle(crop, {70, 70}, 4) == edits::CropHandle::bottomRight &&
 			edits::crop_handle(crop, {50, 55}, 4) == edits::CropHandle::move,
@@ -146,9 +146,9 @@ namespace iw::tests
 		for (const auto handle : {edits::CropHandle::move, edits::CropHandle::left, edits::CropHandle::right,
 			edits::CropHandle::top, edits::CropHandle::bottom, edits::CropHandle::topLeft,
 			edits::CropHandle::topRight, edits::CropHandle::bottomLeft, edits::CropHandle::bottomRight})
-			for (const auto delta : {pointi{-10000, -10000}, pointi{10000, 10000}, pointi{INT_MAX, INT_MIN}})
+			for (const auto delta : {app::pointi{-10000, -10000}, app::pointi{10000, 10000}, app::pointi{INT_MAX, INT_MIN}})
 			{
-				const auto dragged = edits::drag_crop(crop, bounds, handle, delta);
+				const app::recti dragged = edits::drag_crop(crop, bounds, handle, delta);
 				reporter.check(dragged.width >= 1 && dragged.height >= 1 &&
 					dragged.x >= bounds.x && dragged.y >= bounds.y &&
 					dragged.right() <= bounds.right() && dragged.bottom() <= bounds.bottom(),
@@ -156,7 +156,7 @@ namespace iw::tests
 			}
 		edits::EditHistory history;
 		const auto original = stack;
-		stack.crop.x += 2;
+		stack.crop.left += 2;
 		history.record(original, stack);
 		auto before = stack;
 		stack.perspective = edits::whole_picture;
@@ -185,7 +185,7 @@ namespace iw::tests
 		PhotoGeometryAccess::mouse(task, platform::MouseMessage::move, {160, 130}, true);
 		PhotoGeometryAccess::mouse(task, platform::MouseMessage::move, {110, 90}, true);
 		PhotoGeometryAccess::mouse(task, platform::MouseMessage::leftButtonUp, {110, 90});
-		reporter.check(PhotoGeometryAccess::draft(task).crop == recti{0, 0, 1000, 800} &&
+		reporter.check(app::recti{PhotoGeometryAccess::draft(task).crop} == app::recti{0, 0, 1000, 800} &&
 			!PhotoGeometryAccess::dragging(task), L"interactive crop drags convert preview distance into full-resolution pixels");
 		PhotoGeometryAccess::undo(task);
 		reporter.check(PhotoGeometryAccess::draft(task).empty() && !PhotoGeometryAccess::can_undo(task),

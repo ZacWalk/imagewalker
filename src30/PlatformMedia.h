@@ -47,7 +47,7 @@ namespace iw::media
 		virtual void seek(std::int64_t ticks) = 0;
 		virtual void volume(float value) = 0;
 		virtual void close() = 0;
-		virtual void bounds(recti bounds) = 0;
+		virtual void bounds(app::recti bounds) = 0;
 		virtual const PlaybackStatus& status() const = 0;
 	};
 

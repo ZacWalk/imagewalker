@@ -13,6 +13,7 @@
 #include "iw/workqueue.h"
 
 CAppModule _Module;
+extern const std::string_view s_app_name = "ImageWalker10";
 
 // The folder named on the command line, if any.
 CString g_strCmdLine;

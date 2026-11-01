@@ -223,7 +223,7 @@ namespace iw::media
 				status_.hasVideo = false;
 			}
 
-			void bounds(const recti bounds) override
+			void bounds(const app::recti bounds) override
 			{
 				if (!window_) return;
 				RECT current{};
@@ -493,10 +493,49 @@ namespace iw::media
 			bool commandPending_{};
 			bool stopAfterCommand_{};
 		};
+
+		class UnavailablePlayer final : public Player
+		{
+		public:
+			explicit UnavailablePlayer(StatusHandler changed) : changed_(std::move(changed)) {}
+
+			void open(const std::filesystem::path&) override
+			{
+				status_.state = PlaybackState::error;
+				status_.error = std::wstring(native::unavailable_message());
+				if (changed_) changed_(status_);
+			}
+			void play() override {}
+			void pause() override {}
+			void stop() override
+			{
+				status_.state = PlaybackState::stopped;
+				if (changed_) changed_(status_);
+			}
+			void seek(std::int64_t) override {}
+			void volume(const float value) override
+			{
+				if (std::isfinite(value)) status_.volume = std::clamp(value, 0.0f, 1.0f);
+				if (changed_) changed_(status_);
+			}
+			void close() override
+			{
+				status_.state = PlaybackState::closed;
+				if (changed_) changed_(status_);
+			}
+			void bounds(app::recti) override {}
+			const PlaybackStatus& status() const override { return status_; }
+
+		private:
+			StatusHandler changed_;
+			PlaybackStatus status_;
+		};
 	}
 
 	std::unique_ptr<Player> create_player(const platform::WindowFramePtr& parent, StatusHandler changed)
 	{
+		if (!parent || !parent->native_handle())
+			return std::make_unique<UnavailablePlayer>(std::move(changed));
 		auto player = std::make_unique<NativePlayer>(std::move(changed));
 		if (!player->create(parent)) return {};
 		return player;

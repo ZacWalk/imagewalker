@@ -7,11 +7,12 @@ ImageWalker is a Windows image browser and viewer by
 1998 and 2006, are updated to build and run on modern 64-bit Windows.
 ImageWalker 3.0 continues the series.
 
-All five applications use the same statically linked `libiw` imaging engine.
-Its native file readers and shared metadata come from
-[libfiles](https://github.com/ZacWalk/libfiles); `libiw` keeps image storage,
-editing, encoding and the Windows imaging adapters. Each release keeps its own
-interface, settings and workflows.
+All five applications share header-only imaging code under `include/iw`.
+File readers, documents, metadata and codecs come directly from
+[libfiles](https://github.com/ZacWalk/libfiles); platform services and
+runtime-dispatched pixel operations come from
+[libdesktop](https://github.com/ZacWalk/libdesktop). Each release keeps its
+own interface, settings and workflows.
 
 | Directory | Application | Year | New in this release |
 |---|---|---:|---|

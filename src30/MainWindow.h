@@ -64,7 +64,7 @@ namespace iw
 		platform::MessageResult mouse(const platform::WindowFramePtr& frame, platform::MouseMessage message,
 		                              const platform::MouseInput& input) override;
 		void paint(const platform::WindowFramePtr& frame, platform::DrawContext& draw) override;
-		void size(const platform::WindowFramePtr& frame, sizei extent,
+		void size(const platform::WindowFramePtr& frame, app::sizei extent,
 		          platform::MeasureContext& measure) override;
 		bool on_create();
 		void on_size();
@@ -101,7 +101,7 @@ namespace iw
 		void layout_center();
 		std::vector<std::filesystem::path> selected_paths() const;
 		void update_selection_status();
-		void show_file_menu(pointi screenPoint);
+		void show_file_menu(app::pointi screenPoint);
 		void rename_selected();
 		void delete_selected();
 		bool can_undo_last_action() const;
@@ -136,7 +136,7 @@ namespace iw
 
 		// MainWindowFiles.cpp
 		void copy_or_move_to_folder(bool move);
-		void show_open_with_menu(pointi screenPoint);
+		void show_open_with_menu(app::pointi screenPoint);
 		void open_with_chooser();
 
 		platform::WindowFramePtr frame_;
@@ -170,7 +170,7 @@ namespace iw
 		bool synchronizingTree_{};
 		bool draggingTreeSplitter_{};
 		bool hoveringTreeSplitter_{};
-		recti savedWindowBounds_{0, 0, 1280, 800};
+		app::recti savedWindowBounds_{0, 0, 1280, 800};
 		bool hasSavedWindowPosition_{};
 		int savedSplitterPosition_{-1};
 		int folderTreeWidth_{230};

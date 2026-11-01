@@ -1,5 +1,6 @@
 #pragma once
-#include <libiw/ImageResampler.h>
+#include "Geometry.h"
+#include <iw/imaging/ImageResampler.h>
 namespace iw::ui
 {
 	using imaging::SampleRect;
@@ -9,8 +10,8 @@ namespace iw::ui
 	{
 	public:
 		std::span<const std::uint32_t> resample(std::span<const std::uint32_t> sourcePixels,
-		                                        sizei sourceSize, SampleRect sourceRect,
-		                                        sizei destinationSize, std::uint64_t cacheToken = 0);
+		                                        app::sizei sourceSize, SampleRect sourceRect,
+		                                        app::sizei destinationSize, std::uint64_t cacheToken = 0);
 		size_t hit_count() const { return hitCount_; }
 
 	private:
@@ -18,9 +19,9 @@ namespace iw::ui
 		{
 			const std::uint32_t* source{};
 			size_t sourceCount{};
-			sizei sourceSize{};
+			app::sizei sourceSize{};
 			SampleRect sourceRect{};
-			sizei destinationSize{};
+			app::sizei destinationSize{};
 			std::uint64_t cacheToken{};
 			std::uint64_t lastUse{};
 			bool valid{};

@@ -1,5 +1,5 @@
 #pragma once
-#include "iw/imaging/ImagingStreams.h"
+#include "iw/legacy/ImagingStreams.h"
 #include "ViewModelSearch.h"
 
 namespace IW

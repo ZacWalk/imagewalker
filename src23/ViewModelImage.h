@@ -13,7 +13,7 @@
 #include "iw/zstream.h"
 #include "ViewBackBuffer.h"
 #include "ImagingDataObject.h"
-#include "iw/imaging/Metadata.h"
+#include "iw/legacy/Metadata.h"
 
 struct ImageEditMode
 {

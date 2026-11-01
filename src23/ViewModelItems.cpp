@@ -17,7 +17,7 @@
 #include "ImagingStreams.h"
 #include "FileFormatAny.h"
 #include "ViewProgressDlg.h"
-#include "iw/imaging/Metadata.h"
+#include "iw/legacy/Metadata.h"
 
 
 /////////////////////////////////////////////////////////////////////////////

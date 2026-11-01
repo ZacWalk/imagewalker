@@ -1,54 +1,66 @@
-# libiw architecture and integration
+# Shared imaging architecture and integration
 
-Use `libiw` as the common image engine for all five applications. Keep release
-identity, interface, settings and workflows in the application directories.
-The library is statically linked: each application remains a standalone x64
-executable, with no `libiw.dll` or dependency on another ImageWalker executable.
+Use one set of app-owned imaging headers for all five applications. Keep
+release identity, interface, settings and workflows in the application
+directories. There is no production `libiw` library or DLL: each application
+uses inline shared definitions and links libfiles and libdesktop directly.
+There is no shared application object library or implementation translation unit.
 
 ## Ownership and dependency direction
 
 ```text
 Application UI and workflow
-    -> application adapters
-        -> libiw
-            -> libfiles readers / native encoders / Windows imaging
+    -> shared application imaging adapters
+        -> libfiles readers / native encoders / metadata
+        -> libdesktop/Windows adapters where required
 ```
 
 | Location | Responsibility |
 |---|---|
-| [Public headers](../libiw/include/libiw) | Standard C++ image, document, codec and manipulation contracts |
-| [Implementations](../libiw/src) | WIC and libfiles adapters, metadata, pixel operations, editing, resampling and CPU dispatch |
-| [Native-page implementation](../libiw/src/legacy) | Packed/indexed and multi-page storage, native encoders, libfiles row-stream adapters, metadata and lossless JPEG processing |
-| [Compatibility headers](../libiw/compat/iw/imaging) | Existing 2.x types and stream interfaces backed by the shared implementation |
-| [Library tests](../libiw/tests) | Application-independent API and native-engine regression tests |
+| [Modern headers](../include/iw/imaging) | Standard C++ image, document, codec and manipulation contracts |
+| [Modern implementation details](../include/iw/imaging/detail) | Inline libdesktop/libfiles adapters; application image processing remains in the relevant public header |
+| [Historical headers](../include/iw/legacy) | Inline 2.x types, stream/storage adapters, metadata presentation and historical algorithms |
+| [Regression consumer](../tests/imaging) | Shared imaging cases and ownership/direct-dependency checks |
 | [Shared regression definitions](../include/iw/imagingtests.h) | Engine cases also exercised by the three 2.x application suites |
 
-Build the single production target `libiw`, exposed as `iw::libiw`. Do not
-include an application header or precompiled header from the library. Do not
-link an application, inherit `iw::flags`, read application globals or open
-application dialogs. Keep the public API free of ATL, WTL, Win32 handles and
-`TCHAR`. The native-page backend may use ATL internally; it does not need WTL.
+Consume the `iw_imaging` and `iw_legacy` CMake interface targets.
+Modern headers provide their inline definitions directly. Historical consumers
+include [Legacy.h](../include/iw/legacy/Legacy.h), which composes the compatibility
+models and their inline implementations; no implementation macro is required.
+The libdesktop-core bitmap and pixel adapters are compiled library services and
+do not reintroduce application callbacks. Keep shared application definitions
+inline and shared state in inline variables; do not include implementation `.cpp`
+files or add a one-definition implementation macro. Do not include an application
+precompiled header in modern headers, read application globals or open
+application dialogs. Keep `include/iw/imaging` free of ATL, WTL, Win32 handles
+and `TCHAR`; historical headers and sink adapters may retain the ATL/WTL
+contracts required by the 2.x releases.
 
 Keep resource loading, drawing into application canvases, clipboard/OLE objects,
-printing and contact-sheet layout with the applications. Pure raster operations
-belong in the library. Keep Media Foundation playback and poster acquisition in
+printing and contact-sheet layout with the applications. Reusable platform
+pixel primitives belong in libdesktop; application editing and historical
+storage algorithms remain inline here. Keep Media Foundation playback and poster acquisition in
 [src30](../src30).
 
 ## Choosing an image representation
 
-Use [PixelImage](../libiw/include/libiw/Pixel.h) for owned, top-down, straight-alpha
+Use [PixelImage](../include/iw/imaging/Pixel.h) for owned, top-down, straight-alpha
 BGRA pixels. Original dimensions describe the source independently of a reduced
 decode. Treat a failed or reduced decode as such; do not use a preview's enlarged
 pixels as evidence that a full-resolution request succeeded.
 
-Use [Document.h](../libiw/include/libiw/Document.h)'s `decode_document` when
-native pixel storage, multiple pages, palettes or retained metadata matter. It
-gives libfiles' `decoded_document` - each frame's rows, top-down and DWORD
-aligned, with its storage, palette, offsets and animation attributes, and each
-metadata block libfiles names, all owned, so that a copy is an independent
-snapshot - and beside it what ImageWalker's loaders add: the orientation, the
-stored size a thumbnail was scaled from, and their description and name. A
-document is not just its first frame.
+Use [Document.h](../include/iw/imaging/Document.h)'s `decode_document` when
+native pixel storage, multiple pages, palettes or retained metadata matter.
+Native formats call libfiles' `decode_document` directly into a small
+application policy sink that owns one `libfiles::decoded_document`; they do not
+decode into `IW::Image` and copy the document back. The sink enforces the
+requested retained-frame budget before each allocation and forwards
+cancellation and progress. It gives libfiles' `decoded_document` - each
+frame's rows, top-down and DWORD aligned, with its storage, palette, offsets
+and animation attributes, and each metadata block libfiles names, all owned, so
+that a copy is an independent snapshot - and beside it what ImageWalker's
+loaders add: the orientation, the stored size a thumbnail was scaled from, and
+their description and name. A document is not just its first frame.
 
 Read stored rows as BGRA with libfiles' `copy_bgra`, over a frame's `rows()` or a
 `libfiles::pixel_rows` view of any storage, such as a page or a bottom-up DIB; it
@@ -64,7 +76,7 @@ back as source alpha pixels. Follow [reliability.md](reliability.md).
 
 ## Loading, capabilities and encoding
 
-[Codec.h](../libiw/include/libiw/Codec.h) provides path and memory decoding,
+[Codec.h](../include/iw/imaging/Codec.h) provides path and memory decoding,
 capability queries, dimensions/orientation, photo properties and encoding.
 
 - Use the shared registry for extension recognition. Preserve the distinction
@@ -74,7 +86,7 @@ capability queries, dimensions/orientation, photo properties and encoding.
   retained metadata. Use the BGRA path for display/editing and installed Windows
   formats. Bundled WebP does not require a machine-installed WIC extension.
 - Select a BGRA decoder only through the rule in
-  [NativeCodec.h](../libiw/src/NativeCodec.h): libfiles for WebP,
+  [NativeCodec.h](../include/iw/imaging/detail/NativeCodec.h): libfiles for WebP,
   identified by signature for encoded bytes and by extension for a path; an
   installed Windows codec where one claims the extension; otherwise the native
   decoders. Native-storage decodes start with the native loaders and reach
@@ -82,13 +94,21 @@ capability queries, dimensions/orientation, photo properties and encoding.
   one backend directly and never re-enter selection. A display decode reads the
   loaders' image straight to BGRA, without a document's copy of its rows.
 - Native JPEG, PNG, GIF, TIFF, PCX, PSD, WPG and uncompressed BMP readers call
-  libfiles. [LibfilesDocument.cpp](../libiw/src/legacy/LibfilesDocument.cpp)
+  libfiles. The historical libfiles document adapter
   adapts rows, palettes, metadata and diagnostics, not file formats. Memory
   streams lend an immutable `GetMemory()` view for the synchronous decode;
   files retain positional buffered I/O. WebP is encoded by libfiles, exact
   under transparent pixels, and a re-encoded JPEG keeps its source's segments
-  through libfiles' `carry_jpeg_metadata`. Keep the other encoders and the
-  SDK-backed WIC, compressed DIB, metafile and OLE paths local.
+  through libfiles' `carry_jpeg_metadata`. Keep only the explicit
+  libdesktop-core bitmap adapter,
+  compressed DIB, metafile and OLE compatibility paths local; do not add a
+  second native JPEG/PNG/BMP/GIF/TIFF encoder.
+- Historical save adapters turn their existing `IW::Image` into one
+  `libfiles::decoded_document` at the legacy boundary and call
+  `encode_document`. The native encoder owns indexed/packed/multipage and
+  opaque metadata policy; an unsupported storage layout is reported rather
+  than flattened to lossy BGRA. JPEG coefficient transforms remain explicit
+  and never fall back to recompression.
 - Identify input by its extension, then by a complete signature. A first word
   shared with an image format, as RIFF audio and OLE containers share one, does
   not make a file an image; report it as unsupported rather than damaged.
@@ -97,8 +117,11 @@ capability queries, dimensions/orientation, photo properties and encoding.
   have different storage contracts; they share codec ownership, pixel utilities,
   colour processing and CPU detection.
 - Pass thumbnail bounds, orientation policy, memory limits, cancellation and
-  progress explicitly. The public decode request defaults to a 256 MiB decoded
-  storage budget. Reject input without one complete frame, with invalid headers
+  progress explicitly. The public modern decode request defaults to a 256 MiB
+  retained-document budget; the ImageWalker 1.0 adapter explicitly keeps its
+  historical 1 GiB native-page ceiling. The policy sink counts frame pixels,
+  palettes and metadata before allocation, independently of libfiles'
+  working/scratch limit. Reject input without one complete frame, with invalid headers
   or offsets, or with truncated pixel data; never report partially initialized
   pixels as an image. Damage after a complete GIF frame or TIFF page ends the
   document there with a warning, a GIF without its trailer is complete, and
@@ -109,7 +132,7 @@ capability queries, dimensions/orientation, photo properties and encoding.
 - Check `OperationResult`/`DecodeResult`. Distinguish invalid input, unsupported
   input, decoding/encoding failure, resource limits and cancellation. Preserve
   warnings rather than replacing them with a successful-looking default.
-- Let WIC own its intrinsic container orientation, then apply only the remaining
+- Let libdesktop-core own its intrinsic container orientation, then apply only the remaining
   orientation it reports. This avoids turning HEIF twice. Native orientation
   handling supports all eight EXIF values and resets the tag only after changing
   the corresponding pixels.
@@ -123,7 +146,7 @@ application work queue. Keep completion payloads, stale generations, UI dispatch
 and scheduling in their existing application layers.
 
 The application installs its log callback through
-[Diagnostics.h](../libiw/include/libiw/Diagnostics.h); standalone clients receive
+[Diagnostics.h](../include/iw/imaging/Diagnostics.h); standalone clients receive
 diagnostics on stderr when no callback is installed. Never include the
 application's `TCHAR`-dependent logger in the backend: the same library also
 serves the MBCS ImageWalker 1.0 executable.
@@ -135,7 +158,7 @@ does not choose a final name, replace a destination, create backups or commit a
 reviewed task. Keep those policies in the applications:
 
 - 2.x commits explicitly through
-  [CFileTemp](../libiw/compat/iw/imaging/FileStreams.h).
+  [CFileTemp](../include/iw/legacy/FileStreams.h).
 - 3.0 keeps temporary-output publication, identity checks, collision policy,
   backups and Undo in [Files.cpp](../src30/Files.cpp) and its task services.
 - ImageWalker 1.0 remains read-only.
@@ -144,7 +167,17 @@ Pass metadata policy per operation. 3.0 Convert intentionally omits descriptive
 and GPS metadata, whereas Edit can carry it. A common engine is not permission
 to erase this workflow distinction.
 
-Use [JpegTransform.h](../libiw/include/libiw/JpegTransform.h) for coefficient-only
+Read metadata through libfiles without decoding a raster. Formats without a
+native document decoder can still supply scanned blocks; report that fallback.
+Attach only profiles whose headers declare RGB to RGB output, and delegate
+orientation/dimension normalization to libfiles rather than editing EXIF or XMP
+in an application adapter. JPEG-to-JPEG saves capture the original marker header
+through the same source handle and use `carry_jpeg_metadata` after encoding, so
+opaque markers are not lost by reconstructing only recognized properties.
+Historical metadata adapters keep Author, PNG text and Photoshop resources as
+distinct opaque kinds through native round trips.
+
+Use [JpegTransform.h](../include/iw/imaging/JpegTransform.h) for coefficient-only
 JPEG operations. Keep failure/cancellation distinct from "not JPEG"; never turn a
 failed lossless operation into recompression. Preserve opaque marker segments and
 do not trim incomplete edge blocks silently. The
@@ -155,9 +188,9 @@ not coefficient processing.
 
 Use the common quarter-turn mapping, pixel conversion, colour transform,
 histograms, auto adjustments and runtime SIMD dispatch. Use
-[ImageEdits.h](../libiw/include/libiw/ImageEdits.h),
-[ImageResampler.h](../libiw/include/libiw/ImageResampler.h) and
-[EditGeometry.h](../libiw/include/libiw/EditGeometry.h) for BGRA edits,
+[ImageEdits.h](../include/iw/imaging/ImageEdits.h),
+[ImageResampler.h](../include/iw/imaging/ImageResampler.h) and
+[EditGeometry.h](../include/iw/imaging/EditGeometry.h) for BGRA edits,
 alpha-aware resize and perspective geometry.
 
 Keep distinct resampling filters and geometry parameterizations when they
@@ -179,37 +212,36 @@ the adapter; do not add release-number switches to the engine.
 Treat adapters as translation and ownership code. Do not put a second codec,
 tone algorithm or image-format registry there. Keep the compatibility include
 directory private to the 2.x targets; 3.0 and 1.0 use the standard C++ API.
-Include `iw/imaging/...` or `<libiw/...>` directly; an application directory
-holds no forwarding header.
+Include modern contracts as `iw/imaging/...` and historical contracts as
+`iw/legacy/...`; an application directory holds no forwarding header.
 
 ## Build and validation
 
 Keep dependency recipes, versions and hashes in [third-party](../third-party);
 the codecs libfiles builds keep theirs in libfiles, at the commit pinned there.
 Keep the pinned [dd.ps1](../dd.ps1) and [.dd](../.dd) runtime unmodified.
-The library is part of both normal presets and of each application target's
-dependency graph; it is not a sixth GUI product.
+The interface targets are part of both normal presets and each application's
+dependency graph; they compile no application implementation sources.
 
-Use matching static CRT settings. Compile modern library code strictly, and
-isolate `/permissive` to native compatibility sources. Compile codec callbacks
-with `/EHs`, not an overriding `/EHsc`. Preserve optimized cross-translation-unit
-inlining: keep LTCG on and replace RelWithDebInfo's `/Ob1` with `/Ob2` in the
-library and 2.x directories, or the native line converters stay out of line.
-Keep AVX2 instructions confined to their dispatched source.
+Use matching static CRT settings. Compile modern headers strictly, and isolate
+`/permissive` to historical applications. libfiles owns codec callbacks and their
+exception policy. AVX2 instructions belong only to libdesktop's private,
+runtime-dispatched implementation, never application headers or global flags.
+Use multi-translation-unit consumers to check shared state and ODR correctness.
 See [build.md](build.md) and [warnings.md](warnings.md).
 
 ```powershell
-.\dd.ps1 test --label libiw
+.\dd.ps1 test --label imagewalker-imaging
 .\dd.ps1 test --app iw23
 .\dd.ps1 test
 ```
 
 The standalone suite exercises the public API and shared native tests without
 an application module or resources. The
-[boundary check](../libiw/tests/check-boundary.cmake) rejects application/WTL
-dependencies, legacy types in public headers, reintroduced implementation
-copies and application forwarding headers. Both shared checks carry every
-application label, so a focused app run also exercises them.
+[boundary check](../tests/imaging/check-boundary.cmake) rejects a recreated
+static engine target, stale public/compatibility header locations, modern
+header platform leaks, and application forwarding headers. Both shared checks
+carry every application label, so a focused app run also exercises them.
 
 Maintain coverage for:
 

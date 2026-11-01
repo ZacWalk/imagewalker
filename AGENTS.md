@@ -46,8 +46,12 @@ wholesale. `.dd/state/` is generated local state.
 These are the ones a change breaks silently. Everything else lives in the
 documents above; do not restate them here, because a copy drifts.
 
-- Keep `include/` header-only. Shared imaging belongs in the static `libiw`
-  target; its public API must not depend on an application, ATL or WTL.
+- Keep `include/` header-only. Modern imaging contracts live under
+  `include/iw/imaging`, historical adapters under `include/iw/legacy`, and
+  their shared definitions are inline there. Do not recreate shared `.cpp`
+  sources, object libraries or implementation macros. Compiled codec and
+  platform mechanisms belong in libfiles and libdesktop. Modern headers must
+  not depend on an application, ATL, WTL or Windows SDK header.
 - WTL `_EX` message macros are not used in alternate message maps.
 - Floating-point calculations do not call the integer-only `IW::Min`, `IW::Max`
   or `IW::Clamp` helpers.

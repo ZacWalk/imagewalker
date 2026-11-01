@@ -1,5 +1,5 @@
 #pragma once
-#include "iw/imaging/FileJpeg.h"
+#include "iw/legacy/FileJpeg.h"
 
 // The JPEG encoder settings, as a child panel every dialog that saves hosts
 // inline. It writes straight into the settings it was given: the dialog that

@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "util_geometry.h"
+#include "Geometry.h"
 
 #include <algorithm>
 #include <array>
@@ -25,15 +25,15 @@ namespace iw::ui
 		double center_x() const { return centerX_; }
 		double center_y() const { return centerY_; }
 
-		void set_source(const sizei source) { source_ = source; }
-		void carry_to_source(const sizei source, const recti viewport)
+		void set_source(const app::sizei source) { source_ = source; }
+		void carry_to_source(const app::sizei source, const app::recti viewport)
 		{
 			source_ = source;
 			fitForCarriedScale_ = !is_fit() && explicitScale_ < fit_scale(viewport);
 		}
-		sizei source() const { return source_; }
+		app::sizei source() const { return source_; }
 
-		double fit_scale(const recti viewport, const bool enlarge = false) const
+		double fit_scale(const app::recti viewport, const bool enlarge = false) const
 		{
 			if (source_.width <= 0 || source_.height <= 0 || viewport.width <= 0 || viewport.height <= 0)
 				return 1.0;
@@ -42,13 +42,13 @@ namespace iw::ui
 			return enlarge ? scale : (std::min)(1.0, scale);
 		}
 
-		double effective_scale(const recti viewport) const
+		double effective_scale(const app::recti viewport) const
 		{
 			const double fitScale = fit_scale(viewport);
 			return is_fit() || (fitForCarriedScale_ && explicitScale_ < fitScale) ? fitScale : explicitScale_;
 		}
 
-		bool is_effectively_fit(const recti viewport) const
+		bool is_effectively_fit(const app::recti viewport) const
 		{
 			return is_fit() || effective_scale(viewport) == fit_scale(viewport);
 		}
@@ -67,19 +67,19 @@ namespace iw::ui
 				static_cast<long>((std::numeric_limits<int>::max)())));
 		}
 
-		recti destination(const recti viewport) const
+		app::recti destination(const app::recti viewport) const
 		{
 			return destination(viewport, effective_scale(viewport), centerX_, centerY_);
 		}
 
-		recti destination_at_scale(const recti viewport, const double scale) const
+		app::recti destination_at_scale(const app::recti viewport, const double scale) const
 		{
 			return destination(viewport, scale, centerX_, centerY_);
 		}
 
-		SourcePoint source_at(const recti viewport, const pointi point) const
+		SourcePoint source_at(const app::recti viewport, const app::pointi point) const
 		{
-			const recti current = destination(viewport);
+			const app::recti current = destination(viewport);
 			return {
 				std::clamp((point.x - current.x) / static_cast<double>((std::max)(1, current.width)), 0.0, 1.0),
 				std::clamp((point.y - current.y) / static_cast<double>((std::max)(1, current.height)), 0.0, 1.0)
@@ -99,12 +99,12 @@ namespace iw::ui
 			centerY_ = std::clamp(y, 0.0, 1.0);
 		}
 
-		void set_explicit(const double scale, const recti viewport, const pointi anchor)
+		void set_explicit(const double scale, const app::recti viewport, const app::pointi anchor)
 		{
 			set_explicit_at_source(scale, viewport, anchor, source_at(viewport, anchor));
 		}
 
-		void set_explicit_at_source(const double scale, const recti viewport, const pointi anchor,
+		void set_explicit_at_source(const double scale, const app::recti viewport, const app::pointi anchor,
 		                            const SourcePoint sourcePoint)
 		{
 			const double fitScale = fit_scale(viewport);
@@ -120,10 +120,10 @@ namespace iw::ui
 			           (viewportCenterY - anchor.y + sourcePoint.y * height) / (std::max)(1, height));
 		}
 
-		void pan_by(const recti viewport, const int x, const int y)
+		void pan_by(const app::recti viewport, const int x, const int y)
 		{
 			if (is_fit()) return;
-			const recti current = destination(viewport);
+			const app::recti current = destination(viewport);
 			const int width = scaled_extent(source_.width, explicitScale_);
 			const int height = scaled_extent(source_.height, explicitScale_);
 			const double viewportCenterX = viewport.x + viewport.width / 2.0;
@@ -136,7 +136,7 @@ namespace iw::ui
 			else centerY_ = 0.5;
 		}
 
-		void step(const int direction, const recti viewport, const pointi anchor)
+		void step(const int direction, const app::recti viewport, const app::pointi anchor)
 		{
 			if (!direction) return;
 			const double fitScale = fit_scale(viewport);
@@ -179,7 +179,7 @@ namespace iw::ui
 			return (std::max)(1, static_cast<int>(std::lround(source * scale)));
 		}
 
-		recti destination(const recti viewport, const double scale, const double centerX,
+		app::recti destination(const app::recti viewport, const double scale, const double centerX,
 		                  const double centerY) const
 		{
 			const int width = scaled_extent(source_.width, scale);
@@ -209,7 +209,7 @@ namespace iw::ui
 			return result;
 		}
 
-		sizei source_;
+		app::sizei source_;
 		ScaleMode mode_{ScaleMode::fit};
 		double explicitScale_{1.0};
 		double centerX_{0.5};

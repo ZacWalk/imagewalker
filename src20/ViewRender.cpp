@@ -7,7 +7,7 @@
 // For more information on ImageWalker see www.ImageWalker.com
 
 #include "stdafx.h"
-#include "iw/imaging/ImagingBlitter.h"
+#include "iw/legacy/ImagingBlitter.h"
 #include "ViewRenderSurface.h"
 
 // 2.2 wears the system's colours, so the selection is whatever the user's theme

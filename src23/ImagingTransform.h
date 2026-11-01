@@ -8,11 +8,11 @@
 
 #pragma once
 
-#include "iw/imaging/FileJpegTran.h"
+#include "iw/legacy/FileJpegTran.h"
 #include "ImagingStreams.h"
-#include "iw/imaging/Metadata.h"
+#include "iw/legacy/Metadata.h"
 
-#include "iw/imaging/JpegTransform.h"
+#include "iw/legacy/JpegTransform.h"
 
 template<class T>
 class JpegTransformer

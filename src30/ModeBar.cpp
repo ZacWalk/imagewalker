@@ -78,7 +78,7 @@ namespace iw
 		modeBounds_.clear();
 		shortcutBounds_.clear();
 		if (!frame_) return;
-		const recti client = frame_->client_rect();
+		const app::recti client = frame_->client_rect();
 		const int edge = metric(buttonEdge);
 		const int left = (client.width - edge) / 2;
 		int y = metric(2);
@@ -100,7 +100,7 @@ namespace iw
 		}
 	}
 
-	void ModeBar::draw_glyph(const ui::CanvasRenderer& renderer, const Glyph glyph, const recti bounds,
+	void ModeBar::draw_glyph(const ui::CanvasRenderer& renderer, const Glyph glyph, const app::recti bounds,
 	                         const color value) const
 	{
 		const int unit = (std::max)(2, bounds.width / 8);
@@ -160,7 +160,7 @@ namespace iw
 		}
 	}
 
-	void ModeBar::draw_button(const ui::CanvasRenderer& renderer, const Button& button, const recti bounds,
+	void ModeBar::draw_button(const ui::CanvasRenderer& renderer, const Button& button, const app::recti bounds,
 	                          const bool hot) const
 	{
 		const int captionHeight = (std::max)(metric(12), renderer.measure_text(L"Wg").height);
@@ -169,7 +169,7 @@ namespace iw
 			renderer.fill(bounds, platform::calc_hande_color(hot, false, button.checked));
 		if (button.checked)
 			renderer.outline(bounds, platform::system_color(platform::SystemColor::highlight));
-		const recti glyph{
+		const app::recti glyph{
 			bounds.x + (bounds.width - glyphEdge) / 2,
 			bounds.y + (bounds.height - captionHeight - glyphEdge) / 2, glyphEdge, glyphEdge
 		};
@@ -189,7 +189,7 @@ namespace iw
 	{
 		if (frame != frame_) return;
 		const ui::CanvasRenderer renderer(draw, platform::create_message_font(dpi_));
-		const recti client = frame_->client_rect();
+		const app::recti client = frame_->client_rect();
 		renderer.fill(client, platform::system_color(platform::SystemColor::face));
 		layout();
 		for (size_t index = 0; index < modeBounds_.size(); ++index)
@@ -203,14 +203,14 @@ namespace iw
 		                 platform::system_color(platform::SystemColor::shadow));
 	}
 
-	void ModeBar::size(const platform::WindowFramePtr& frame, sizei, platform::MeasureContext&)
+	void ModeBar::size(const platform::WindowFramePtr& frame, app::sizei, platform::MeasureContext&)
 	{
 		if (frame != frame_) return;
 		layout();
 		invalidate();
 	}
 
-	const ModeBar::Button* ModeBar::button_at(const pointi point) const
+	const ModeBar::Button* ModeBar::button_at(const app::pointi point) const
 	{
 		for (size_t index = 0; index < modeBounds_.size(); ++index)
 			if (modeBounds_[index].contains(point)) return &modes_[index];

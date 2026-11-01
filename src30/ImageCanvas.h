@@ -4,7 +4,7 @@
 #pragma once
 
 #include "Platform.h"
-#include "util_layout.h"
+#include "AppLayout.h"
 #include "CanvasRenderer.h"
 #include "Dpi.h"
 #include "Files.h"
@@ -68,7 +68,7 @@ namespace iw
 		};
 		void set_command_handlers(CommandHandlers handlers) { commandHandlers_ = std::move(handlers); }
 
-		void set_context_menu_handler(std::function<void(pointi)> handler)
+		void set_context_menu_handler(std::function<void(app::pointi)> handler)
 		{
 			contextMenuHandler_ = std::move(handler);
 		}
@@ -196,7 +196,7 @@ namespace iw
 		// One presented image: the pane it occupies plus its independent fit, zoom, and pan state.
 		struct ImageView
 		{
-			recti bounds;
+			app::recti bounds;
 			ui::ZoomModel zoom;
 			int sourceWidth{};
 			int sourceHeight{};
@@ -227,8 +227,8 @@ namespace iw
 			std::filesystem::path path;
 			int index{-1};
 			files::ItemKind kind{files::ItemKind::other};
-			sizei source;
-			recti bounds;
+			app::sizei source;
+			app::recti bounds;
 			files::DecodedImage image;
 			ThumbnailState state{ThumbnailState::none};
 		};
@@ -244,14 +244,14 @@ namespace iw
 		platform::MessageResult gesture(const platform::WindowFramePtr& frame,
 		                                const platform::GestureInput& input) override;
 		void paint(const platform::WindowFramePtr& frame, platform::DrawContext& draw) override;
-		void size(const platform::WindowFramePtr& frame, sizei extent,
+		void size(const platform::WindowFramePtr& frame, app::sizei extent,
 		          platform::MeasureContext& measure) override;
 		platform::MessageResult handle_input(InputEvent event, const platform::MouseInput& mouse = {},
 		                                     const platform::KeyInput& key = {});
 		void paint_items(const ui::CanvasRenderer& renderer);
 		void paint_properties(const ui::CanvasRenderer& renderer);
 		void paint_property_panel(const ui::CanvasRenderer& renderer, const std::wstring& title,
-		                          const std::vector<Property>& rows, recti panel, bool expanded,
+		                          const std::vector<Property>& rows, app::recti panel, bool expanded,
 		                          std::uint8_t opacity) const;
 		void paint_details_header(const ui::CanvasRenderer& renderer);
 		void paint_details(const ui::CanvasRenderer& renderer);
@@ -267,20 +267,20 @@ namespace iw
 		void mark_layout_dirty() { layoutDirty_ = true; }
 		void ensure_layout() { if (layoutDirty_) rebuild_layout(); }
 		int metric(const int logicalValue) const { return ui::scale_metric(logicalValue, dpi_); }
-		std::array<recti, 5> details_columns(recti row) const;
+		std::array<app::recti, 5> details_columns(app::recti row) const;
 		void rebuild_properties();
 		void measure_properties();
 		void measure_property_panels();
-		recti measure_property_panel(const std::wstring& title, const std::vector<Property>& rows,
-		                             recti available, bool rightAligned, bool expanded) const;
+		app::recti measure_property_panel(const std::wstring& title, const std::vector<Property>& rows,
+		                             app::recti available, bool rightAligned, bool expanded) const;
 		const files::Metadata* cached_metadata(const std::filesystem::path& path) const;
 		std::vector<Property> summary_properties(int index, std::vector<std::filesystem::path>& pending) const;
 		void queue_metadata(std::vector<std::filesystem::path> paths, bool aggregate, size_t selectionCount);
 		void pump_metadata(MetadataJob job);
 		void apply_metadata(const MetadataJob& job);
 		void trim_metadata_cache();
-		int hit_test_item(pointi point) const;
-		recti item_rect(int index) const;
+		int hit_test_item(app::pointi point) const;
+		app::recti item_rect(int index) const;
 		void invalidate_item(int index) const;
 		void invalidate_image_pane() const;
 		int splitter_x() const;
@@ -298,22 +298,22 @@ namespace iw
 		void trim_retained_images();
 		void apply_thumbnail(ThumbnailResult result);
 		static ThumbnailResult decode_thumbnail(const ThumbnailRequest& request);
-		bool image_hit(pointi point) const;
-		bool comparison_hit(pointi point) const;
-		bool inspect_hit(pointi point) const;
+		bool image_hit(app::pointi point) const;
+		bool comparison_hit(app::pointi point) const;
+		bool inspect_hit(app::pointi point) const;
 		bool immersive_zoom() const;
 		double fit_scale(bool comparison = false) const;
 		double effective_scale(bool comparison) const;
-		recti image_destination(double scale, bool comparison = false) const;
-		void set_zoom(double scale, pointi focus);
-		void step_zoom(int direction, pointi focus);
-		void zoom_at(double factor, pointi focus);
+		app::recti image_destination(double scale, bool comparison = false) const;
+		void set_zoom(double scale, app::pointi focus);
+		void step_zoom(int direction, app::pointi focus);
+		void zoom_at(double factor, app::pointi focus);
 		void reset_zoom(double scale);
 		void pan_by(int x, int y);
-		void begin_quick_zoom(pointi point);
-		void begin_inspect_candidate(pointi point);
+		void begin_quick_zoom(app::pointi point);
+		void begin_inspect_candidate(app::pointi point);
 		void commit_quick_zoom();
-		void update_quick_zoom(pointi point);
+		void update_quick_zoom(app::pointi point);
 		void cancel_quick_zoom();
 		void end_quick_zoom();
 		void request_full_image();
@@ -353,19 +353,19 @@ namespace iw
 		ui::Element rootElement_;
 		ui::Element itemFlow_;
 		ui::Element propertyFlow_;
-		std::vector<recti> itemBounds_;
-		recti imagePane_;
-		recti propertyPanelBounds_;
-		recti comparisonPanelBounds_;
-		recti propertyToggleBounds_;
-		recti comparisonPropertyToggleBounds_;
-		recti propertyHeaderBounds_;
-		recti comparisonPropertyHeaderBounds_;
-		recti stripHeaderBounds_;
-		recti stripToggleBounds_;
-		recti splitterBounds_;
-		recti itemsViewport_;
-		recti detailsHeaderBounds_;
+		std::vector<app::recti> itemBounds_;
+		app::recti imagePane_;
+		app::recti propertyPanelBounds_;
+		app::recti comparisonPanelBounds_;
+		app::recti propertyToggleBounds_;
+		app::recti comparisonPropertyToggleBounds_;
+		app::recti propertyHeaderBounds_;
+		app::recti comparisonPropertyHeaderBounds_;
+		app::recti stripHeaderBounds_;
+		app::recti stripToggleBounds_;
+		app::recti splitterBounds_;
+		app::recti itemsViewport_;
+		app::recti detailsHeaderBounds_;
 		int detailsColumnsX_{};
 		int detailsColumnsWidth_{};
 		ui::VerticalScroll imageScroll_;
@@ -407,9 +407,9 @@ namespace iw
 		bool deferSingleSelection_{};
 		bool draggingFiles_{};
 		size_t marqueeCount_{};
-		pointi marqueeStart_{};
-		pointi marqueeCurrent_{};
-		pointi fileDragStart_{};
+		app::pointi marqueeStart_{};
+		app::pointi marqueeCurrent_{};
+		app::pointi fileDragStart_{};
 		bool fullscreen_{};
 		ui::ZoomModel normalZoom_;
 		bool activeComparison_{};
@@ -423,13 +423,13 @@ namespace iw
 		bool panningImage_{};
 		bool selectingZoom_{};
 		bool suppressContextMenu_{};
-		pointi imageDragOrigin_{};
-		pointi imageDragPoint_{};
-		pointi zoomSelectionStart_{};
-		pointi zoomSelectionCurrent_{};
+		app::pointi imageDragOrigin_{};
+		app::pointi imageDragPoint_{};
+		app::pointi zoomSelectionStart_{};
+		app::pointi zoomSelectionCurrent_{};
 		std::uint64_t gestureZoomDistance_{};
 		double gestureZoomStart_{};
-		pointi gesturePanPoint_{};
+		app::pointi gesturePanPoint_{};
 		ItemMode mode_{ItemMode::thumbnails};
 		files::SortField sortField_{files::SortField::name};
 		bool sortAscending_{true};
@@ -452,7 +452,7 @@ namespace iw
 		std::function<void()> selectionHandler_;
 		std::function<void(bool)> zoomModeHandler_;
 		CommandHandlers commandHandlers_;
-		std::function<void(pointi)> contextMenuHandler_;
+		std::function<void(app::pointi)> contextMenuHandler_;
 		std::function<void(const std::vector<std::filesystem::path>&)> dropHandler_;
 		std::function<void()> clearFilterHandler_;
 		std::function<void(files::SortField, bool)> sortHandler_;

@@ -17,6 +17,7 @@
 #pragma comment(lib, "HtmlHelp")
 
 CAppModule _Module;
+extern const std::string_view s_app_name = "ImageWalker22";
 
 // In AppMainFrame.cpp, which is the only translation unit that needs the
 // complete frame type.

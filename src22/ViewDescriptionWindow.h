@@ -10,10 +10,10 @@
 
 #include "ViewModelImage.h"
 #include "ViewMetadataList.h"
-#include "iw/imaging/Metadata.h"
-#include "iw/imaging/MetadataExif.h"
-#include "iw/imaging/MetadataIPTC.h"
-#include "iw/imaging/MetadataXMP.h"
+#include "iw/legacy/Metadata.h"
+#include "iw/legacy/MetadataExif.h"
+#include "iw/legacy/MetadataIPTC.h"
+#include "iw/legacy/MetadataXMP.h"
 
 #ifndef ETDT_ENABLETAB
 #define ETDT_ENABLETAB 6

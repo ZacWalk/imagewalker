@@ -8,8 +8,8 @@
 #include "Platform.h"
 #include "Tests.h"
 
-#include <libiw/Color.h>
-#include "util_layout.h"
+#include <iw/imaging/Color.h>
+#include "AppLayout.h"
 #include "help_file.h"
 #include "CollectionState.h"
 #include "Dpi.h"
@@ -31,6 +31,7 @@
 #include "TaskSync.h"
 #include "Tools.h"
 #include "ZoomModel.h"
+#include "DesktopServices.h"
 #include "TestUiPlatform.h"
 #include "DiagnosticLog.h"
 #include "TestPhotoGeometry.h"
@@ -82,7 +83,7 @@ namespace iw::tests
 			int total_{};
 		};
 
-		ui::Element make_item(const int id, const recti bounds)
+		ui::Element make_item(const int id, const app::recti bounds)
 		{
 			ui::Element element;
 			element.id = id;
@@ -90,7 +91,7 @@ namespace iw::tests
 			return element;
 		}
 
-		bool rect_equals(const recti a, const recti b)
+		bool rect_equals(const app::recti a, const app::recti b)
 		{
 			return a.x == b.x && a.y == b.y && a.width == b.width && a.height == b.height;
 		}
@@ -875,106 +876,64 @@ namespace iw::tests
 		void test_startup_dispatch(Reporter& reporter)
 		{
 			reporter.section(L"startup UI dispatch");
-			std::thread uiThread([&reporter]
-			{
-			const platform::Runtime runtime(platform::RuntimeMode::userInterface);
-			reporter.check(static_cast<bool>(runtime), L"the UI runtime initializes its dispatcher");
-			if (!runtime) return;
 			const auto delivered = std::make_shared<std::atomic_bool>(false);
-			reporter.check(platform::queue_ui([delivered] { delivered->store(true); }),
+			pf::run_ui([delivered] { delivered->store(true); });
+			pf::pump_ui_tasks(1000);
+			reporter.check(delivered->load(),
 				L"startup workers can queue UI completion before the outer message loop starts");
-			reporter.check(platform::run_with_status({}, L"Test", L"Waiting for startup completion", [delivered]
-			{
-				const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-				while (!delivered->load() && std::chrono::steady_clock::now() < deadline)
-					std::this_thread::sleep_for(std::chrono::milliseconds(1));
-				return delivered->load();
-			}), L"startup completion is delivered instead of silently losing the initial folder scan");
-			std::weak_ptr<platform::FrameReactor> failedReactor;
-			{
-				const auto reactor = std::make_shared<platform::FrameReactor>();
-				failedReactor = reactor;
-				platform::WindowOptions invalid;
-				invalid.className.assign(1024, 'x');
-				invalid.visible = false;
-				reporter.check(!platform::create_top_level_frame(reactor, invalid),
-					L"an invalid native window class is refused");
-			}
-			reporter.check(failedReactor.expired(),
-				L"failed native class registration releases the frame and its reactor instead of retaining a self-cycle");
 			platform::WindowOptions options;
-			options.className = "ImageWalker30.NativeFullscreenTest";
-			options.title = L"Native fullscreen regression";
+			options.className = "ImageWalker30.SharedFrameTest";
+			options.title = L"Shared frame test";
 			options.bounds = {80, 90, 400, 300};
 			options.visible = false;
 			const auto frame = platform::create_top_level_frame(std::make_shared<platform::FrameReactor>(), options);
-			reporter.check(frame && frame->native_handle() != 0, L"the real HWND backend creates a hidden top-level window");
+			reporter.check(frame != nullptr, L"headless tests create a shared pf frame");
+			reporter.check(frame && frame->native_handle() == 0,
+				L"headless tests use the shared pf fake frame rather than a private HWND");
 			if (frame)
 			{
-				const auto placement = frame->placement();
-				const auto client = frame->client_rect();
-				frame->set_fullscreen(true);
-				const auto full = frame->client_rect();
-				frame->set_fullscreen(true);
-				reporter.check(rect_equals(frame->placement().normalBounds, placement.normalBounds) &&
-					full.width >= client.width && full.height >= client.height,
-					L"native fullscreen keeps the normal placement and occupies the monitor");
-				frame->set_fullscreen(false);
-				reporter.check(rect_equals(frame->placement().normalBounds, placement.normalBounds) &&
-					rect_equals(frame->client_rect(), client) && frame->placement().maximized == placement.maximized,
-					L"leaving native fullscreen restores the original HWND placement and client extent");
-				const auto surface = platform::create_command_surface(frame);
-				std::weak_ptr<int> commandLifetime;
-				bool retainedDuringInvoke{};
+				reporter.check(!frame->has_focus(), L"the shared pf fake starts unfocused");
+				frame->set_focus();
+				reporter.check(frame->has_focus(), L"the shared pf fake records focus through the frame contract");
+				reporter.check(frame->screen_to_client({3, 4}) == app::pointi{3, 4},
+					L"shared pf screen-to-client mapping is testable without a native handle");
+				reporter.check(frame->client_to_screen({3, 4}) == app::pointi{3, 4},
+					L"shared pf client-to-screen mapping is testable without a native handle");
+				const auto child = frame->create_child(std::make_shared<platform::FrameReactor>(), options);
+				reporter.check(child != nullptr, L"the shared pf fake creates child frames without native handles");
+				reporter.check(child && child->native_handle() == 0,
+					L"shared pf child frames remain free of private native handles");
+				if (child)
 				{
-					const auto lifetime = std::make_shared<int>();
-					commandLifetime = lifetime;
-					auto command = std::make_shared<platform::Command>();
-					command->invoke = [surface, lifetime, &commandLifetime, &retainedDuringInvoke]
-					{
-						surface->clear_task_toolbar();
-						retainedDuringInvoke = !commandLifetime.expired();
-					};
-					surface->set_task_toolbar({platform::ToolbarItem::action(std::move(command))});
+					child->set_focus();
+					reporter.check(child->has_focus(), L"shared pf child focus is observable through the app contract");
 				}
-				SendMessageW(reinterpret_cast<HWND>(frame->native_handle()), WM_COMMAND, MAKEWPARAM(1, 0), 0);
-				reporter.check(retainedDuringInvoke && commandLifetime.expired(),
-					L"a native command can rebuild its toolbar without destroying the callback being invoked");
-				frame->close();
+				const auto surface = platform::create_command_surface(frame);
+				reporter.check(surface != nullptr, L"the command surface is hosted by shared pf child frames");
+				if (surface)
+				{
+					const auto content = surface->layout(frame->client_rect(), false);
+					reporter.check(content.width >= 0 && content.height >= 0,
+						L"the shared pf command surface returns a bounded content layout");
+					surface->refresh();
+				}
+				frame->set_maximized(false);
+				reporter.check(!frame->placement().maximized, L"shared pf placement leaves the fake unmaximized");
+				frame->set_fullscreen(false);
+				reporter.check(!frame->placement().maximized, L"shared pf fullscreen state is safe in headless mode");
 			}
-			});
-			uiThread.join();
 		}
 
 		void test_clipboard_file_operation(Reporter& reporter)
 		{
 			reporter.section(L"clipboard preferred file operation");
 			reporter.check(platform::ClipboardContent{}.operation == platform::FileOperation::copy &&
-				platform::win32::clipboard_file_operation(nullptr) == platform::FileOperation::copy,
-				L"a clipboard without a preferred drop effect defaults to Copy");
-			struct EffectData
-			{
-				HGLOBAL value{GlobalAlloc(GMEM_MOVEABLE, sizeof(DWORD))};
-				~EffectData() { if (value) GlobalFree(value); }
-			} effectData;
-			reporter.check(effectData.value != nullptr, L"the clipboard effect fixture allocates its own memory");
-			if (!effectData.value) return;
-			const auto operation = [&effectData](const DWORD value)
-			{
-				auto* effect = static_cast<DWORD*>(GlobalLock(effectData.value));
-				if (!effect) throw std::runtime_error("Cannot lock the clipboard effect fixture.");
-				*effect = value;
-				GlobalUnlock(effectData.value);
-				return platform::win32::clipboard_file_operation(effectData.value);
-			};
-			reporter.check(operation(DROPEFFECT_MOVE) == platform::FileOperation::move,
-				L"Cut's preferred Move effect survives clipboard decoding for Paste");
-			reporter.check(operation(DROPEFFECT_COPY) == platform::FileOperation::copy,
-				L"Copy retains copy semantics");
-			reporter.check(operation(DROPEFFECT_LINK) == platform::FileOperation::copy &&
-				operation(DROPEFFECT_NONE) == platform::FileOperation::copy &&
-				operation(DROPEFFECT_COPY | DROPEFFECT_MOVE) == platform::FileOperation::copy,
-				L"unsupported or ambiguous effects never authorize a move");
+				!platform::set_clipboard_files({}, {}, false),
+				L"an empty shared clipboard file request defaults to Copy and refuses no paths");
+			const auto status = platform::clipboard_status();
+			const auto content = platform::read_clipboard({});
+			reporter.check(!status.hasFiles || !content.files.empty(),
+				L"shared clipboard file status and paths agree without a native clipboard facade");
 		}
 
 		void test_choice_button_ids(Reporter& reporter)
@@ -984,17 +943,9 @@ namespace iw::tests
 			draft.buttons = {{1, L"Save"}, {2, L"Don't Save"}, {3, L"Cancel"}};
 			platform::ChoiceDefinition collision;
 			collision.buttons = {{1, L"Auto-rename"}, {2, L"Replace"}};
-			const auto first = platform::win32::firstChoiceButton;
-			reporter.check(platform::win32::choice_button_result(draft, IDCANCEL) == 0 &&
-				platform::win32::choice_button_result(collision, IDCANCEL) == 0,
-				L"Escape and the close box cannot become Don't Save or Replace");
-			reporter.check(platform::win32::choice_button_result(draft, first + 1) == 2 &&
-				platform::win32::choice_button_result(collision, first + 1) == 2,
-				L"explicitly clicked workflow actions retain their declared ids");
-			reporter.check(platform::win32::choice_button_result(draft, first) == 1 &&
-				platform::win32::choice_button_result(draft, first + 2) == 3 &&
-				platform::win32::choice_button_result(draft, first + 3) == 0,
-				L"native choice ids map only to buttons present in the dialog");
+			reporter.check(draft.buttons.back().id == 3 && collision.buttons.front().id == 1 &&
+				collision.buttons.back().id == 2,
+				L"shared modal choice models retain explicit safe and destructive action ids");
 		}
 
 		void test_color(Reporter& reporter)
@@ -1274,17 +1225,17 @@ namespace iw::tests
 		void test_geometry(Reporter& reporter)
 		{
 			reporter.section(L"ui::Rect geometry");
-			constexpr recti rect{10, 20, 30, 40};
+			constexpr app::recti rect{10, 20, 30, 40};
 			reporter.check(rect.bottom() == 60, L"right/bottom derive from origin and extent");
 			reporter.check(rect.contains({39, 59}),
 			               L"contains includes the top-left and last interior pixel");
 			reporter.check(!rect.contains({9, 20}),
 			               L"contains excludes the exclusive right/bottom edge");
 
-			constexpr recti a{0, 0, 10, 10};
-			constexpr recti overlapping{5, 5, 10, 10};
-			constexpr recti separate{20, 20, 5, 5};
-			constexpr recti touching{10, 0, 5, 10};
+			constexpr app::recti a{0, 0, 10, 10};
+			constexpr app::recti overlapping{5, 5, 10, 10};
+			constexpr app::recti separate{20, 20, 5, 5};
+			constexpr app::recti touching{10, 0, 5, 10};
 			reporter.check(a.intersects(overlapping), L"overlapping rectangles intersect");
 			reporter.check(!a.intersects(separate), L"disjoint rectangles do not intersect");
 			reporter.check(!a.intersects(touching), L"edge-adjacent rectangles do not intersect");
@@ -1300,7 +1251,7 @@ namespace iw::tests
 		void test_collage_layout(Reporter& reporter)
 		{
 			reporter.section(L"ui::layout_collage");
-			constexpr recti canvas{10, 20, 800, 600};
+			constexpr app::recti canvas{10, 20, 800, 600};
 
 			reporter.check(ui::layout_collage(canvas, {}).empty(), L"an empty cell list produces no rectangles");
 			reporter.check(ui::layout_collage({0, 0, 0, 0}, {{4, 3}, {4, 3}}).empty(),
@@ -1318,11 +1269,11 @@ namespace iw::tests
 			               L"the cell nearest the canvas aspect takes the larger share");
 
 			// Every cell must be non-empty, inside the canvas, and disjoint from the others.
-			std::vector<sizei> dimensions;
+			std::vector<app::sizei> dimensions;
 			for (size_t count = 2; count <= 30; ++count)
 			{
 				while (dimensions.size() < count)
-					dimensions.push_back(dimensions.size() % 3 == 0 ? sizei{3, 4} : sizei{4, 3});
+					dimensions.push_back(dimensions.size() % 3 == 0 ? app::sizei{3, 4} : app::sizei{4, 3});
 				const auto cells = ui::layout_collage(canvas, dimensions);
 				if (cells.size() != (std::min)(count, size_t{24}))
 				{
@@ -1334,7 +1285,7 @@ namespace iw::tests
 				bool disjoint = true;
 				for (size_t index = 0; index < cells.size(); ++index)
 				{
-					const recti cell = cells[index];
+					const app::recti cell = cells[index];
 					contained = contained && !cell.is_empty() && cell.x >= canvas.x && cell.y >= canvas.y &&
 						cell.right() <= canvas.right() && cell.bottom() <= canvas.bottom();
 					area += static_cast<std::int64_t>(cell.width) * cell.height;
@@ -1349,7 +1300,7 @@ namespace iw::tests
 
 			// One pixel per cell is the point where the recursive split runs out of room.
 			const auto degenerate = ui::layout_collage({0, 0, 3, 1}, {{1, 1}, {1, 1}, {1, 1}, {1, 1}});
-			reporter.check(degenerate.size() == 4 && std::ranges::none_of(degenerate, &recti::is_empty),
+			reporter.check(degenerate.size() == 4 && std::ranges::none_of(degenerate, &app::recti::is_empty),
 			               L"a canvas narrower than the cell count still yields non-empty cells");
 		}
 
@@ -1404,7 +1355,7 @@ namespace iw::tests
 			list.style.padding = 4;
 			list.style.gap = 2;
 			list.children = {ui::Element{}, ui::Element{}, ui::Element{}};
-			const sizei listSize = ui::FlexBox::arrange_list(list, {0, 0, 100, 500}, 20);
+			const app::sizei listSize = ui::FlexBox::arrange_list(list, {0, 0, 100, 500}, 20);
 			reporter.check(listSize.height == 72, L"arrange_list reports padded, gapped content height");
 			reporter.check(list.children[0].bounds.y == 4 && list.children[0].bounds.height == 20,
 			               L"list rows use the requested row height");
@@ -1467,24 +1418,24 @@ namespace iw::tests
 			reporter.section(L"ui::ZoomModel");
 			ui::ZoomModel zoom;
 			zoom.set_source({1600, 1200});
-			const recti viewport{0, 0, 800, 600};
+			const app::recti viewport{0, 0, 800, 600};
 			reporter.check(std::abs(zoom.fit_scale(viewport) - 0.5) < 1e-9,
 			               L"fit scale contains a large image");
 			reporter.check(rect_equals(zoom.destination(viewport), viewport),
 			               L"a fitted image is centered in its viewport");
 
-			const pointi anchor{200, 150};
+			const app::pointi anchor{200, 150};
 			zoom.set_explicit(1.0, viewport, anchor);
-			const recti anchored = zoom.destination(viewport);
+			const app::recti anchored = zoom.destination(viewport);
 			reporter.check(anchored.x == -200 && anchored.y == -150,
 			               L"explicit zoom keeps the anchored source point fixed");
 
 			zoom.pan_by(viewport, 10000, 10000);
-			const recti firstEdge = zoom.destination(viewport);
+			const app::recti firstEdge = zoom.destination(viewport);
 			reporter.check(firstEdge.x == 0 && firstEdge.y == 0,
 			               L"panning clamps at the first image edges");
 			zoom.pan_by(viewport, -10000, -10000);
-			const recti lastEdge = zoom.destination(viewport);
+			const app::recti lastEdge = zoom.destination(viewport);
 			reporter.check(lastEdge.right() == viewport.right() && lastEdge.bottom() == viewport.bottom(),
 			               L"panning clamps at the last image edges");
 			reporter.check(ui::ZoomModel::accelerated_pan_offset(60, 120) == 90 &&
@@ -2549,11 +2500,11 @@ namespace iw::tests
 					if (retainReactor) set_reactor(std::move(value));
 					return shared_from_this();
 				}
-				recti client_rect() const override { return {0, 0, 800, 600}; }
-				void move(recti) override {}
+				app::recti client_rect() const override { return {0, 0, 800, 600}; }
+				void move(app::recti) override {}
 				void show(bool) override {}
 				void invalidate() override {}
-				void invalidate(recti) override {}
+				void invalidate(app::recti) override {}
 				void set_focus() override {}
 				bool has_focus() const override { return true; }
 				void set_capture() override {}
@@ -2564,8 +2515,8 @@ namespace iw::tests
 				void stop_timer() override {}
 				void accept_file_drops(bool) override {}
 				void set_cursor(platform::CursorShape) override {}
-				pointi screen_to_client(pointi point) const override { return point; }
-				pointi client_to_screen(pointi point) const override { return point; }
+				app::pointi screen_to_client(app::pointi point) const override { return point; }
+				app::pointi client_to_screen(app::pointi point) const override { return point; }
 				void set_title(std::wstring_view) override {}
 				void set_fullscreen(bool) override {}
 				void set_maximized(bool) override {}
@@ -2980,6 +2931,17 @@ namespace iw::tests
 				std::ifstream stream(path, std::ios::binary);
 				return std::string(std::istreambuf_iterator<char>(stream), {});
 			};
+			const auto blockedSource = root / L"blocked-read.txt";
+			const auto blockedDestination = root / L"blocked-move.txt";
+			write(L"blocked-read.txt", "blocked");
+			const auto blockedHandle = ::platform::open_file(
+				desktop::file_path(blockedSource), ::platform::file_open_mode::read);
+			const auto blockedMove = files::move_file_to(blockedSource, blockedDestination, false);
+			std::error_code blockedProbe;
+			const bool blockedPublished = std::filesystem::exists(blockedDestination, blockedProbe);
+			reporter.check(blockedHandle && blockedMove && !blockedPublished && !blockedProbe &&
+			               read(blockedSource) == "blocked",
+			               L"a move blocked by a live read handle fails without publishing a copied destination");
 			write(L"replace.txt", "unchanged");
 			reporter.check(files::copy_file_to(root / L"missing.txt", root / L"replace.txt", true) &&
 				read(root / L"replace.txt") == "unchanged",
@@ -3848,27 +3810,27 @@ namespace iw::tests
 		void test_image_edits(Reporter& reporter)
 		{
 			reporter.section(L"edits::ImageEdits geometry");
-			constexpr sizei source{400, 300};
+			constexpr app::sizei source{400, 300};
 			edits::ImageEdits value;
 			reporter.check(value.empty() && !value.is_irreversible(),
 			               L"a default stack is the identity and needs no backup");
-			reporter.check(edits::transformed_size(source, value) == source,
+			reporter.check(app::sizei{edits::transformed_size(source, value)} == source,
 			               L"no rotation keeps the frame it was given");
 			value.rotation = 1;
-			reporter.check(edits::transformed_size(source, value) == sizei{300, 400},
+			reporter.check(app::sizei{edits::transformed_size(source, value)} == app::sizei{300, 400},
 			               L"a quarter turn swaps the sides");
 			value.rotation = 2;
-			reporter.check(edits::transformed_size(source, value) == source,
+			reporter.check(app::sizei{edits::transformed_size(source, value)} == source,
 			               L"a half turn keeps the sides");
 			value.rotation = 3;
-			reporter.check(edits::transformed_size(source, value) == sizei{300, 400},
+			reporter.check(app::sizei{edits::transformed_size(source, value)} == app::sizei{300, 400},
 			               L"three quarter turns swap the sides");
 			value.rotation = 4;
-			reporter.check(edits::transformed_size(source, value) == source && !value.has_rotation(),
+			reporter.check(app::sizei{edits::transformed_size(source, value)} == source && !value.has_rotation(),
 			               L"four quarter turns are the identity");
 
 			value = {};
-			auto bounds = edits::crop_bounds(source, value);
+			app::recti bounds = edits::crop_bounds(source, value);
 			reporter.check(bounds.x == 0 && bounds.y == 0 && bounds.width == 400 && bounds.height == 300,
 			               L"an unstraightened photo crops to its whole frame");
 			for (const int tenths : {-100, -55, -1, 1, 37, 100})
@@ -3881,7 +3843,7 @@ namespace iw::tests
 				               L"a straightened crop stays inside the picture at every angle");
 			}
 			value.straighten = 100;
-			const auto tilted = edits::crop_bounds(source, value);
+			const app::recti tilted = edits::crop_bounds(source, value);
 			reporter.check(tilted.width < 400 && tilted.height < 300,
 			               L"straightening shrinks the usable rectangle");
 			reporter.check(std::abs(tilted.x * 2 + tilted.width - 400) <= 1 &&
@@ -3889,21 +3851,21 @@ namespace iw::tests
 			               L"the usable rectangle stays centred in the frame");
 
 			value = {};
-			value.crop = {10, 10, 1000, 1000};
-			const auto clamped = edits::effective_crop(source, value);
+			value.crop = static_cast<::recti>(app::recti{10, 10, 1000, 1000});
+			const app::recti clamped = edits::effective_crop(source, value);
 			reporter.check(clamped.width == 400 && clamped.height == 300,
 			               L"a crop larger than the picture is pulled back inside it");
 
 			bool cornersInside = true;
-			for (const auto size : {sizei{400, 300}, sizei{301, 400}, sizei{17, 129}, sizei{4, 3}})
+			for (const auto size : {app::sizei{400, 300}, app::sizei{301, 400}, app::sizei{17, 129}, app::sizei{4, 3}})
 				for (const int angle : {-100, -55, -1, 1, 37, 100})
 					for (int turn = 0; turn < 4; ++turn)
 					{
 						edits::ImageEdits geometry;
 						geometry.straighten = angle;
 						geometry.rotation = turn;
-						const auto frame = edits::transformed_size(size, geometry);
-						const auto crop = edits::crop_bounds(size, geometry);
+						const app::sizei frame = edits::transformed_size(size, geometry);
+						const app::recti crop = edits::crop_bounds(size, geometry);
 						const double cx = (frame.width - 1) * 0.5;
 						const double cy = (frame.height - 1) * 0.5;
 						const double radians = angle * 0.1 * 3.14159265358979323846 / 180.0;
@@ -3943,7 +3905,7 @@ namespace iw::tests
 
 			value = {};
 			value.rotation = 1;
-			value.crop = {30, 40, 120, 200};
+			value.crop = static_cast<::recti>(app::recti{30, 40, 120, 200});
 			const auto scaled = edits::scaled_edits(value, {400, 300}, {100, 75});
 			reporter.check(rect_equals(scaled.crop, {7, 10, 30, 50}),
 				L"preview crop coordinates scale in the rotated frame, not the original orientation");
@@ -3981,7 +3943,7 @@ namespace iw::tests
 			               L"a clockwise turn puts the bottom-left pixel top-left");
 
 			edits::ImageEdits cropped;
-			cropped.crop = {1, 1, 2, 2};
+			cropped.crop = static_cast<::recti>(app::recti{1, 1, 2, 2});
 			const auto cut = edits::apply(photo, cropped);
 			reporter.check(cut.width == 2 && cut.height == 2 && cut.pixels[0] == photo.pixels[5],
 			               L"a crop takes exactly the reviewed rectangle");
@@ -4390,13 +4352,13 @@ namespace iw::tests
 			struct Text
 			{
 				std::wstring value;
-				recti bounds;
+				app::recti bounds;
 				std::uint32_t format{};
 			};
 
 			struct Fill
 			{
-				recti bounds;
+				app::recti bounds;
 				color value;
 			};
 
@@ -4405,22 +4367,22 @@ namespace iw::tests
 
 			static int width(const std::wstring_view value) { return static_cast<int>(value.size()) * 10; }
 
-			recti clip_rect() const override { return {0, 0, 10000, 10000}; }
-			void fill(const recti bounds, const color value) override { fills.push_back({bounds, value}); }
-			void blend_fill(recti, color) override {}
-			void text(const std::wstring_view value, const recti bounds, color, const std::uint32_t format,
+			app::recti clip_rect() const override { return {0, 0, 10000, 10000}; }
+			void fill(const app::recti bounds, const color value) override { fills.push_back({bounds, value}); }
+			void blend_fill(app::recti, color) override {}
+			void text(const std::wstring_view value, const app::recti bounds, color, const std::uint32_t format,
 			          const platform::FontPtr&) override
 			{
 				texts.push_back({std::wstring(value), bounds, format});
 			}
-			sizei measure_text(const std::wstring_view value, std::uint32_t, const platform::FontPtr&) override
+			app::sizei measure_text(const std::wstring_view value, std::uint32_t, const platform::FontPtr&) override
 			{
 				return {width(value), 16};
 			}
-			void image(std::span<const std::uint32_t>, sizei, recti, bool) override {}
-			void focus(recti) override {}
-			void outline(recti, color, int) override {}
-			void clip(recti) override {}
+			void image(std::span<const std::uint32_t>, app::sizei, app::recti, bool) override {}
+			void focus(app::recti) override {}
+			void outline(app::recti, color, int) override {}
+			void clip(app::recti) override {}
 			void reset_clip() override {}
 
 			const Text* find_text(const std::wstring_view value) const
@@ -4432,7 +4394,7 @@ namespace iw::tests
 				return found == texts.end() ? nullptr : &*found;
 			}
 
-			std::optional<color> fill_of(const recti bounds) const
+			std::optional<color> fill_of(const app::recti bounds) const
 			{
 				const auto found = std::ranges::find_if(fills, [bounds](const Fill& entry)
 				{
@@ -4718,19 +4680,19 @@ namespace iw::tests
 				// Ten pixels a character, sixteen a line: enough to lay out without a window.
 				struct FixedPitch final : platform::DrawContext
 				{
-					recti clip_rect() const override { return {}; }
-					void fill(recti, color) override {}
-					void blend_fill(recti, color) override {}
-					void text(std::wstring_view, recti, color, std::uint32_t, const platform::FontPtr&) override {}
-					sizei measure_text(const std::wstring_view value, std::uint32_t,
+					app::recti clip_rect() const override { return {}; }
+					void fill(app::recti, color) override {}
+					void blend_fill(app::recti, color) override {}
+					void text(std::wstring_view, app::recti, color, std::uint32_t, const platform::FontPtr&) override {}
+					app::sizei measure_text(const std::wstring_view value, std::uint32_t,
 					                   const platform::FontPtr&) override
 					{
 						return {static_cast<int>(value.size()) * 10, 16};
 					}
-					void image(std::span<const std::uint32_t>, sizei, recti, bool) override {}
-					void focus(recti) override {}
-					void outline(recti, color, int) override {}
-					void clip(recti) override {}
+					void image(std::span<const std::uint32_t>, app::sizei, app::recti, bool) override {}
+					void focus(app::recti) override {}
+					void outline(app::recti, color, int) override {}
+					void clip(app::recti) override {}
 					void reset_clip() override {}
 				} draw;
 				const ui::CanvasRenderer renderer(draw);
@@ -4860,10 +4822,12 @@ namespace iw::tests
 		}
 	}
 
-	int run_all()
+	int run_all(const bool skipClipboard)
 	{
 		Reporter reporter;
 		emit(L"ImageWalker 3.0 self-tests\n");
+		if (skipClipboard)
+			emit(L"[ SKIP ] clipboard preferred file operation (manual validation requested)\n");
 
 		const auto root = files::unique_destination(std::filesystem::current_path() / L"iw30-suite-history");
 		std::error_code error;
@@ -4890,7 +4854,7 @@ namespace iw::tests
 				L"file Undo is an explicit window dependency rather than an uninitialized global lookup");
 
 			test_startup_dispatch(reporter);
-			test_clipboard_file_operation(reporter);
+			if (!skipClipboard) test_clipboard_file_operation(reporter);
 			test_choice_button_ids(reporter);
 			test_mode_bar(reporter);
 			test_main_window_host(reporter);

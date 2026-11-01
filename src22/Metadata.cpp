@@ -1,5 +1,5 @@
 #include "stdafx.h"
-#include "iw/imaging/Metadata.h"
+#include "iw/legacy/Metadata.h"
 #include "ViewMetadataList.h"
 
 void IW::MetadataProperties::Apply(CMetadataListCtrl& list) const

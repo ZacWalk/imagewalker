@@ -2,11 +2,15 @@
 // Implements Windows runtime, shell, and natural-ordering services.
 
 #include "Platform.h"
+#include "DesktopServices.h"
 #include "Files.h"
 #include "PixelOps.h"
 #include "Resource.h"
 #include "PlatformWin32.h"
 #include "DiagnosticLog.h"
+#include "platform_win_interop.h"
+#include "ui/ui.h"
+#include "ui/test_support.h"
 
 #include <commctrl.h>
 #include <objbase.h>
@@ -15,10 +19,10 @@
 #include <shlwapi.h>
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <condition_variable>
 #include <deque>
 #include <format>
-#include <intrin.h>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -27,53 +31,18 @@
 
 namespace iw::platform
 {
-	namespace
-	{
-		HINSTANCE resourceInstance{};
-		constexpr UINT messageRunUiWork = WM_APP + 0x3f;
-
-		RECT native_rect(const recti value)
-		{
-			return {value.x, value.y, value.right(), value.bottom()};
-		}
-
-		sizei text_extent(const HDC dc, const std::wstring_view value)
-		{
-			if (value.empty() || value.size() > static_cast<size_t>((std::numeric_limits<int>::max)())) return {};
-			SIZE extent{};
-			return GetTextExtentPoint32W(dc, value.data(), static_cast<int>(value.size()), &extent)
-			       ? sizei{extent.cx, extent.cy}
-			       : sizei{};
-		}
-	}
+	void show_popup_menu_pf(const WindowFramePtr& owner, app::pointi screenPoint,
+	                        std::span<const PopupItem> items);
 
 	HWND win32::owner_window(const WindowFramePtr& frame)
 	{
 		return frame ? reinterpret_cast<HWND>(frame->native_handle()) : nullptr;
 	}
 
-	HANDLE win32::shell_small_image_list()
-	{
-		SHFILEINFOW info{};
-		return reinterpret_cast<HANDLE>(SHGetFileInfoW(
-			L"C:\\", FILE_ATTRIBUTE_DIRECTORY, &info, sizeof(info),
-			SHGFI_SYSICONINDEX | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES));
-	}
-
-	int win32::shell_icon_index(const std::filesystem::path& path)
-	{
-		if (path.empty()) return -1;
-		SHFILEINFOW info{};
-		return SHGetFileInfoW(path.c_str(), 0, &info, sizeof(info),
-		                      SHGFI_SYSICONINDEX | SHGFI_SMALLICON)
-			       ? info.iIcon
-			       : -1;
-	}
-
 	struct Font::Impl
 	{
-		HFONT handle{};
-		~Impl() { if (handle) DeleteObject(handle); }
+		pf::font_handle handle{};
+		~Impl() { if (handle) pf::delete_font_handle(handle); }
 	};
 
 	Font::Font() = default;
@@ -89,52 +58,33 @@ namespace iw::platform
 
 	NativeHandle Font::native_handle() const
 	{
-		return impl_ ? reinterpret_cast<NativeHandle>(impl_->handle) : 0;
+		return impl_ ? static_cast<NativeHandle>(impl_->handle) : 0;
 	}
 
 	FontPtr create_message_font(const unsigned int dpi)
 	{
-		NONCLIENTMETRICSW metrics{sizeof(metrics)};
-		using SystemParametersInfoForDpiFn = BOOL(WINAPI*)(UINT, UINT, PVOID, UINT, UINT);
-		static const auto systemParametersInfoForDpi = reinterpret_cast<SystemParametersInfoForDpiFn>(
-			GetProcAddress(GetModuleHandleW(L"user32.dll"), "SystemParametersInfoForDpi"));
-		const UINT effectiveDpi = dpi ? dpi : USER_DEFAULT_SCREEN_DPI;
-		const BOOL loaded = systemParametersInfoForDpi
-			                    ? systemParametersInfoForDpi(
-				                    SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0, effectiveDpi)
-			                    : SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0);
-		if (!loaded) return {};
 		auto impl = std::make_unique<Font::Impl>();
-		impl->handle = CreateFontIndirectW(&metrics.lfMessageFont);
+		impl->handle = pf::create_font_handle({"Segoe UI", static_cast<int>(9.0 * (dpi ? dpi : 96) / 96),
+		                                      400});
 		if (!impl->handle) return {};
 		return std::shared_ptr<Font>(new Font(std::move(impl)));
 	}
 
 	color system_color(const SystemColor value)
 	{
-		int index = COLOR_WINDOW;
 		switch (value)
 		{
-		case SystemColor::window: index = COLOR_WINDOW;
-			break;
-		case SystemColor::windowText: index = COLOR_WINDOWTEXT;
-			break;
-		case SystemColor::face: index = COLOR_3DFACE;
-			break;
-		case SystemColor::shadow: index = COLOR_3DSHADOW;
-			break;
-		case SystemColor::highlight: index = COLOR_HIGHLIGHT;
-			break;
-		case SystemColor::highlightText: index = COLOR_HIGHLIGHTTEXT;
-			break;
-		case SystemColor::grayText: index = COLOR_GRAYTEXT;
-			break;
-		case SystemColor::buttonText: index = COLOR_BTNTEXT;
-			break;
-		case SystemColor::scrollbar: index = COLOR_SCROLLBAR;
-			break;
+		case SystemColor::window: return {255, 255, 255};
+		case SystemColor::windowText: return {32, 32, 32};
+		case SystemColor::face: return {245, 245, 245};
+		case SystemColor::shadow: return {128, 128, 128};
+		case SystemColor::highlight: return {51, 103, 180};
+		case SystemColor::highlightText: return {255, 255, 255};
+		case SystemColor::grayText: return {128, 128, 128};
+		case SystemColor::buttonText: return {32, 32, 32};
+		case SystemColor::scrollbar: return {220, 220, 220};
 		}
-		return color::from_packed(GetSysColor(index));
+		return colors::black;
 	}
 
 	color calc_hande_color(const bool hover, const bool selected, const bool checked)
@@ -145,9 +95,9 @@ namespace iw::platform
 		return system_color(SystemColor::face);
 	}
 
-	sizei drag_threshold()
+	app::sizei drag_threshold()
 	{
-		return {GetSystemMetrics(SM_CXDRAG), GetSystemMetrics(SM_CYDRAG)};
+		return {4, 4};
 	}
 
 	PopupItem PopupItem::action(CommandPtr command, std::wstring text)
@@ -162,32 +112,10 @@ namespace iw::platform
 		return result;
 	}
 
-	void show_popup_menu(const WindowFramePtr& owner, const pointi screenPoint,
+	void show_popup_menu(const WindowFramePtr& owner, const app::pointi screenPoint,
 	                     const std::span<const PopupItem> items)
 	{
-		const HMENU menu = CreatePopupMenu();
-		if (!menu) return;
-		std::vector<CommandPtr> commands;
-		for (const auto& item : items)
-		{
-			if (item.separator)
-			{
-				AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-				continue;
-			}
-			if (!item.command) continue;
-			commands.push_back(item.command);
-			UINT flags = MF_STRING;
-			if (item.command->enabled && !item.command->enabled()) flags |= MF_GRAYED;
-			if (item.command->checked && item.command->checked()) flags |= MF_CHECKED;
-			AppendMenuW(menu, flags, commands.size(), item.label.c_str());
-		}
-		const UINT selected = TrackPopupMenu(
-			menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, screenPoint.x, screenPoint.y, 0,
-			win32::owner_window(owner), nullptr);
-		DestroyMenu(menu);
-		if (selected && selected <= commands.size() && commands[selected - 1]->invoke)
-			commands[selected - 1]->invoke();
+		show_popup_menu_pf(owner, screenPoint, items);
 	}
 
 	std::wstring path_ellipsis(const std::wstring_view path, const int width,
@@ -225,1031 +153,659 @@ namespace iw::platform
 		return std::wstring(fitting(name, width - measure(ellipsis))) + std::wstring(ellipsis);
 	}
 
-	class WinMeasureContext final : public MeasureContext
+	// The application keeps its old event vocabulary and task-owned chrome, but the
+	// actual frame, dispatcher and drawing surface belong to libdesktop.  This
+	// adapter contains no window procedure or message loop; it only translates the
+	// values used by the ImageWalker model.
+	class LibdesktopWindowFrame;
+
+	class LibdesktopDrawContext final : public DrawContext
 	{
 	public:
-		explicit WinMeasureContext(const HDC dc) : dc_(dc)
+		explicit LibdesktopDrawContext(pf::draw_context& draw) : draw_(draw) {}
+
+		app::recti clip_rect() const override
 		{
+			const auto clip = draw_.clip_rect();
+			return {clip.left, clip.top, clip.width(), clip.height()};
 		}
 
-		sizei measure_text(const std::wstring_view value, const std::uint32_t,
-		                   const FontPtr& font) const override
+		void fill(const app::recti bounds, const color value) override
 		{
-			const auto nativeFont = font && *font ? reinterpret_cast<HFONT>(font->native_handle()) : nullptr;
-			const HGDIOBJ previousFont = nativeFont ? SelectObject(dc_, nativeFont) : nullptr;
-			const sizei result = text_extent(dc_, value);
-			if (previousFont) SelectObject(dc_, previousFont);
-			return result;
+			draw_.fill_solid_rect({bounds.x, bounds.y, bounds.right(), bounds.bottom()},
+			                      {value.r, value.g, value.b});
 		}
 
-	private:
-		HDC dc_{};
-	};
-
-	class WinDrawContext final : public DrawContext
-	{
-	public:
-		WinDrawContext(const HDC target, const recti clip, const int width, const int height)
-			: target_(target), clip_(clip), width_(width), height_(height)
+		void blend_fill(const app::recti bounds, const color value) override
 		{
-			if (width_ <= 0 || height_ <= 0) return;
-			dc_ = CreateCompatibleDC(target_);
-			BITMAPINFO info{};
-			info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-			info.bmiHeader.biWidth = width_;
-			info.bmiHeader.biHeight = -height_;
-			info.bmiHeader.biPlanes = 1;
-			info.bmiHeader.biBitCount = 32;
-			info.bmiHeader.biCompression = BI_RGB;
-			bitmap_ = CreateDIBSection(target_, &info, DIB_RGB_COLORS, reinterpret_cast<void**>(&pixels_), nullptr, 0);
-			if (!dc_ || !bitmap_)
-			{
-				if (bitmap_) DeleteObject(bitmap_);
-				if (dc_) DeleteDC(dc_);
-				bitmap_ = nullptr;
-				dc_ = target_;
-				pixels_ = nullptr;
-				return;
-			}
-			oldBitmap_ = SelectObject(dc_, bitmap_);
+			draw_.fill_blend_rect({bounds.x, bounds.y, bounds.right(), bounds.bottom()},
+			                      {value.r, value.g, value.b});
 		}
 
-		~WinDrawContext() override
-		{
-			if (dc_ != target_)
-			{
-				SelectObject(dc_, oldBitmap_);
-				DeleteObject(bitmap_);
-				DeleteDC(dc_);
-			}
-			for (const auto& [value, brush] : brushes_) DeleteObject(brush);
-		}
-
-		void begin(const HDC target, const recti clip)
-		{
-			target_ = target;
-			clip_ = clip;
-			SelectClipRgn(dc_, nullptr);
-		}
-
-		bool reusable(const int width, const int height) const
-		{
-			return dc_ != target_ && width_ == width && height_ == height;
-		}
-
-		void present() const
-		{
-			if (dc_ != target_) BitBlt(target_, 0, 0, width_, height_, dc_, 0, 0, SRCCOPY);
-		}
-
-		recti clip_rect() const override { return clip_; }
-
-		void fill(const recti bounds, const color value) override
-		{
-			const RECT area = native_rect(bounds);
-			FillRect(dc_, &area, brush(value));
-		}
-
-		void blend_fill(const recti bounds, const color value) override
-		{
-			if (!pixels_ || value.a == 255)
-			{
-				fill(bounds, value);
-				return;
-			}
-			GdiFlush();
-			const int left = std::clamp(bounds.x, 0, width_);
-			const int right = std::clamp(bounds.right(), 0, width_);
-			const int top = std::clamp(bounds.y, 0, height_);
-			const int bottom = std::clamp(bounds.bottom(), 0, height_);
-			// recti carries no ordering invariant, and an inverted rect would size the span from a
-			// negative difference. FillRect tolerates one, so the two paths have to agree here.
-			const auto count = static_cast<size_t>((std::max)(0, right - left));
-			for (int y = top; y < bottom; ++y)
-				ui::blend_constant_bgra(
-					{pixels_ + static_cast<size_t>(y) * width_ + left, count}, value);
-		}
-
-		void text(const std::wstring_view value, const recti bounds, const color textColor,
+		void text(const std::wstring_view value, const app::recti bounds, const color textColor,
 		          const std::uint32_t format, const FontPtr& font) override
 		{
-			if (value.empty() || bounds.width <= 0 || bounds.height <= 0 ||
-				value.size() > static_cast<size_t>((std::numeric_limits<int>::max)()))
-				return;
-			const auto nativeFont = font && *font ? reinterpret_cast<HFONT>(font->native_handle()) : nullptr;
-			const HGDIOBJ previousFont = nativeFont ? SelectObject(dc_, nativeFont) : nullptr;
-			const int previousMode = SetBkMode(dc_, TRANSPARENT);
-			const COLORREF previousColor = SetTextColor(dc_, textColor.pack());
-
-			// DrawTextW was considered too expensive for this retained-canvas hot path.
+			if (value.empty() || bounds.width <= 0 || bounds.height <= 0) return;
 			std::wstring shortened;
 			std::wstring_view displayed = value;
-			sizei extent = text_extent(dc_, displayed);
+			const auto measure = [this, &font](const std::wstring_view part)
+			{
+				return measure_text(part, TextFormat::singleLine, font).width;
+			};
+			auto extent = measure_text(displayed, TextFormat::singleLine, font);
 			if ((format & TextFormat::pathEllipsis) && extent.width > bounds.width)
 			{
-				const auto measure = [this](const std::wstring_view part) { return text_extent(dc_, part).width; };
 				shortened = path_ellipsis(value, bounds.width, measure);
 				displayed = shortened;
-				extent = text_extent(dc_, displayed);
+				extent = measure_text(displayed, TextFormat::singleLine, font);
 			}
 			else if ((format & TextFormat::endEllipsis) && extent.width > bounds.width)
 			{
 				constexpr std::wstring_view ellipsis = L"...";
-				const int prefixWidth = (std::max)(0, bounds.width - text_extent(dc_, ellipsis).width);
-				int fit{};
-				SIZE fittedExtent{};
-				GetTextExtentExPointW(dc_, value.data(), static_cast<int>(value.size()), prefixWidth,
-				                       &fit, nullptr, &fittedExtent);
-				if (fit > 0 && fit < static_cast<int>(value.size()) &&
-					value[fit - 1] >= 0xd800 && value[fit - 1] <= 0xdbff &&
-					value[fit] >= 0xdc00 && value[fit] <= 0xdfff)
-					--fit;
-				shortened.assign(value.substr(0, static_cast<size_t>(fit)));
-				shortened.append(ellipsis);
+				const auto available = (std::max)(0, bounds.width - measure(ellipsis));
+				size_t low = 0;
+				size_t high = value.size();
+				while (low < high)
+				{
+					const size_t middle = low + (high - low + 1) / 2;
+					if (measure(value.substr(0, middle)) <= available) low = middle;
+					else high = middle - 1;
+				}
+				shortened.assign(value.substr(0, low));
+				shortened += ellipsis;
 				displayed = shortened;
-				extent = text_extent(dc_, displayed);
+				extent = measure_text(displayed, TextFormat::singleLine, font);
 			}
-
 			int x = bounds.x;
 			if (format & TextFormat::center) x += (bounds.width - extent.width) / 2;
 			else if (format & TextFormat::right) x += bounds.width - extent.width;
 			int y = bounds.y;
 			if (format & TextFormat::verticalCenter) y += (bounds.height - extent.height) / 2;
-			const RECT area = native_rect(bounds);
-			ExtTextOutW(dc_, x, y, ETO_CLIPPED, &area, displayed.data(), static_cast<UINT>(displayed.size()), nullptr);
-			SetTextColor(dc_, previousColor);
-			SetBkMode(dc_, previousMode);
-			if (previousFont) SelectObject(dc_, previousFont);
+			const auto utf8 = pf::utf16_to_utf8(displayed);
+			const auto handle = font && *font ? static_cast<pf::font_handle>(font->native_handle()) : 0;
+			if (handle)
+				draw_.draw_text_h(x, y, utf8, handle, {textColor.r, textColor.g, textColor.b});
+			else
+				draw_.draw_text(x, y, {x, y, x + extent.width, y + extent.height}, utf8,
+				                {9, pf::font_name::arial}, {textColor.r, textColor.g, textColor.b},
+				                {255, 255, 255});
 		}
 
-		sizei measure_text(const std::wstring_view value, const std::uint32_t format,
+		app::sizei measure_text(const std::wstring_view value, const std::uint32_t,
 		                   const FontPtr& font) override
 		{
-			return WinMeasureContext(dc_).measure_text(value, format, font);
+			const auto utf8 = pf::utf16_to_utf8(value);
+			const auto handle = font && *font ? static_cast<pf::font_handle>(font->native_handle()) : 0;
+			const auto extent = handle
+				                    ? draw_.measure_text_h(utf8, handle)
+				                    : draw_.measure_text(utf8, {9, pf::font_name::arial});
+			return {extent.cx, extent.cy};
 		}
 
-		void image(const std::span<const std::uint32_t> sourcePixels, const sizei source,
-		           const recti destination, const bool alpha) override
+		void image(const std::span<const std::uint32_t> pixels, const app::sizei source,
+		           const app::recti destination, const bool) override
 		{
-			if (source.width <= 0 || source.height <= 0 || sourcePixels.empty() ||
-				destination.width <= 0 || destination.height <= 0)
+			if (source.width <= 0 || source.height <= 0 ||
+				pixels.size() < static_cast<size_t>(source.width) * source.height)
 				return;
-			const size_t sourceWidth = static_cast<size_t>(source.width);
-			const size_t sourceHeight = static_cast<size_t>(source.height);
-			if (sourceWidth > (std::numeric_limits<size_t>::max)() / sourceHeight ||
-				sourcePixels.size() < sourceWidth * sourceHeight)
-				return;
-			if (alpha && pixels_)
-			{
-				GdiFlush();
-				const int startX = (std::max)(0, destination.x);
-				const int endX = (std::min)(width_, destination.right());
-				const int startY = (std::max)(0, destination.y);
-				const int endY = (std::min)(height_, destination.bottom());
-				for (int y = startY; y < endY; ++y)
-				{
-					const int sourceY = std::clamp(static_cast<int>(
-						static_cast<std::int64_t>(y - destination.y) * source.height / destination.height),
-					                               0, source.height - 1);
-					for (int x = startX; x < endX; ++x)
-					{
-						const int sourceX = std::clamp(static_cast<int>(
-							static_cast<std::int64_t>(x - destination.x) * source.width / destination.width),
-						                               0, source.width - 1);
-						const auto sourcePixel = sourcePixels[static_cast<size_t>(sourceY) * source.width + sourceX];
-						const int sourceAlpha = static_cast<int>((sourcePixel >> 24) & 0xff);
-						if (!sourceAlpha) continue;
-						auto& pixel = pixels_[static_cast<size_t>(y) * width_ + x];
-						const auto over = [sourceAlpha](const std::uint32_t background,
-						                                const std::uint32_t foreground)
-						{
-							return (background * (255 - sourceAlpha) + foreground * sourceAlpha + 127) / 255;
-						};
-						pixel = over(pixel & 0xff, sourcePixel & 0xff) |
-							(over((pixel >> 8) & 0xff, (sourcePixel >> 8) & 0xff) << 8) |
-							(over((pixel >> 16) & 0xff, (sourcePixel >> 16) & 0xff) << 16) | 0xff000000;
-					}
-				}
-				return;
-			}
-			BITMAPINFO info{};
-			info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-			info.bmiHeader.biWidth = source.width;
-			info.bmiHeader.biHeight = -source.height;
-			info.bmiHeader.biPlanes = 1;
-			info.bmiHeader.biBitCount = 32;
-			info.bmiHeader.biCompression = BI_RGB;
-			const int previousMode = SetStretchBltMode(dc_, HALFTONE);
-			SetBrushOrgEx(dc_, 0, 0, nullptr);
-			StretchDIBits(dc_, destination.x, destination.y, destination.width, destination.height,
-			              0, 0, source.width, source.height, sourcePixels.data(), &info, DIB_RGB_COLORS, SRCCOPY);
-			SetStretchBltMode(dc_, previousMode);
+			std::vector<std::uint32_t> owned(pixels.begin(),
+			                                 pixels.begin() + static_cast<size_t>(source.width) * source.height);
+			pf::bitmap bitmap(source.width, source.height, std::move(owned));
+			draw_.draw_bitmap({destination.x, destination.y, destination.right(), destination.bottom()}, bitmap, true);
 		}
 
-		void focus(const recti bounds) override
+		void focus(const app::recti bounds) override { outline(bounds, {0, 0, 0}, 1); }
+
+		void outline(const app::recti bounds, const color value, const int width) override
 		{
-			const RECT area = native_rect(bounds);
-			DrawFocusRect(dc_, &area);
+			const auto c = pf::color_t{value.r, value.g, value.b};
+			const auto left = pf::ipoint(bounds.x, bounds.y);
+			const auto right = pf::ipoint(bounds.right(), bounds.bottom());
+			draw_.draw_solid_line(left, {right.x, left.y}, c, width);
+			draw_.draw_solid_line({right.x, left.y}, right, c, width);
+			draw_.draw_solid_line(right, {left.x, right.y}, c, width);
+			draw_.draw_solid_line({left.x, right.y}, left, c, width);
 		}
 
-		void outline(const recti bounds, const color value, const int width) override
+		void clip(const app::recti bounds) override
 		{
-			const HPEN pen = CreatePen(PS_SOLID, (std::max)(1, width), value.pack());
-			if (!pen) return;
-			const HGDIOBJ oldPen = SelectObject(dc_, pen);
-			const HGDIOBJ oldBrush = SelectObject(dc_, GetStockObject(NULL_BRUSH));
-			Rectangle(dc_, bounds.x, bounds.y, bounds.right(), bounds.bottom());
-			SelectObject(dc_, oldBrush);
-			SelectObject(dc_, oldPen);
-			DeleteObject(pen);
+			draw_.set_clip_rect({bounds.x, bounds.y, bounds.right(), bounds.bottom()});
 		}
 
-		void clip(const recti bounds) override
-		{
-			IntersectClipRect(dc_, bounds.x, bounds.y, bounds.right(), bounds.bottom());
-		}
-
-		void reset_clip() override { SelectClipRgn(dc_, nullptr); }
+		void reset_clip() override { draw_.clear_clip_rect(); }
 
 	private:
-		HBRUSH brush(const color value)
-		{
-			for (const auto& [cached, handle] : brushes_) if (cached == value) return handle;
-			const HBRUSH created = CreateSolidBrush(value.pack());
-			if (created) brushes_.emplace_back(value, created);
-			return created;
-		}
-
-		HDC target_{};
-		HDC dc_{};
-		HBITMAP bitmap_{};
-		HGDIOBJ oldBitmap_{};
-		std::uint32_t* pixels_{};
-		recti clip_;
-		int width_{};
-		int height_{};
-		std::vector<std::pair<color, HBRUSH>> brushes_;
+		pf::draw_context& draw_;
 	};
 
-	class WinWindowFrame final : public WindowFrame, public std::enable_shared_from_this<WinWindowFrame>
+	class LibdesktopMeasureContext final : public MeasureContext
 	{
 	public:
-		~WinWindowFrame() override
+		explicit LibdesktopMeasureContext(pf::measure_context& measure) : measure_(measure) {}
+
+		app::sizei measure_text(const std::wstring_view value, const std::uint32_t,
+		                   const FontPtr& font) const override
 		{
-			if (accelerators_) DestroyAcceleratorTable(accelerators_);
-			if (window_ && IsWindow(window_)) SetWindowLongPtrW(window_, GWLP_USERDATA, 0);
+			const auto utf8 = pf::utf16_to_utf8(value);
+			const auto handle = font && *font ? static_cast<pf::font_handle>(font->native_handle()) : 0;
+			const auto extent = handle
+				                    ? pf::measure_text_with_font(handle, utf8)
+				                    : measure_.measure_text(utf8, {9, pf::font_name::arial});
+			return {extent.cx, extent.cy};
 		}
 
-		static std::shared_ptr<WinWindowFrame> create(const HWND parent, FrameReactorPtr reactor,
-		                                              const WindowOptions& options)
+	private:
+		pf::measure_context& measure_;
+	};
+
+	class LibdesktopReactor final : public pf::frame_reactor
+	{
+	public:
+		explicit LibdesktopReactor(const std::shared_ptr<LibdesktopWindowFrame>& owner) : owner_(owner) {}
+
+		std::uint32_t handle_message(pf::window_frame_ptr, const pf::message_type message,
+		                             const pf::message_params& params) override;
+		std::uint32_t handle_mouse(pf::window_frame_ptr, const pf::mouse_message_type message,
+		                           const pf::mouse_params& params) override;
+		std::uint32_t handle_keyboard(pf::window_frame_ptr, const pf::keyboard_message_type message,
+		                              const pf::keyboard_params& params) override;
+		std::uint32_t handle_gesture(pf::window_frame_ptr, const pf::gesture_params& params) override;
+		void handle_paint(pf::window_frame_ptr&, pf::draw_context& draw) override;
+		void handle_size(pf::window_frame_ptr&, pf::isize extent, pf::measure_context& measure) override;
+
+	private:
+		std::weak_ptr<LibdesktopWindowFrame> owner_;
+	};
+
+	class LibdesktopWindowFrame final : public WindowFrame,
+		public std::enable_shared_from_this<LibdesktopWindowFrame>
+	{
+	public:
+		explicit LibdesktopWindowFrame(pf::window_frame_ptr native) : native_(std::move(native)) {}
+
+		NativeHandle native_handle() const override
 		{
-			auto frame = std::make_shared<WinWindowFrame>();
-			frame->reactor_ = std::move(reactor);
-			frame->topLevel_ = parent == nullptr;
-			frame->eraseBackground_ = options.eraseBackground;
-			const std::wstring className(options.className.begin(), options.className.end());
-			WNDCLASSEXW windowClass{sizeof(windowClass)};
-			windowClass.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
-			windowClass.lpfnWndProc = window_proc;
-			windowClass.hInstance = resourceInstance;
-			windowClass.hIcon = options.icon == WindowIcon::application
-				                    ? LoadIconW(resourceInstance, MAKEINTRESOURCEW(IDI_APP))
-				                    : nullptr;
-			windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-			windowClass.hbrBackground = options.eraseBackground
-				                              ? reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1)
-				                              : nullptr;
-			windowClass.lpszClassName = className.c_str();
-			windowClass.hIconSm = windowClass.hIcon;
-			if (!RegisterClassExW(&windowClass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return {};
-			DWORD style = options.child ? WS_CHILD : WS_OVERLAPPEDWINDOW;
-			if (options.visible) style |= WS_VISIBLE;
-			if (options.clipChildren) style |= WS_CLIPCHILDREN;
-			if (options.tabStop) style |= WS_TABSTOP;
-			const int x = options.useDefaultPosition ? CW_USEDEFAULT : options.bounds.x;
-			const int y = options.useDefaultPosition ? CW_USEDEFAULT : options.bounds.y;
-			const int width = options.bounds.width;
-			const int height = options.bounds.height;
-			frame->self_ = frame;
-			frame->window_ = CreateWindowExW(0, className.c_str(), options.title.c_str(), style,
-			                                 x, y, width, height, parent, nullptr, resourceInstance, frame.get());
-			if (!frame->window_)
-			{
-				frame->self_.reset();
-				return {};
-			}
-			if (!options.child && options.showCommand)
-			{
-				ShowWindow(frame->window_, options.maximized ? SW_SHOWMAXIMIZED : options.showCommand);
-				UpdateWindow(frame->window_);
-			}
-			return frame;
+			return native_ ? pf::platform_win::native_window_handle(native_) : 0;
 		}
 
-		NativeHandle native_handle() const override { return reinterpret_cast<NativeHandle>(window_); }
-		void set_reactor(FrameReactorPtr reactor) override { reactor_ = std::move(reactor); }
+		void set_reactor(FrameReactorPtr reactor) override
+		{
+			reactor_ = std::move(reactor);
+			if (native_)
+			{
+				native_->set_reactor(reactor_
+					                     ? std::make_shared<LibdesktopReactor>(shared_from_this())
+					                     : pf::frame_reactor_ptr{});
+			}
+		}
 
 		WindowFramePtr create_child(FrameReactorPtr reactor, const WindowOptions& options) override
 		{
-			return create(window_, std::move(reactor), options);
+			if (!native_) return {};
+			std::uint32_t style = pf::window_style::child;
+			if (options.visible) style |= pf::window_style::visible;
+			if (options.clipChildren) style |= pf::window_style::clip_children;
+			const auto className = options.className.empty() ? "ImageWalker30.Child" : options.className;
+			auto child = native_->create_child(className, style, {});
+			if (!child) return {};
+			auto result = std::make_shared<LibdesktopWindowFrame>(std::move(child));
+			result->set_reactor(std::move(reactor));
+			if (options.bounds.width > 0 && options.bounds.height > 0)
+				result->move(options.bounds);
+			result->show(options.visible);
+			return result;
 		}
 
-		recti client_rect() const override
+		app::recti client_rect() const override
 		{
-			RECT value{};
-			GetClientRect(window_, &value);
-			return {value.left, value.top, value.right - value.left, value.bottom - value.top};
+			if (!native_) return {};
+			const auto value = native_->get_client_rect();
+			return {value.left, value.top, value.width(), value.height()};
 		}
 
-		void move(const recti bounds) override
+		void move(const app::recti bounds) override
 		{
-			MoveWindow(window_, bounds.x, bounds.y, bounds.width, bounds.height, TRUE);
+			pendingBounds_ = bounds;
+			if (native_handle()) native_->move_window({bounds.x, bounds.y, bounds.right(), bounds.bottom()});
 		}
 
-		void show(const bool visible) override { ShowWindow(window_, visible ? SW_SHOW : SW_HIDE); }
-		void invalidate() override { InvalidateRect(window_, nullptr, FALSE); }
-
-		void invalidate(const recti bounds) override
+		void show(const bool visible) override
 		{
-			const RECT area = native_rect(bounds);
-			InvalidateRect(window_, &area, FALSE);
+			pendingVisible_ = visible;
+			if (native_handle()) native_->show(visible);
 		}
 
-		void set_focus() override { SetFocus(window_); }
-		bool has_focus() const override { return GetFocus() == window_; }
-		void set_capture() override { SetCapture(window_); }
-		void release_capture() override { if (GetCapture() == window_) ReleaseCapture(); }
-		void start_timer(const unsigned int milliseconds) override
+		void invalidate() override { if (native_) native_->invalidate(); }
+
+		void invalidate(const app::recti bounds) override
 		{
-			SetTimer(window_, 1, (std::max)(1u, milliseconds), nullptr);
-		}
-		void stop_timer() override { KillTimer(window_, 1); }
-
-		void track_mouse_leave() override
-		{
-			TRACKMOUSEEVENT tracking{sizeof(tracking), TME_LEAVE, window_, 0};
-			TrackMouseEvent(&tracking);
+			if (native_) native_->invalidate_rect({bounds.x, bounds.y, bounds.right(), bounds.bottom()});
 		}
 
+		void set_focus() override { if (native_) native_->set_focus(); }
+		bool has_focus() const override { return native_ && native_->has_focus(); }
+		void set_capture() override { if (native_) native_->set_capture(); }
+		void release_capture() override { if (native_) native_->release_capture(); }
+		void track_mouse_leave() override { if (native_) native_->track_mouse_leave(); }
 		void configure_gestures(const bool zoom, const bool pan) override
 		{
-			GESTURECONFIG gestures[]{
-				{
-					GID_ZOOM, zoom ? static_cast<DWORD>(GC_ZOOM) : 0u,
-					zoom ? 0u : static_cast<DWORD>(GC_ZOOM)
-				},
-				{
-					GID_PAN, pan ? static_cast<DWORD>(GC_PAN) : 0u,
-					pan ? 0u : static_cast<DWORD>(GC_PAN)
-				}
-			};
-			SetGestureConfig(window_, 0, std::size(gestures), gestures, sizeof(GESTURECONFIG));
+			if (native_) native_->configure_gestures(zoom, pan);
 		}
+
+		void start_timer(const unsigned int milliseconds) override
+		{
+			if (native_) native_->set_timer(1, (std::max)(1u, milliseconds));
+		}
+
+		void stop_timer() override { if (native_) native_->kill_timer(1); }
 
 		void accept_file_drops(const bool accept) override
 		{
-			if (window_) DragAcceptFiles(window_, accept);
+			if (native_) native_->accept_drop_files(accept);
 		}
 
 		void set_cursor(const CursorShape cursor) override
 		{
-			LPCWSTR identifier = IDC_ARROW;
-			if (cursor == CursorShape::sizeAll) identifier = IDC_SIZEALL;
-			else if (cursor == CursorShape::sizeHorizontal) identifier = IDC_SIZEWE;
-			else if (cursor == CursorShape::wait) identifier = IDC_WAIT;
-			if (cursor == CursorShape::zoom)
-				SetCursor(LoadCursorW(resourceInstance, MAKEINTRESOURCEW(IDC_ZOOM_CURSOR)));
-			else SetCursor(LoadCursorW(nullptr, identifier));
+			if (!native_) return;
+			native_->set_cursor_shape(cursor == CursorShape::sizeHorizontal ? pf::cursor_shape::size_we :
+				cursor == CursorShape::sizeAll ? pf::cursor_shape::hand :
+				cursor == CursorShape::wait ? pf::cursor_shape::wait :
+				cursor == CursorShape::zoom ? pf::cursor_shape::hand : pf::cursor_shape::arrow);
 		}
 
-		pointi screen_to_client(const pointi point) const override
+		app::pointi screen_to_client(const app::pointi point) const override
 		{
-			POINT value{point.x, point.y};
-			ScreenToClient(window_, &value);
-			return {value.x, value.y};
+			if (!native_) return point;
+			const auto result = native_->screen_to_client({point.x, point.y});
+			return {result.x, result.y};
 		}
 
-		pointi client_to_screen(const pointi point) const override
+		app::pointi client_to_screen(const app::pointi point) const override
 		{
-			POINT value{point.x, point.y};
-			ClientToScreen(window_, &value);
-			return {value.x, value.y};
+			if (!native_) return point;
+			const auto result = native_->client_to_screen({point.x, point.y});
+			return {result.x, result.y};
 		}
 
 		void set_title(const std::wstring_view title) override
 		{
-			const std::wstring value(title);
-			SetWindowTextW(window_, value.c_str());
+			pendingTitle_ = std::wstring(title);
+			if (native_handle()) native_->set_text(pf::utf16_to_utf8(title));
 		}
 
 		void set_fullscreen(const bool fullscreen) override
 		{
-			if (!topLevel_ || fullscreen == fullscreen_) return;
-			fullscreen_ = fullscreen;
-			if (fullscreen)
-			{
-				normalStyle_ = static_cast<DWORD>(GetWindowLongPtrW(window_, GWL_STYLE));
-				normalPlacement_ = {sizeof(normalPlacement_)};
-				GetWindowPlacement(window_, &normalPlacement_);
-				MONITORINFO monitor{sizeof(monitor)};
-				GetMonitorInfoW(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST), &monitor);
-				SetWindowLongPtrW(window_, GWL_STYLE, normalStyle_ & ~WS_OVERLAPPEDWINDOW);
-				SetWindowPos(window_, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
-				             monitor.rcMonitor.right - monitor.rcMonitor.left,
-				             monitor.rcMonitor.bottom - monitor.rcMonitor.top,
-				             SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
-			}
-			else
-			{
-				SetWindowLongPtrW(window_, GWL_STYLE, normalStyle_);
-				SetWindowPlacement(window_, &normalPlacement_);
-				SetWindowPos(window_, nullptr, 0, 0, 0, 0,
-				             SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER);
-			}
+			pendingFullscreen_ = fullscreen;
+			if (native_handle()) pf::platform_win::set_fullscreen(native_, fullscreen);
 		}
 
 		void set_maximized(const bool maximized) override
 		{
-			if (fullscreen_) set_fullscreen(false);
-			ShowWindow(window_, maximized ? SW_MAXIMIZE : SW_RESTORE);
+			pendingMaximized_ = maximized;
+			if (native_handle())
+			{
+				auto placement = native_->get_placement();
+				placement.maximized = maximized;
+				native_->set_placement(placement);
+			}
 		}
 
 		WindowPlacement placement() const override
 		{
-			WINDOWPLACEMENT value{sizeof(value)};
-			if (fullscreen_ && normalPlacement_.length) value = normalPlacement_;
-			else if (!GetWindowPlacement(window_, &value)) return {};
-			return {
-				{
-					value.rcNormalPosition.left, value.rcNormalPosition.top,
-					value.rcNormalPosition.right - value.rcNormalPosition.left,
-					value.rcNormalPosition.bottom - value.rcNormalPosition.top
-				},
-				value.showCmd == SW_SHOWMAXIMIZED
-			};
+			if (!native_) return {pendingBounds_, pendingMaximized_};
+			const auto value = native_->get_placement();
+			return {{value.normal_bounds.left, value.normal_bounds.top,
+			         value.normal_bounds.width(), value.normal_bounds.height()}, value.maximized};
 		}
 
-		void set_accelerators(const std::span<const CommandAccelerator> accelerators) override
-		{
-			if (accelerators_)
-			{
-				DestroyAcceleratorTable(accelerators_);
-				accelerators_ = nullptr;
-			}
-			std::vector<ACCEL> native;
-			native.reserve(accelerators.size());
-			for (const auto& accelerator : accelerators)
-			{
-				WORD key{};
-				switch (accelerator.shortcut.key)
-				{
-				case ShortcutKey::a: key = L'A'; break;
-				case ShortcutKey::b: key = L'B'; break;
-				case ShortcutKey::c: key = L'C'; break;
-				case ShortcutKey::e: key = L'E'; break;
-				case ShortcutKey::n: key = L'N'; break;
-				case ShortcutKey::o: key = L'O'; break;
-				case ShortcutKey::r: key = L'R'; break;
-				case ShortcutKey::v: key = L'V'; break;
-				case ShortcutKey::x: key = L'X'; break;
-				case ShortcutKey::z: key = L'Z'; break;
-				case ShortcutKey::deleteKey: key = VK_DELETE; break;
-				case ShortcutKey::enterKey: key = VK_RETURN; break;
-				case ShortcutKey::f1: key = VK_F1; break;
-				case ShortcutKey::f2: key = VK_F2; break;
-				case ShortcutKey::f3: key = VK_F3; break;
-				case ShortcutKey::f4: key = VK_F4; break;
-				case ShortcutKey::f5: key = VK_F5; break;
-				case ShortcutKey::f6: key = VK_F6; break;
-				case ShortcutKey::f7: key = VK_F7; break;
-				case ShortcutKey::f8: key = VK_F8; break;
-				case ShortcutKey::f9: key = VK_F9; break;
-				case ShortcutKey::f11: key = VK_F11; break;
-				case ShortcutKey::f12: key = VK_F12; break;
-				default: break;
-				}
-				if (!key || !accelerator.command) continue;
-				BYTE flags = FVIRTKEY;
-				if (accelerator.shortcut.control) flags |= FCONTROL;
-				if (accelerator.shortcut.shift) flags |= FSHIFT;
-				if (accelerator.shortcut.alt) flags |= FALT;
-				native.push_back({flags, key, accelerator.command});
-			}
-			if (!native.empty())
-				accelerators_ = CreateAcceleratorTableW(native.data(), static_cast<int>(native.size()));
-		}
-
-		bool translate_accelerator(MSG& message) const
-		{
-			wchar_t className[32]{};
-			if (GetClassNameW(message.hwnd, className, static_cast<int>(std::size(className))) &&
-				_wcsicmp(className, L"EDIT") == 0)
-				return false;
-			return accelerators_ && TranslateAcceleratorW(window_, accelerators_, &message);
-		}
-
-		void close() override { DestroyWindow(window_); }
-
+		void set_accelerators(const std::span<const CommandAccelerator>) override {}
+		void close() override { if (native_) native_->close(); }
 		unsigned int dpi() const override
 		{
-			using GetDpiForWindowFn = UINT(WINAPI*)(HWND);
-			static const auto getDpiForWindow = reinterpret_cast<GetDpiForWindowFn>(
-				GetProcAddress(GetModuleHandleW(L"user32.dll"), "GetDpiForWindow"));
-			if (getDpiForWindow) return getDpiForWindow(window_);
-			const HDC dc = GetDC(window_);
-			const UINT value = dc ? static_cast<UINT>(GetDeviceCaps(dc, LOGPIXELSX)) : USER_DEFAULT_SCREEN_DPI;
-			if (dc) ReleaseDC(window_, dc);
-			return value;
+			return native_ ? static_cast<unsigned int>(native_->get_dpi_scale() * 96.0 + 0.5) : 96;
+		}
+
+		const pf::window_frame_ptr& native_frame() const { return native_; }
+		const FrameReactorPtr& reactor() const { return reactor_; }
+
+		void apply_pending()
+		{
+			if (!native_) return;
+			if (!pendingTitle_.empty()) native_->set_text(pf::utf16_to_utf8(pendingTitle_));
+			if (pendingBounds_.width > 0 && pendingBounds_.height > 0)
+				native_->move_window({pendingBounds_.x, pendingBounds_.y,
+				                      pendingBounds_.right(), pendingBounds_.bottom()});
+			if (pendingMaximized_)
+			{
+				auto value = native_->get_placement();
+				value.maximized = true;
+				native_->set_placement(value);
+			}
+			if (pendingFullscreen_) pf::platform_win::set_fullscreen(native_, true);
 		}
 
 	private:
-		static pointi message_point(const LPARAM value)
-		{
-			return {static_cast<short>(LOWORD(value)), static_cast<short>(HIWORD(value))};
-		}
+		pf::window_frame_ptr native_;
+		FrameReactorPtr reactor_;
+		app::recti pendingBounds_{};
+		std::wstring pendingTitle_;
+		bool pendingVisible_{true};
+		bool pendingFullscreen_{};
+		bool pendingMaximized_{};
+	};
 
-		static KeyCode key_code(const WPARAM value)
+	std::uint32_t LibdesktopReactor::handle_message(pf::window_frame_ptr,
+	                                                const pf::message_type message,
+	                                                const pf::message_params& params)
+	{
+		const auto owner = owner_.lock();
+		if (!owner || !owner->reactor()) return 0;
+		const auto frame = std::static_pointer_cast<WindowFrame>(owner);
+		MessageResult result = 0;
+		switch (message)
 		{
-			switch (value)
+		case pf::message_type::create: result = owner->reactor()->message(frame, WindowMessage::create); break;
+		case pf::message_type::destroy: result = owner->reactor()->message(frame, WindowMessage::destroy); break;
+		case pf::message_type::close: result = owner->reactor()->message(frame, WindowMessage::close); break;
+		case pf::message_type::dpi_changed:
+			result = owner->reactor()->message(frame, WindowMessage::dpiChanged);
+			break;
+		case pf::message_type::set_focus:
+			result = owner->reactor()->message(frame, WindowMessage::focusGained);
+			break;
+		case pf::message_type::kill_focus:
+			result = owner->reactor()->message(frame, WindowMessage::focusLost);
+			break;
+		case pf::message_type::timer:
+			result = owner->reactor()->message(frame, WindowMessage::timer);
+			break;
+		case pf::message_type::drop_files:
+		{
+			FileDrop drop;
+			drop.point = {};
+			for (const auto& path : params.dropped_paths)
+				drop.files.emplace_back(pf::utf8_to_utf16(path.view()));
+			result = owner->reactor()->files_dropped(frame, drop);
+			break;
+		}
+		default: break;
+		}
+		if (message == pf::message_type::create) owner->apply_pending();
+		return static_cast<std::uint32_t>(result);
+	}
+
+	std::uint32_t LibdesktopReactor::handle_mouse(pf::window_frame_ptr,
+	                                              const pf::mouse_message_type message,
+	                                              const pf::mouse_params& params)
+	{
+		const auto owner = owner_.lock();
+		if (!owner || !owner->reactor()) return 0;
+		const auto frame = std::static_pointer_cast<WindowFrame>(owner);
+		MouseInput input;
+		input.point = {params.point.x, params.point.y};
+		const auto screen = owner->client_to_screen(input.point);
+		input.screenPoint = screen;
+		input.leftButton = params.left_button;
+		input.control = params.control;
+		input.shift = params.shift;
+		input.wheelDelta = params.wheel_delta;
+		MouseMessage translated = MouseMessage::move;
+		switch (message)
+		{
+		case pf::mouse_message_type::left_button_down: translated = MouseMessage::leftButtonDown; break;
+		case pf::mouse_message_type::left_button_dbl_clk: translated = MouseMessage::leftButtonDoubleClick; break;
+		case pf::mouse_message_type::right_button_down: translated = MouseMessage::rightButtonDown; break;
+		case pf::mouse_message_type::left_button_up: translated = MouseMessage::leftButtonUp; break;
+		case pf::mouse_message_type::mouse_move: translated = MouseMessage::move; break;
+		case pf::mouse_message_type::mouse_wheel: translated = MouseMessage::wheel; break;
+		case pf::mouse_message_type::mouse_leave: translated = MouseMessage::leave; break;
+		default: translated = MouseMessage::contextMenu; break;
+		}
+		return static_cast<std::uint32_t>(owner->reactor()->mouse(frame, translated, input));
+	}
+
+	std::uint32_t LibdesktopReactor::handle_keyboard(pf::window_frame_ptr,
+	                                                 const pf::keyboard_message_type message,
+	                                                 const pf::keyboard_params& params)
+	{
+		const auto owner = owner_.lock();
+		if (!owner || !owner->reactor() || message == pf::keyboard_message_type::key_up) return 0;
+		const auto frame = std::static_pointer_cast<WindowFrame>(owner);
+		KeyInput input;
+		input.key = [vk = params.vk]
+		{
+			switch (vk)
 			{
-			case VK_LEFT: return KeyCode::left;
-			case VK_RIGHT: return KeyCode::right;
-			case VK_UP: return KeyCode::up;
-			case VK_DOWN: return KeyCode::down;
-			case VK_HOME: return KeyCode::home;
-			case VK_END: return KeyCode::end;
-			case VK_PRIOR: return KeyCode::pageUp;
-			case VK_NEXT: return KeyCode::pageDown;
-			case VK_SPACE: return KeyCode::space;
-			case VK_DELETE: return KeyCode::deleteKey;
-			case VK_F2: return KeyCode::f2;
-			case VK_RETURN: return KeyCode::enter;
-			case VK_ESCAPE: return KeyCode::escape;
-			case VK_DIVIDE:
-			case VK_OEM_2: return KeyCode::divide;
-			case VK_MULTIPLY: return KeyCode::multiply;
-			case VK_ADD:
-			case VK_OEM_PLUS: return KeyCode::add;
-			case VK_SUBTRACT:
-			case VK_OEM_MINUS: return KeyCode::subtract;
+			case pf::platform_key::Left: return KeyCode::left;
+			case pf::platform_key::Right: return KeyCode::right;
+			case pf::platform_key::Up: return KeyCode::up;
+			case pf::platform_key::Down: return KeyCode::down;
+			case pf::platform_key::Home: return KeyCode::home;
+			case pf::platform_key::End: return KeyCode::end;
+			case pf::platform_key::Prior: return KeyCode::pageUp;
+			case pf::platform_key::Next: return KeyCode::pageDown;
+			case pf::platform_key::Space: return KeyCode::space;
+			case pf::platform_key::Delete: return KeyCode::deleteKey;
+			case pf::platform_key::F2: return KeyCode::f2;
+			case pf::platform_key::Return: return KeyCode::enter;
+			case pf::platform_key::Escape: return KeyCode::escape;
+			case pf::platform_key::Divide: return KeyCode::divide;
+			case pf::platform_key::Multiply: return KeyCode::multiply;
+			case pf::platform_key::Add: return KeyCode::add;
+			case pf::platform_key::Subtract: return KeyCode::subtract;
 			default: return KeyCode::unknown;
 			}
-		}
+		}();
+		input.character = params.ch <= 0xffff ? static_cast<wchar_t>(params.ch) : L'\ufffd';
+		input.control = owner->native_frame()->is_key_down_async(pf::platform_key::Control);
+		input.shift = owner->native_frame()->is_key_down_async(pf::platform_key::Shift);
+		input.alt = owner->native_frame()->is_key_down_async(pf::platform_key::Alt);
+		return static_cast<std::uint32_t>(owner->reactor()->key(frame,
+			message == pf::keyboard_message_type::char_input ? KeyMessage::character : KeyMessage::down,
+			input));
+	}
 
-		static LRESULT CALLBACK window_proc(const HWND window, const UINT message,
-		                                    const WPARAM wparam, const LPARAM lparam) noexcept
-		{
-			try
-			{
-				auto* frame = reinterpret_cast<WinWindowFrame*>(GetWindowLongPtrW(window, GWLP_USERDATA));
-				if (message == WM_NCCREATE)
-				{
-					frame = static_cast<WinWindowFrame*>(reinterpret_cast<CREATESTRUCTW*>(lparam)->lpCreateParams);
-					frame->window_ = window;
-					SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(frame));
-				}
-				return frame ? frame->dispatch(message, wparam, lparam) : DefWindowProcW(window, message, wparam, lparam);
-			}
-			catch (...) { return DefWindowProcW(window, message, wparam, lparam); }
-		}
+	std::uint32_t LibdesktopReactor::handle_gesture(pf::window_frame_ptr,
+	                                                const pf::gesture_params& params)
+	{
+		const auto owner = owner_.lock();
+		if (!owner || !owner->reactor()) return 0;
+		const auto frame = std::static_pointer_cast<WindowFrame>(owner);
+		GestureInput input;
+		input.kind = params.kind == pf::gesture_kind::zoom ? GestureKind::zoom : GestureKind::pan;
+		input.point = {params.point.x, params.point.y};
+		input.argument = params.argument;
+		input.begin = params.begin;
+		input.end = params.end;
+		return static_cast<std::uint32_t>(owner->reactor()->gesture(frame, input));
+	}
 
-		LRESULT dispatch(const UINT message, const WPARAM wparam, const LPARAM lparam)
+	void LibdesktopReactor::handle_paint(pf::window_frame_ptr&, pf::draw_context& draw)
+	{
+		const auto owner = owner_.lock();
+		if (!owner || !owner->reactor()) return;
+		LibdesktopDrawContext context(draw);
+		auto frame = std::static_pointer_cast<WindowFrame>(owner);
+		owner->reactor()->paint(frame, context);
+	}
+
+	void LibdesktopReactor::handle_size(pf::window_frame_ptr&, const pf::isize extent,
+	                                    pf::measure_context& measure)
+	{
+		const auto owner = owner_.lock();
+		if (!owner || !owner->reactor()) return;
+		LibdesktopMeasureContext context(measure);
+		auto frame = std::static_pointer_cast<WindowFrame>(owner);
+		owner->reactor()->size(frame, {extent.cx, extent.cy}, context);
+	}
+
+	void show_popup_menu_pf(const WindowFramePtr& owner, const app::pointi screenPoint,
+	                        const std::span<const PopupItem> items)
+	{
+		const auto frame = std::dynamic_pointer_cast<LibdesktopWindowFrame>(owner);
+		if (!frame) return;
+		std::vector<pf::menu_command> commands;
+		int nextId = 1;
+		for (const auto& item : items)
 		{
-			const auto self = self_;
-			if (!self) return DefWindowProcW(window_, message, wparam, lparam);
-			if (message == WM_NCDESTROY)
+			if (item.separator)
 			{
-				const HWND window = window_;
-				SetWindowLongPtrW(window, GWLP_USERDATA, 0);
-				window_ = nullptr;
-				self_.reset();
-				return DefWindowProcW(window, message, wparam, lparam);
+				commands.emplace_back();
+				continue;
 			}
-			if (!reactor_) return DefWindowProcW(window_, message, wparam, lparam);
-			if (message == WM_ERASEBKGND && !eraseBackground_) return 1;
-			if (message == WM_PAINT)
+			if (!item.command) continue;
+			const auto command = item.command;
+			commands.emplace_back(
+				pf::utf16_to_utf8(item.label), nextId++,
+				[command] { if (command->invoke) command->invoke(); },
+				command->enabled, command->checked);
+		}
+		frame->native_frame()->show_popup_menu(commands, {screenPoint.x, screenPoint.y});
+	}
+
+	namespace
+	{
+		pf::key_binding to_pf_key(const Shortcut shortcut)
+		{
+			unsigned int key = 0;
+			switch (shortcut.key)
 			{
-				PAINTSTRUCT paint{};
-				const HDC dc = BeginPaint(window_, &paint);
-				RECT client{};
-				GetClientRect(window_, &client);
-				const recti clip{
-					paint.rcPaint.left, paint.rcPaint.top,
-					paint.rcPaint.right - paint.rcPaint.left,
-					paint.rcPaint.bottom - paint.rcPaint.top
-				};
-				const int width = client.right - client.left;
-				const int height = client.bottom - client.top;
-				if (!drawContext_ || !drawContext_->reusable(width, height))
-					drawContext_ = std::make_unique<WinDrawContext>(dc, clip, width, height);
-				else drawContext_->begin(dc, clip);
-				try
-				{
-					reactor_->paint(self, *drawContext_);
-					drawContext_->present();
-				}
-				catch (...)
-				{
-					EndPaint(window_, &paint);
-					throw;
-				}
-				EndPaint(window_, &paint);
-				return 0;
-			}
-			if (message == WM_SIZE)
-			{
-				const HDC dc = GetDC(window_);
-				WinMeasureContext context(dc);
-				try { reactor_->size(self, {LOWORD(lparam), HIWORD(lparam)}, context); }
-				catch (...)
-				{
-					ReleaseDC(window_, dc);
-					throw;
-				}
-				ReleaseDC(window_, dc);
-				return 0;
-			}
-			if (message == WM_DPICHANGED)
-			{
-				const auto* suggested = reinterpret_cast<const RECT*>(lparam);
-				SetWindowPos(window_, nullptr, suggested->left, suggested->top,
-				             suggested->right - suggested->left, suggested->bottom - suggested->top,
-				             SWP_NOZORDER | SWP_NOACTIVATE);
-				return reactor_->message(self, WindowMessage::dpiChanged);
-			}
-			switch (message)
-			{
-			case WM_LBUTTONDOWN:
-			case WM_LBUTTONDBLCLK:
-			case WM_RBUTTONDOWN:
-			case WM_LBUTTONUP:
-			case WM_MOUSEMOVE:
-			case WM_MOUSELEAVE:
-			case WM_MOUSEWHEEL:
-			case WM_CONTEXTMENU:
-				return dispatch_mouse(self, message, wparam, lparam);
+			case ShortcutKey::a: key = 'A'; break;
+			case ShortcutKey::b: key = 'B'; break;
+			case ShortcutKey::c: key = 'C'; break;
+			case ShortcutKey::e: key = 'E'; break;
+			case ShortcutKey::n: key = 'N'; break;
+			case ShortcutKey::o: key = 'O'; break;
+			case ShortcutKey::r: key = 'R'; break;
+			case ShortcutKey::v: key = 'V'; break;
+			case ShortcutKey::x: key = 'X'; break;
+			case ShortcutKey::z: key = 'Z'; break;
+			case ShortcutKey::deleteKey: key = pf::platform_key::Delete; break;
+			case ShortcutKey::enterKey: key = pf::platform_key::Return; break;
+			case ShortcutKey::f1: key = pf::platform_key::F1; break;
+			case ShortcutKey::f2: key = pf::platform_key::F2; break;
+			case ShortcutKey::f3: key = pf::platform_key::F3; break;
+			case ShortcutKey::f4: key = pf::platform_key::F4; break;
+			case ShortcutKey::f5: key = pf::platform_key::F5; break;
+			case ShortcutKey::f6: key = pf::platform_key::F6; break;
+			case ShortcutKey::f7: key = pf::platform_key::F7; break;
+			case ShortcutKey::f8: key = pf::platform_key::F8; break;
+			case ShortcutKey::f9: key = pf::platform_key::F9; break;
+			case ShortcutKey::f11: key = pf::platform_key::F11; break;
+			case ShortcutKey::f12: key = pf::platform_key::F12; break;
 			default: break;
 			}
-			if (message == WM_KEYDOWN || message == WM_CHAR)
+			std::uint8_t modifiers = pf::key_mod::none;
+			if (shortcut.control) modifiers |= pf::key_mod::ctrl;
+			if (shortcut.shift) modifiers |= pf::key_mod::shift;
+			if (shortcut.alt) modifiers |= pf::key_mod::alt;
+			return {key, modifiers};
+		}
+
+		pf::menu_command to_pf_menu_item(const MenuItem& item)
+		{
+			pf::menu_command result;
+			if (item.kind == MenuItemKind::separator) return result;
+			if (item.kind == MenuItemKind::submenu)
 			{
-				const wchar_t character = message == WM_KEYDOWN &&
-				                          ((wparam >= L'0' && wparam <= L'9') || (wparam >= L'A' && wparam <= L'Z'))
-					                          ? static_cast<wchar_t>(wparam)
-					                          : message == WM_CHAR
-					                          ? static_cast<wchar_t>(wparam)
-					                          : L'\0';
-				const KeyInput input{
-					key_code(wparam), character,
-					(GetKeyState(VK_CONTROL) & 0x8000) != 0,
-					(GetKeyState(VK_SHIFT) & 0x8000) != 0,
-					(GetKeyState(VK_MENU) & 0x8000) != 0
-				};
-				return reactor_->key(self, message == WM_KEYDOWN ? KeyMessage::down : KeyMessage::character, input);
-			}
-			if (message == WM_GESTURE)
-			{
-				GESTUREINFO gesture{sizeof(gesture)};
-				if (GetGestureInfo(reinterpret_cast<HGESTUREINFO>(lparam), &gesture))
-				{
-					POINT location{gesture.ptsLocation.x, gesture.ptsLocation.y};
-					ScreenToClient(window_, &location);
-					const GestureInput input{
-						gesture.dwID == GID_PAN ? GestureKind::pan : GestureKind::zoom,
-						{location.x, location.y}, gesture.ullArguments,
-						(gesture.dwFlags & GF_BEGIN) != 0, (gesture.dwFlags & GF_END) != 0
-					};
-					MessageResult result{};
-					try { result = reactor_->gesture(self, input); }
-					catch (...)
-					{
-						CloseGestureInfoHandle(reinterpret_cast<HGESTUREINFO>(lparam));
-						throw;
-					}
-					CloseGestureInfoHandle(reinterpret_cast<HGESTUREINFO>(lparam));
-					return result;
-				}
-				CloseGestureInfoHandle(reinterpret_cast<HGESTUREINFO>(lparam));
-				return 0;
-			}
-			if (message == WM_DROPFILES)
-			{
-				const auto drop = reinterpret_cast<HDROP>(wparam);
-				POINT location{};
-				DragQueryPoint(drop, &location);
-				const FileDrop dropped{win32::dropped_files(drop), {location.x, location.y}};
-				DragFinish(drop);
-				return reactor_->files_dropped(self, dropped);
-			}
-			// Activation focuses the top-level window itself, so remember which descendant
-			// had the keyboard on the way out and hand it back on the way in. With nothing
-			// to restore, focusGained lets the reactor choose its default control.
-			if (topLevel_ && message == WM_ACTIVATE && LOWORD(wparam) == WA_INACTIVE)
-			{
-				const HWND focus = GetFocus();
-				if (focus && IsChild(window_, focus)) lastFocus_ = focus;
-			}
-			if (topLevel_ && message == WM_SETFOCUS && lastFocus_)
-			{
-				const HWND restore = lastFocus_;
-				lastFocus_ = nullptr;
-				if (IsWindow(restore) && IsChild(window_, restore) && IsWindowVisible(restore) &&
-				    IsWindowEnabled(restore))
-				{
-					SetFocus(restore);
-					return 0;
-				}
-			}
-			std::optional<WindowMessage> mapped;
-			switch (message)
-			{
-			case WM_CREATE: mapped = WindowMessage::create;
-				break;
-			case WM_DESTROY: mapped = WindowMessage::destroy;
-				break;
-			case WM_CLOSE: mapped = WindowMessage::close;
-				break;
-			case WM_SETFOCUS: mapped = WindowMessage::focusGained;
-				break;
-			case WM_KILLFOCUS: mapped = WindowMessage::focusLost;
-				break;
-			case WM_CAPTURECHANGED: mapped = WindowMessage::captureLost;
-				break;
-			case WM_TIMER: mapped = WindowMessage::timer;
-				break;
-			default: break;
-			}
-			if (mapped)
-			{
-				const auto result = reactor_->message(self, *mapped);
-				if (message == WM_DESTROY && topLevel_) PostQuitMessage(0);
+				result.text = pf::utf16_to_utf8(item.name);
+				for (const auto& child : item.children)
+					result.children.push_back(to_pf_menu_item(child));
 				return result;
 			}
-			return DefWindowProcW(window_, message, wparam, lparam);
+			if (!item.command) return result;
+			const auto command = item.command;
+			result.text = pf::utf16_to_utf8(command->name);
+			result.id = 1;
+			result.action = [command] { if (command->invoke) command->invoke(); };
+			result.is_enabled = command->enabled;
+			result.is_checked = command->checked;
+			result.accel = to_pf_key(command->shortcut);
+			return result;
 		}
+	}
 
-		MessageResult dispatch_mouse(const WindowFramePtr& self, const UINT message,
-		                             const WPARAM wparam, const LPARAM lparam)
+	void set_frame_menu(const WindowFramePtr& owner, const std::vector<Menu> menus)
+	{
+		const auto frame = std::dynamic_pointer_cast<LibdesktopWindowFrame>(owner);
+		if (!frame) return;
+		std::vector<pf::menu_command> menu;
+		menu.reserve(menus.size());
+		for (const auto& top : menus)
 		{
-			const pointi messagePoint = message_point(lparam);
-			pointi clientPoint = messagePoint;
-			pointi screenPoint = messagePoint;
-			if (message == WM_MOUSEWHEEL || message == WM_CONTEXTMENU)
-			{
-				if (message == WM_CONTEXTMENU && messagePoint.x == -1 && messagePoint.y == -1)
-				{
-					POINT cursor{};
-					GetCursorPos(&cursor);
-					screenPoint = {cursor.x, cursor.y};
-				}
-				POINT point{screenPoint.x, screenPoint.y};
-				ScreenToClient(window_, &point);
-				clientPoint = {point.x, point.y};
-			}
-			else
-			{
-				POINT point{clientPoint.x, clientPoint.y};
-				ClientToScreen(window_, &point);
-				screenPoint = {point.x, point.y};
-			}
-			MouseInput mouseInput{
-				clientPoint, screenPoint, (wparam & MK_LBUTTON) != 0,
-				(wparam & MK_CONTROL) != 0, (wparam & MK_SHIFT) != 0, 0
-			};
-			switch (message)
-			{
-			case WM_LBUTTONDOWN: return reactor_->mouse(self, MouseMessage::leftButtonDown, mouseInput);
-			case WM_LBUTTONDBLCLK: return reactor_->mouse(self, MouseMessage::leftButtonDoubleClick, mouseInput);
-			case WM_RBUTTONDOWN: return reactor_->mouse(self, MouseMessage::rightButtonDown, mouseInput);
-			case WM_LBUTTONUP: return reactor_->mouse(self, MouseMessage::leftButtonUp, mouseInput);
-			case WM_MOUSEMOVE: return reactor_->mouse(self, MouseMessage::move, mouseInput);
-			case WM_MOUSELEAVE: return reactor_->mouse(self, MouseMessage::leave, mouseInput);
-			case WM_MOUSEWHEEL:
-				mouseInput.wheelDelta = static_cast<short>(HIWORD(wparam));
-				return reactor_->mouse(self, MouseMessage::wheel, mouseInput);
-			default: return reactor_->mouse(self, MouseMessage::contextMenu, mouseInput);
-			}
+			pf::menu_command item;
+			item.text = pf::utf16_to_utf8(top.name);
+			for (const auto& child : top.items) item.children.push_back(to_pf_menu_item(child));
+			menu.push_back(std::move(item));
 		}
+		frame->native_frame()->set_menu(std::move(menu));
+	}
 
-		HWND window_{};
-		HWND lastFocus_{};
-		std::unique_ptr<WinDrawContext> drawContext_;
-		FrameReactorPtr reactor_;
-		WindowFramePtr self_;
-		WINDOWPLACEMENT normalPlacement_{};
-		DWORD normalStyle_{};
-		bool eraseBackground_{true};
-		bool topLevel_{};
-		bool fullscreen_{};
-		HACCEL accelerators_{};
-	};
+	pf::window_frame_ptr native_frame(const WindowFramePtr& owner)
+	{
+		if (const auto frame = std::dynamic_pointer_cast<LibdesktopWindowFrame>(owner))
+			return frame->native_frame();
+		return {};
+	}
+
+	pf::window_frame_ptr pendingMainFrame;
+
+	void bind_main_frame(const pf::window_frame_ptr& frame)
+	{
+		pendingMainFrame = frame;
+	}
 
 	WindowFramePtr create_top_level_frame(FrameReactorPtr reactor, const WindowOptions& options)
 	{
-		return WinWindowFrame::create(nullptr, std::move(reactor), options);
+		if (pendingMainFrame)
+		{
+			auto frame = std::make_shared<LibdesktopWindowFrame>(std::exchange(pendingMainFrame, nullptr));
+			frame->set_reactor(std::move(reactor));
+			frame->set_title(options.title);
+			frame->move(options.bounds);
+			frame->show(options.visible);
+			frame->set_maximized(options.maximized);
+			return frame;
+		}
+		auto frame = std::make_shared<LibdesktopWindowFrame>(
+			std::make_shared<pf::ui::test::fake_window_frame>());
+		frame->set_reactor(std::move(reactor));
+		frame->set_title(options.title);
+		frame->move(options.bounds);
+		frame->show(options.visible);
+		frame->set_maximized(options.maximized);
+		return frame;
 	}
 
 	BitmapResource load_bitmap_resource(const BitmapAsset asset)
 	{
 		BitmapResource result;
-		const int resource = [asset]
+		const auto name = [asset]
 		{
 			switch (asset)
 			{
-			case BitmapAsset::fileFolder: return IDB_FILE_FOLDER;
-			case BitmapAsset::filePhoto: return IDB_FILE_PHOTO;
-			case BitmapAsset::fileDocument: return IDB_FILE_DOCUMENT;
-			case BitmapAsset::fileVideo: return IDB_FILE_VIDEO;
-			case BitmapAsset::fileAudio: return IDB_FILE_AUDIO;
-			case BitmapAsset::fileOther: return IDB_FILE_OTHER;
-			case BitmapAsset::toolbarSymbols: return IDB_TOOLBAR_SYMBOLS;
-			default: return IDB_STATUS_SYMBOLS;
+			case BitmapAsset::fileFolder: return "folder.bmp";
+			case BitmapAsset::filePhoto: return "photo.bmp";
+			case BitmapAsset::fileDocument: return "document.bmp";
+			case BitmapAsset::fileVideo: return "video.bmp";
+			case BitmapAsset::fileAudio: return "audio.bmp";
+			case BitmapAsset::fileOther: return "other.bmp";
+			case BitmapAsset::toolbarSymbols: return "ToolbarSymbols.bmp";
+			default: return "status-symbols.bmp";
 			}
 		}();
-		const auto bitmap = static_cast<HBITMAP>(LoadImageW(resourceInstance, MAKEINTRESOURCEW(resource), IMAGE_BITMAP,
-		                                                    0, 0, LR_CREATEDIBSECTION));
-		if (!bitmap) return result;
-		BITMAP value{};
-		if (GetObjectW(bitmap, sizeof(value), &value) == sizeof(value) && value.bmWidth > 0 && value.bmHeight != 0)
+		const auto bytes = pf::embedded_resource_data(name);
+		const auto bitmap = bytes.empty() ? pf::bitmap_ptr{} : pf::load_bitmap_memory(bytes.data(), bytes.size());
+		if (!bitmap || bitmap->empty()) return result;
+		result.size = {bitmap->width, bitmap->height};
+		result.pixels = bitmap->pixels;
+		result.hasAlpha = std::ranges::any_of(result.pixels, [](const std::uint32_t pixel)
 		{
-			result.size = {value.bmWidth, std::abs(value.bmHeight)};
-			result.pixels.resize(static_cast<size_t>(result.size.width) * result.size.height);
-			BITMAPINFO info{};
-			info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-			info.bmiHeader.biWidth = result.size.width;
-			info.bmiHeader.biHeight = -result.size.height;
-			info.bmiHeader.biPlanes = 1;
-			info.bmiHeader.biBitCount = 32;
-			info.bmiHeader.biCompression = BI_RGB;
-			const HDC dc = GetDC(nullptr);
-			if (!dc || GetDIBits(dc, bitmap, 0, result.size.height, result.pixels.data(), &info, DIB_RGB_COLORS) !=
-				result.size.height)
-				result = {};
-			if (dc) ReleaseDC(nullptr, dc);
-		}
-		DeleteObject(bitmap);
-		const bool missingAlpha = std::ranges::none_of(result.pixels, [](const std::uint32_t pixel)
-		{
-			return (pixel & 0xff000000) != 0;
+			return (pixel >> 24) != 0xff;
 		});
-		if (missingAlpha) for (auto& pixel : result.pixels) pixel |= 0xff000000;
-		else
-			result.hasAlpha = std::ranges::any_of(result.pixels, [](const std::uint32_t pixel)
-			{
-				return (pixel & 0xff000000) != 0xff000000;
-			});
+		if (!result.hasAlpha)
+			for (auto& pixel : result.pixels) pixel |= 0xff000000;
 		return result;
-	}
-
-	namespace
-	{
-		std::optional<std::filesystem::path> shell_item_path(IShellItem* item)
-		{
-			PWSTR value = nullptr;
-			if (!item || FAILED(item->GetDisplayName(SIGDN_FILESYSPATH, &value))) return std::nullopt;
-			std::filesystem::path result(value);
-			CoTaskMemFree(value);
-			return result;
-		}
-
-		std::wstring path_list(const std::span<const std::filesystem::path> paths)
-		{
-			std::wstring result;
-			for (const auto& path : paths)
-			{
-				if (path.empty()) continue;
-				result += path.wstring();
-				result.push_back(L'\0');
-			}
-			if (!result.empty()) result.push_back(L'\0');
-			return result;
-		}
-
-		const std::filesystem::path& settings_path()
-		{
-			static const std::filesystem::path path = []
-			{
-				std::wstring modulePath(MAX_PATH, L'\0');
-				for (;;)
-				{
-					const DWORD length = GetModuleFileNameW(nullptr, modulePath.data(),
-					                                        static_cast<DWORD>(modulePath.size()));
-					if (!length) return std::filesystem::path(L"imagewalker30.ini");
-					if (length < modulePath.size())
-					{
-						modulePath.resize(length);
-						auto destination = std::filesystem::path(modulePath);
-						destination.replace_extension(L".ini");
-						const auto legacy = destination.parent_path() / L"imagewalker.ini";
-						if (GetFileAttributesW(destination.c_str()) == INVALID_FILE_ATTRIBUTES &&
-							GetFileAttributesW(legacy.c_str()) != INVALID_FILE_ATTRIBUTES &&
-							!CopyFileW(legacy.c_str(), destination.c_str(), TRUE) &&
-							GetLastError() != ERROR_FILE_EXISTS)
-							write_diagnostic(L"Unable to migrate legacy ImageWalker settings.\n");
-						return destination;
-					}
-					if (modulePath.size() >= 32768) return std::filesystem::path(L"imagewalker30.ini");
-					modulePath.resize(modulePath.size() * 2);
-				}
-			}();
-			return path;
-		}
-
-		HBITMAP bitmap_from_dib(const HGLOBAL data)
-		{
-			if (!data) return nullptr;
-			const SIZE_T bytes = GlobalSize(data);
-			const auto* memory = static_cast<const BYTE*>(GlobalLock(data));
-			if (!memory || bytes < sizeof(BITMAPINFOHEADER))
-			{
-				if (memory) GlobalUnlock(data);
-				return nullptr;
-			}
-			const auto* header = reinterpret_cast<const BITMAPINFOHEADER*>(memory);
-			size_t pixelOffset = header->biSize;
-			if (header->biSize < sizeof(BITMAPINFOHEADER) || pixelOffset > bytes || header->biWidth <= 0 ||
-				header->biHeight == 0 || header->biHeight == (std::numeric_limits<LONG>::min)() ||
-				header->biPlanes != 1 ||
-				(header->biBitCount != 1 && header->biBitCount != 4 && header->biBitCount != 8 &&
-				 header->biBitCount != 16 && header->biBitCount != 24 && header->biBitCount != 32) ||
-				(header->biCompression != BI_RGB && header->biCompression != BI_BITFIELDS) ||
-				(header->biCompression == BI_BITFIELDS && header->biBitCount != 16 && header->biBitCount != 32))
-			{
-				GlobalUnlock(data);
-				return nullptr;
-			}
-			const size_t masks = header->biSize == sizeof(BITMAPINFOHEADER) &&
-			                     header->biCompression == BI_BITFIELDS ? 3 * sizeof(DWORD) : 0;
-			const size_t colors = header->biClrUsed
-				                      ? header->biClrUsed
-				                      : header->biBitCount <= 8
-				                      ? size_t{1} << header->biBitCount
-				                      : 0;
-			if (masks > bytes - pixelOffset || colors > (bytes - pixelOffset - masks) / sizeof(RGBQUAD))
-			{
-				GlobalUnlock(data);
-				return nullptr;
-			}
-			pixelOffset += masks + colors * sizeof(RGBQUAD);
-			const size_t width = static_cast<size_t>(header->biWidth);
-			const size_t height = static_cast<size_t>(std::abs(static_cast<std::int64_t>(header->biHeight)));
-			if (width > ((std::numeric_limits<size_t>::max)() - 31) / header->biBitCount)
-			{
-				GlobalUnlock(data);
-				return nullptr;
-			}
-			const size_t stride = ((width * header->biBitCount + 31) / 32) * 4;
-			if (height > (bytes - pixelOffset) / stride)
-			{
-				GlobalUnlock(data);
-				return nullptr;
-			}
-			HBITMAP bitmap = nullptr;
-			if (pixelOffset < bytes)
-			{
-				const HDC dc = GetDC(nullptr);
-				if (dc)
-				{
-					bitmap = CreateDIBitmap(dc, header, CBM_INIT, memory + pixelOffset,
-					                        reinterpret_cast<const BITMAPINFO*>(memory), DIB_RGB_COLORS);
-					ReleaseDC(nullptr, dc);
-				}
-			}
-			GlobalUnlock(data);
-			return bitmap;
-		}
-
-		BitmapResource bitmap_resource(const HBITMAP bitmap)
-		{
-			BitmapResource result;
-			BITMAP description{};
-			if (!bitmap || GetObjectW(bitmap, sizeof(description), &description) != sizeof(description) ||
-				description.bmWidth <= 0 || description.bmHeight == 0)
-				return result;
-			result.size = {description.bmWidth, std::abs(description.bmHeight)};
-			const auto bytes = static_cast<std::uint64_t>(result.size.width) * result.size.height * 4;
-			if (bytes > 256ull * 1024 * 1024) return {};
-			result.pixels.resize(static_cast<size_t>(result.size.width) * result.size.height);
-			BITMAPINFO info{};
-			info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-			info.bmiHeader.biWidth = result.size.width;
-			info.bmiHeader.biHeight = -result.size.height;
-			info.bmiHeader.biPlanes = 1;
-			info.bmiHeader.biBitCount = 32;
-			info.bmiHeader.biCompression = BI_RGB;
-			const HDC dc = GetDC(nullptr);
-			const int lines = dc
-				                  ? GetDIBits(dc, bitmap, 0, result.size.height, result.pixels.data(), &info,
-				                              DIB_RGB_COLORS)
-				                  : 0;
-			if (dc) ReleaseDC(nullptr, dc);
-			if (lines != result.size.height) return {};
-			result.hasAlpha = std::ranges::any_of(result.pixels, [](const std::uint32_t pixel)
-			{
-				return (pixel & 0xff000000) != 0;
-			});
-			if (!result.hasAlpha) for (auto& pixel : result.pixels) pixel |= 0xff000000;
-			return result;
-		}
 	}
 
 	namespace
@@ -1316,76 +872,13 @@ namespace iw::platform
 			return queues[static_cast<size_t>(queue)];
 		}
 
-		std::mutex uiWorkMutex;
-		std::deque<std::pair<std::uint64_t, std::function<void()>>> uiWork;
-		std::uint64_t nextUiWorkToken{1};
-		HWND uiWorkWindow{};
-
-		LRESULT CALLBACK ui_work_proc(const HWND window, const UINT message, const WPARAM wparam,
-		                              const LPARAM lparam)
-		{
-			if (message != messageRunUiWork) return DefWindowProcW(window, message, wparam, lparam);
-			std::deque<std::pair<std::uint64_t, std::function<void()>>> batch;
-			{
-				const std::scoped_lock lock(uiWorkMutex);
-				batch.swap(uiWork);
-			}
-			for (auto& [token, work] : batch)
-			{
-				try { work(); }
-				catch (...) {}
-			}
-			return 0;
-		}
-
-		bool start_ui_work_window()
-		{
-			{
-				const std::scoped_lock lock(uiWorkMutex);
-				if (uiWorkWindow) return true;
-			}
-			WNDCLASSEXW description{sizeof(description)};
-			description.lpfnWndProc = ui_work_proc;
-			description.hInstance = resourceInstance;
-			description.lpszClassName = L"ImageWalker30.UiWork";
-			if (!RegisterClassExW(&description) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
-			const HWND window = CreateWindowExW(0, description.lpszClassName, nullptr, 0, 0, 0, 0, 0,
-			                                    HWND_MESSAGE, nullptr, resourceInstance, nullptr);
-			if (!window) return false;
-			const std::scoped_lock lock(uiWorkMutex);
-			uiWorkWindow = window;
-			return true;
-		}
-
-		void stop_ui_work_window()
-		{
-			HWND window{};
-			{
-				const std::scoped_lock lock(uiWorkMutex);
-				window = std::exchange(uiWorkWindow, nullptr);
-				uiWork.clear();
-			}
-			if (window) DestroyWindow(window);
-		}
 	}
 
 	bool queue_ui(std::function<void()> work)
 	{
 		if (!work) return false;
-		HWND target{};
-		std::uint64_t token{};
-		{
-			const std::scoped_lock lock(uiWorkMutex);
-			if (!uiWorkWindow) return false;
-			target = uiWorkWindow;
-			token = nextUiWorkToken++;
-			uiWork.emplace_back(token, std::move(work));
-		}
-		if (PostMessageW(target, messageRunUiWork, 0, 0)) return true;
-		const std::scoped_lock lock(uiWorkMutex);
-		const auto found = std::ranges::find(uiWork, token, &decltype(uiWork)::value_type::first);
-		if (found != uiWork.end()) uiWork.erase(found);
-		return false;
+		pf::run_ui(std::move(work));
+		return true;
 	}
 
 	bool queue_work(const WorkQueue queue, std::function<void()> work)
@@ -1407,6 +900,16 @@ namespace iw::platform
 		return exit_request().get_token();
 	}
 
+	void shutdown_runtime()
+	{
+		exit_request().request_stop();
+		for (const auto queue : {
+			     WorkQueue::image, WorkQueue::thumbnail, WorkQueue::metadata, WorkQueue::folder,
+			     WorkQueue::shell, WorkQueue::task
+		     })
+			serial_queue(queue).stop();
+	}
+
 	int compare_ordinal_ignore_case(const std::wstring_view left, const std::wstring_view right)
 	{
 		const int result = CompareStringOrdinal(left.data(), static_cast<int>(left.size()),
@@ -1426,314 +929,175 @@ namespace iw::platform
 
 	std::optional<std::filesystem::path> choose_folder(const WindowFramePtr& owner, const std::wstring_view title)
 	{
-		const HWND nativeOwner = win32::owner_window(owner);
-		IFileOpenDialog* dialog = nullptr;
-		if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))))
-			return std::nullopt;
-		DWORD options{};
-		dialog->GetOptions(&options);
-		dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
-		const std::wstring titleText(title);
-		dialog->SetTitle(titleText.c_str());
-		std::optional<std::filesystem::path> result;
-		if (SUCCEEDED(dialog->Show(nativeOwner)))
-		{
-			IShellItem* item = nullptr;
-			if (SUCCEEDED(dialog->GetResult(&item)))
-			{
-				result = shell_item_path(item);
-				item->Release();
-			}
-		}
-		dialog->Release();
-		return result;
+		df::folder_path selected;
+		if (!::platform::browse_for_folder(selected)) return std::nullopt;
+		return ::platform::to_stream_path(selected);
 	}
 
 	std::optional<std::filesystem::path> choose_open_file(const WindowFramePtr& owner, const OpenFileOptions& options)
 	{
-		IFileOpenDialog* dialog = nullptr;
-		if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))))
-			return std::nullopt;
-		const std::wstring filterName(options.filterName);
-		const std::wstring filterPattern(options.filterPattern);
-		const COMDLG_FILTERSPEC filters[]{
-			{filterName.c_str(), filterPattern.c_str()},
-			{L"All files", L"*.*"}
+		std::vector<df::file_path> selected;
+		const std::vector<::platform::file_dialog_filter> filters{
+			{::platform::utf16_to_utf8(options.filterName), ::platform::utf16_to_utf8(options.filterPattern)},
+			{"All files", "*.*"}
 		};
-		dialog->SetFileTypes(std::size(filters), filters);
-		DWORD flags{};
-		dialog->GetOptions(&flags);
-		dialog->SetOptions(flags | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_FORCEFILESYSTEM);
-		std::optional<std::filesystem::path> result;
-		if (SUCCEEDED(dialog->Show(win32::owner_window(owner))))
-		{
-			IShellItem* item = nullptr;
-			if (SUCCEEDED(dialog->GetResult(&item)))
-			{
-				result = shell_item_path(item);
-				item->Release();
-			}
-		}
-		dialog->Release();
-		return result;
+		if (!::platform::prompt_for_open_paths(selected, filters, false) || selected.empty())
+			return std::nullopt;
+		return ::platform::to_stream_path(selected.front());
 	}
 
 	std::optional<std::filesystem::path> choose_save_file(const WindowFramePtr& owner, const SaveFileOptions& options)
 	{
-		const HWND nativeOwner = win32::owner_window(owner);
-		IFileSaveDialog* dialog = nullptr;
-		if (FAILED(CoCreateInstance(CLSID_FileSaveDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))))
-			return std::nullopt;
-		const std::wstring filterName(options.filterName);
-		const std::wstring filterPattern(options.filterPattern);
-		const std::wstring defaultExtension(options.defaultExtension);
-		const std::wstring initialName(options.initialName);
-		const COMDLG_FILTERSPEC filter{filterName.c_str(), filterPattern.c_str()};
-		dialog->SetFileTypes(1, &filter);
-		dialog->SetDefaultExtension(defaultExtension.c_str());
-		dialog->SetFileName(initialName.c_str());
-		if (!options.initialFolder.empty())
-		{
-			IShellItem* folder = nullptr;
-			if (SUCCEEDED(SHCreateItemFromParsingName(options.initialFolder.c_str(), nullptr, IID_PPV_ARGS(&folder))))
-			{
-				dialog->SetFolder(folder);
-				folder->Release();
-			}
-		}
-		std::optional<std::filesystem::path> result;
-		if (SUCCEEDED(dialog->Show(nativeOwner)))
-		{
-			IShellItem* item = nullptr;
-			if (SUCCEEDED(dialog->GetResult(&item)))
-			{
-				result = shell_item_path(item);
-				item->Release();
-			}
-		}
-		dialog->Release();
-		return result;
+		df::file_path selected(desktop::file_path(options.initialFolder / options.initialName).pack());
+		const std::vector<::platform::file_dialog_filter> filters{
+			{::platform::utf16_to_utf8(options.filterName), ::platform::utf16_to_utf8(options.filterPattern)}
+		};
+		if (!::platform::prompt_for_save_path(selected, filters)) return std::nullopt;
+		return ::platform::to_stream_path(selected);
 	}
 
 	int read_integer_setting(const std::wstring_view section, const std::wstring_view key, const int fallback)
 	{
-		const std::wstring sectionText(section);
-		const std::wstring keyText(key);
-		return static_cast<int>(GetPrivateProfileIntW(
-			sectionText.c_str(), keyText.c_str(), fallback, settings_path().c_str()));
+		const auto text = pf::config_read(pf::utf16_to_utf8(section), pf::utf16_to_utf8(key),
+		                                  std::to_string(fallback));
+		int value = fallback;
+		const auto first = text.data();
+		const auto last = first + text.size();
+		std::from_chars(first, last, value);
+		return value;
 	}
 
 	void write_integer_settings(const std::wstring_view section, const std::span<const IntegerSetting> values)
 	{
-		const auto path = settings_path();
-		const std::wstring sectionText(section);
 		for (const auto& value : values)
-		{
-			const auto text = std::to_wstring(value.value);
-			WritePrivateProfileStringW(sectionText.c_str(), value.key.c_str(), text.c_str(), path.c_str());
-		}
-		WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str());
+			pf::config_write(pf::utf16_to_utf8(section), pf::utf16_to_utf8(value.key),
+			                 std::to_string(value.value));
+		pf::config_flush();
 	}
 
 	std::wstring read_text_setting(const std::wstring_view section, const std::wstring_view key,
 	                               const std::wstring_view fallback)
 	{
-		const std::wstring sectionText(section);
-		const std::wstring keyText(key);
-		const std::wstring fallbackText(fallback);
-		std::wstring buffer(1024, L'\0');
-		const DWORD written = GetPrivateProfileStringW(sectionText.c_str(), keyText.c_str(), fallbackText.c_str(),
-		                                               buffer.data(), static_cast<DWORD>(buffer.size()),
-		                                               settings_path().c_str());
-		buffer.resize(written);
-		return buffer;
+		return pf::utf8_to_utf16(pf::config_read(pf::utf16_to_utf8(section), pf::utf16_to_utf8(key),
+		                                         pf::utf16_to_utf8(fallback)));
 	}
 
 	void write_text_settings(const std::wstring_view section, const std::span<const TextSetting> values)
 	{
-		const auto path = settings_path();
-		const std::wstring sectionText(section);
 		for (const auto& value : values)
-			WritePrivateProfileStringW(sectionText.c_str(), value.key.c_str(),
-			                           value.value.empty() ? nullptr : value.value.c_str(), path.c_str());
-		WritePrivateProfileStringW(nullptr, nullptr, nullptr, path.c_str());
+			pf::config_write(pf::utf16_to_utf8(section), pf::utf16_to_utf8(value.key),
+			                 pf::utf16_to_utf8(value.value));
+		pf::config_flush();
 	}
 
 	void clear_settings_section(const std::wstring_view section)
 	{
-		const std::wstring sectionText(section);
-		WritePrivateProfileStringW(sectionText.c_str(), nullptr, nullptr, settings_path().c_str());
+		const auto sectionText = pf::utf16_to_utf8(section);
+		// The shared INI API intentionally writes through and does not expose a
+		// destructive section delete.  Clear the bounded list keys used by 3.0;
+		// empty values preserve the portable file and make stale rows invisible.
+		for (int index = 0; index < 256; ++index)
+		{
+			pf::config_write(sectionText, "Path" + std::to_string(index), {});
+			pf::config_write(sectionText, "Collection" + std::to_string(index), {});
+		}
+		for (const auto key : {"WholeCollection", "CollectionCount", "WindowLeft", "WindowTop",
+		                       "WindowWidth", "WindowHeight", "Maximized", "ShowFolderTree",
+		                       "FolderTreeWidth", "ThumbnailSize", "ViewMode", "FitImage",
+		                       "PasteImageFormat"})
+			pf::config_write(sectionText, key, {});
+		pf::config_flush();
 	}
 
 	std::filesystem::path module_folder()
 	{
-		return settings_path().parent_path();
+		return std::filesystem::path(pf::utf8_to_utf16(pf::file_path::module_folder().view()));
 	}
 
 	std::filesystem::path known_folder(const KnownFolder folder)
 	{
-		const KNOWNFOLDERID* identifier = &FOLDERID_Pictures;
+		::platform::known_folder identifier = ::platform::known_folder::pictures;
 		switch (folder)
 		{
-		case KnownFolder::documents: identifier = &FOLDERID_Documents; break;
-		case KnownFolder::desktop: identifier = &FOLDERID_Desktop; break;
-		case KnownFolder::downloads: identifier = &FOLDERID_Downloads; break;
-		case KnownFolder::music: identifier = &FOLDERID_Music; break;
-		case KnownFolder::videos: identifier = &FOLDERID_Videos; break;
+		case KnownFolder::documents: identifier = ::platform::known_folder::documents; break;
+		case KnownFolder::desktop: identifier = ::platform::known_folder::desktop; break;
+		case KnownFolder::downloads: identifier = ::platform::known_folder::downloads; break;
+		case KnownFolder::music: identifier = ::platform::known_folder::music; break;
+		case KnownFolder::videos: identifier = ::platform::known_folder::video; break;
 		default: break;
 		}
-		PWSTR text = nullptr;
 		std::filesystem::path result;
-		if (SUCCEEDED(SHGetKnownFolderPath(*identifier, KF_FLAG_DEFAULT, nullptr, &text)) && text) result = text;
-		if (text) CoTaskMemFree(text);
+		const auto path = ::platform::known_path(identifier);
+		if (!path.is_empty()) result = ::platform::to_stream_path(path);
 		std::error_code error;
 		if (!result.empty() && !std::filesystem::is_directory(result, error)) result.clear();
 		return result;
 	}
 
-	std::vector<std::filesystem::path> win32::dropped_files(const HANDLE drop)
-	{
-		std::vector<std::filesystem::path> result;
-		const auto nativeDrop = static_cast<HDROP>(drop);
-		if (!nativeDrop) return result;
-		const UINT count = DragQueryFileW(nativeDrop, 0xffffffff, nullptr, 0);
-		result.reserve(count);
-		std::wstring path;
-		for (UINT index = 0; index < count; ++index)
-		{
-			const UINT length = DragQueryFileW(nativeDrop, index, nullptr, 0);
-			path.assign(static_cast<size_t>(length) + 1, L'\0');
-			if (!DragQueryFileW(nativeDrop, index, path.data(), length + 1)) continue;
-			path.resize(length);
-			result.emplace_back(path);
-		}
-		return result;
-	}
-
 	ClipboardStatus clipboard_status()
 	{
-		return {
-			IsClipboardFormatAvailable(CF_HDROP) != FALSE,
-			IsClipboardFormatAvailable(CF_DIBV5) != FALSE ||
-			IsClipboardFormatAvailable(CF_DIB) != FALSE ||
-			IsClipboardFormatAvailable(CF_BITMAP) != FALSE
-		};
+		const auto clipboard = ::platform::clipboard();
+		if (!clipboard) return {};
+		return {clipboard->has_drop_files(), clipboard->has_bitmap()};
 	}
 
 	bool set_clipboard_files(const WindowFramePtr& owner, const std::span<const std::filesystem::path> paths,
 	                         const bool move)
 	{
 		if (paths.empty()) return false;
-		size_t characters = 1;
-		for (const auto& path : paths) characters += path.wstring().size() + 1;
-		const HGLOBAL data = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT,
-		                                 sizeof(DROPFILES) + characters * sizeof(wchar_t));
-		if (!data) return false;
-		auto* drop = static_cast<DROPFILES*>(GlobalLock(data));
-		if (!drop)
-		{
-			GlobalFree(data);
-			return false;
-		}
-		drop->pFiles = sizeof(DROPFILES);
-		drop->fWide = TRUE;
-		auto* output = reinterpret_cast<wchar_t*>(reinterpret_cast<BYTE*>(drop) + sizeof(DROPFILES));
-		for (const auto& path : paths)
-		{
-			const auto text = path.wstring();
-			std::copy(text.begin(), text.end(), output);
-			output += text.size();
-			*output++ = L'\0';
-		}
-		*output = L'\0';
-		GlobalUnlock(data);
-		if (!OpenClipboard(win32::owner_window(owner)))
-		{
-			GlobalFree(data);
-			return false;
-		}
-		EmptyClipboard();
-		const bool filesSet = SetClipboardData(CF_HDROP, data) != nullptr;
-		if (!filesSet) GlobalFree(data);
-		const UINT format = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
-		const HGLOBAL effectData = GlobalAlloc(GMEM_MOVEABLE, sizeof(DWORD));
-		if (effectData)
-		{
-			auto* effect = static_cast<DWORD*>(GlobalLock(effectData));
-			if (effect)
-			{
-				*effect = move ? DROPEFFECT_MOVE : DROPEFFECT_COPY;
-				GlobalUnlock(effectData);
-				if (!SetClipboardData(format, effectData)) GlobalFree(effectData);
-			}
-			else GlobalFree(effectData);
-		}
-		CloseClipboard();
-		return filesSet;
+		std::vector<df::file_path> files;
+		files.reserve(paths.size());
+		for (const auto& path : paths) files.push_back(desktop::file_path(path));
+		return ::platform::set_clipboard(files, {}, {}, move);
 	}
 
 	ClipboardContent read_clipboard(const WindowFramePtr& owner)
 	{
 		ClipboardContent result;
-		if (!OpenClipboard(win32::owner_window(owner))) return result;
-		result.files = win32::dropped_files(GetClipboardData(CF_HDROP));
+		const auto clipboard = ::platform::clipboard();
+		if (!clipboard) return result;
+		for (const auto& path : clipboard->drop_paths())
+			result.files.push_back(::platform::to_stream_path(path));
 		if (!result.files.empty())
 		{
-			const UINT format = RegisterClipboardFormatW(CFSTR_PREFERREDDROPEFFECT);
-			result.operation = win32::clipboard_file_operation(format ? GetClipboardData(format) : nullptr);
+			result.operation = clipboard->files_description().preferred_drop_effect == ::platform::drop_effect::move
+				                   ? FileOperation::move
+				                   : FileOperation::copy;
 		}
-		if (result.files.empty())
+		else if (clipboard->has_bitmap())
 		{
-			for (const UINT format : {CF_DIBV5, CF_DIB})
+			const auto folder = ::platform::to_stream_path(::platform::temp_folder());
+			const auto name = std::format(L"iw30-clipboard-{}.png", ::platform::tick_count());
+			const auto saved = clipboard->save_bitmap(desktop::folder_path(folder),
+			                                          desktop::utf8_path(std::filesystem::path(name)), true);
+			if (saved.success())
 			{
-				const HBITMAP bitmap = bitmap_from_dib(GetClipboardData(format));
-				if (!bitmap) continue;
-				result.image = bitmap_resource(bitmap);
-				DeleteObject(bitmap);
-				if (!result.image.pixels.empty()) break;
+				const auto path = folder / name;
+				const auto image = files::load_image(path);
+				result.image.size = {image.width, image.height};
+				result.image.pixels = image.pixels;
+				result.image.hasAlpha = std::ranges::any_of(result.image.pixels,
+					[](const std::uint32_t pixel) { return (pixel >> 24) != 0xff; });
+				::platform::delete_file(desktop::file_path(path));
 			}
-			if (result.image.pixels.empty())
-				result.image = bitmap_resource(static_cast<HBITMAP>(GetClipboardData(CF_BITMAP)));
 		}
-		CloseClipboard();
 		return result;
-	}
-
-	FileOperation win32::clipboard_file_operation(const HANDLE preferredEffect)
-	{
-		if (!preferredEffect || GlobalSize(preferredEffect) < sizeof(DWORD)) return FileOperation::copy;
-		const auto* effect = static_cast<const DWORD*>(GlobalLock(preferredEffect));
-		if (!effect) return FileOperation::copy;
-		const DWORD value = *effect;
-		GlobalUnlock(preferredEffect);
-		return value == DROPEFFECT_MOVE ? FileOperation::move : FileOperation::copy;
 	}
 
 	bool perform_file_operation(const WindowFramePtr& owner, const FileOperation operation,
 	                            const std::span<const std::filesystem::path> sources,
 	                            const std::filesystem::path& destination)
 	{
-		const std::wstring sourceList = path_list(sources);
-		if (sourceList.empty() || (operation != FileOperation::recycle && destination.empty())) return false;
-		std::wstring destinationList;
-		if (!destination.empty())
-		{
-			destinationList = destination.wstring();
-			destinationList.push_back(L'\0');
-			destinationList.push_back(L'\0');
-		}
-		SHFILEOPSTRUCTW nativeOperation{};
-		nativeOperation.hwnd = win32::owner_window(owner);
-		nativeOperation.wFunc = operation == FileOperation::copy
-			                        ? FO_COPY
-			                        : operation == FileOperation::move
-			                        ? FO_MOVE
-			                        : FO_DELETE;
-		nativeOperation.pFrom = sourceList.c_str();
-		nativeOperation.pTo = destinationList.empty() ? nullptr : destinationList.c_str();
-		nativeOperation.fFlags = FOF_ALLOWUNDO |
-			(operation == FileOperation::recycle ? 0 : FOF_NOCONFIRMMKDIR);
-		return SHFileOperationW(&nativeOperation) == 0 && !nativeOperation.fAnyOperationsAborted;
+		if (sources.empty()) return false;
+		std::vector<df::file_path> files;
+		files.reserve(sources.size());
+		for (const auto& path : sources) files.push_back(desktop::file_path(path));
+		if (operation == FileOperation::recycle)
+			return ::platform::delete_items(files, {}, true).success();
+		if (destination.empty()) return false;
+		const auto result = ::platform::move_or_copy(
+			files, {}, desktop::folder_path(destination), operation == FileOperation::move, false);
+		return result.success();
 	}
 
 	bool delete_permanently(const std::span<const std::filesystem::path> paths, std::error_code& error)
@@ -1742,74 +1106,40 @@ namespace iw::platform
 		bool allRemoved = true;
 		for (const auto& path : paths)
 		{
-			// A remote folder is often a UNC path, which needs the \\?\UNC\ form, not a bare prefix.
-			const auto native = files::native_path(path);
-			std::error_code removeError;
-			if (std::filesystem::remove(native, removeError) && !removeError) continue;
-			// A read-only file refuses to go; clearing the attribute is the whole difference.
-			if (SetFileAttributesW(native.c_str(), FILE_ATTRIBUTE_NORMAL))
+			auto result = ::platform::delete_file(desktop::file_path(path));
+			if (result.failed())
 			{
-				removeError.clear();
-				if (std::filesystem::remove(native, removeError) && !removeError) continue;
+				::platform::make_file_writable(desktop::file_path(path));
+				result = ::platform::delete_file(desktop::file_path(path));
 			}
+			if (result.success()) continue;
 			allRemoved = false;
-			if (!error) error = removeError ? removeError : std::make_error_code(std::errc::io_error);
+			if (!error) error = std::make_error_code(std::errc::io_error);
 		}
 		return allRemoved;
 	}
 
 	namespace
 	{
-		class ShellAppHandler final : public AppHandler
+		class DesktopAppHandler final : public AppHandler
 		{
 		public:
-			ShellAppHandler(IAssocHandler* handler, std::wstring name)
-				: handler_(handler), name_(std::move(name))
-			{
-			}
-
-			~ShellAppHandler() override { if (handler_) handler_->Release(); }
-			ShellAppHandler(const ShellAppHandler&) = delete;
-			ShellAppHandler& operator=(const ShellAppHandler&) = delete;
+			DesktopAppHandler(::platform::open_with_entry entry, std::wstring name)
+				: entry_(std::move(entry)), name_(std::move(name)) {}
 
 			const std::wstring& name() const override { return name_; }
 
 			bool invoke(const std::span<const std::filesystem::path> paths) const override
 			{
-				if (!handler_ || paths.empty()) return false;
-				std::vector<PIDLIST_ABSOLUTE> items;
-				for (const auto& path : paths)
-				{
-					const auto pidl = ILCreateFromPathW(path.c_str());
-					if (!pidl)
-					{
-						for (const auto item : items) ILFree(item);
-						return false;
-					}
-					items.push_back(pidl);
-				}
-				bool invoked = false;
-				if (!items.empty())
-				{
-					IShellItemArray* array = nullptr;
-					if (SUCCEEDED(SHCreateShellItemArrayFromIDLists(static_cast<UINT>(items.size()),
-						const_cast<LPCITEMIDLIST*>(items.data()), &array)) && array)
-					{
-						IDataObject* data = nullptr;
-						if (SUCCEEDED(array->BindToHandler(nullptr, BHID_DataObject, IID_PPV_ARGS(&data))) && data)
-						{
-							invoked = SUCCEEDED(handler_->Invoke(data));
-							data->Release();
-						}
-						array->Release();
-					}
-				}
-				for (const auto pidl : items) ILFree(pidl);
-				return invoked;
+				if (paths.empty() || !entry_.invoke) return false;
+				std::vector<df::file_path> files;
+				files.reserve(paths.size());
+				for (const auto& path : paths) files.push_back(desktop::file_path(path));
+				return entry_.invoke(files, {});
 			}
 
 		private:
-			IAssocHandler* handler_{};
+			::platform::open_with_entry entry_;
 			std::wstring name_;
 		};
 	}
@@ -1818,28 +1148,14 @@ namespace iw::platform
 	{
 		std::vector<AppHandlerPtr> result;
 		if (extension.empty() || extension.front() != L'.') return result;
-		const std::wstring key(extension);
-		IEnumAssocHandlers* handlers = nullptr;
-		if (FAILED(SHAssocEnumHandlers(key.c_str(), ASSOC_FILTER_RECOMMENDED, &handlers)) || !handlers)
-			return result;
+		const auto handlers = ::platform::assoc_handlers(pf::utf16_to_utf8(extension));
 		constexpr size_t maximumHandlers = 32;
-		for (;;)
+		for (const auto& handler : handlers)
 		{
-			IAssocHandler* handler = nullptr;
-			ULONG fetched = 0;
-			if (handlers->Next(1, &handler, &fetched) != S_OK || !fetched || !handler) break;
-			LPWSTR uiName = nullptr;
-			std::wstring name;
-			if (SUCCEEDED(handler->GetUIName(&uiName)) && uiName)
-			{
-				name = uiName;
-				CoTaskMemFree(uiName);
-			}
-			if (name.empty()) handler->Release();
-			else result.push_back(std::make_shared<ShellAppHandler>(handler, std::move(name)));
+			result.push_back(std::make_shared<DesktopAppHandler>(
+				handler, pf::utf8_to_utf16(handler.name)));
 			if (result.size() >= maximumHandlers) break;
 		}
-		handlers->Release();
 		return result;
 	}
 
@@ -1847,152 +1163,71 @@ namespace iw::platform
 	                    const WindowFramePtr& owner)
 	{
 		if (executable.empty()) return false;
-		const std::wstring argumentText(arguments);
-		SHELLEXECUTEINFOW information{sizeof(information)};
-		information.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
-		information.hwnd = win32::owner_window(owner);
-		information.lpVerb = L"open";
-		information.lpFile = executable.c_str();
-		information.lpParameters = argumentText.empty() ? nullptr : argumentText.c_str();
-		information.lpDirectory = nullptr;
-		information.nShow = SW_SHOWNORMAL;
-		return ShellExecuteExW(&information) != FALSE;
+		return ::platform::run(desktop::file_path(executable), pf::utf16_to_utf8(arguments));
 	}
 
 	namespace
 	{
-		class WinTextInput final : public TextInput
+		class PfTextInput final : public TextInput
 		{
 		public:
-			WinTextInput(const HWND parent, TextInputOptions options)
-				: options_(std::move(options)), parent_(parent)
+			PfTextInput(const WindowFramePtr& owner, TextInputOptions options)
+				: options_(std::move(options))
 			{
-				if (!parent_) return;
-				static UINT_PTR nextSubclassId = 1;
-				subclassId_ = nextSubclassId++;
-				control_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", options_.text.c_str(),
-				                           WS_CHILD | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 0, 0,
-				                           parent_, reinterpret_cast<HMENU>(subclassId_),
-				                           GetModuleHandleW(nullptr), nullptr);
-				if (!control_) return;
-				if (options_.folderCompletion)
-					SHAutoComplete(control_, SHACF_FILESYS_DIRS | SHACF_AUTOSUGGEST_FORCE_ON);
-				if (!options_.cueBanner.empty())
-					SendMessageW(control_, EM_SETCUEBANNER, TRUE,
-					             reinterpret_cast<LPARAM>(options_.cueBanner.c_str()));
-				SetWindowSubclass(parent_, parent_proc, subclassId_, reinterpret_cast<DWORD_PTR>(this));
-				SetWindowSubclass(control_, control_proc, 1, reinterpret_cast<DWORD_PTR>(this));
-			}
-
-			~WinTextInput() override
-			{
-				if (parent_ && IsWindow(parent_)) RemoveWindowSubclass(parent_, parent_proc, subclassId_);
-				if (control_ && IsWindow(control_))
+				const auto frame = native_frame(owner);
+				if (!frame) return;
+				pf::text_input_options input;
+				input.cue = pf::utf16_to_utf8(options_.cueBanner);
+				input.changed = [this](const std::string_view value)
 				{
-					RemoveWindowSubclass(control_, control_proc, 1);
-					DestroyWindow(control_);
-				}
+					if (options_.changed) options_.changed(pf::utf8_to_utf16(value));
+				};
+				input.accepted = [this](const std::string_view)
+				{
+					if (options_.accepted) options_.accepted();
+				};
+				input.escaped = [this]
+				{
+					if (options_.escaped) options_.escaped();
+				};
+				input.tabbed = [this](const bool backwards)
+				{
+					if (options_.tabbed) options_.tabbed(backwards);
+				};
+				input_ = pf::create_text_input(frame, std::move(input));
+				if (input_) input_->set_text(pf::utf16_to_utf8(options_.text));
 			}
 
-			WinTextInput(const WinTextInput&) = delete;
-			WinTextInput& operator=(const WinTextInput&) = delete;
-
-			void set_bounds(const recti bounds) override
+			void set_bounds(const app::recti bounds) override
 			{
-				if (control_) MoveWindow(control_, bounds.x, bounds.y, bounds.width, bounds.height, TRUE);
+				if (input_) input_->set_bounds({bounds.x, bounds.y, bounds.right(), bounds.bottom()});
 			}
 
-			void show(const bool visible) override
-			{
-				if (control_) ShowWindow(control_, visible ? SW_SHOW : SW_HIDE);
-			}
-
-			void set_focus() override { if (control_) SetFocus(control_); }
-			bool has_focus() const override { return control_ && GetFocus() == control_; }
-
+			void show(const bool visible) override { if (input_) input_->show(visible); }
+			void set_focus() override { if (input_) input_->set_focus(); }
+			bool has_focus() const override { return input_ && input_->has_focus(); }
 			std::wstring text() const override
 			{
-				if (!control_) return {};
-				const int length = GetWindowTextLengthW(control_);
-				if (length <= 0) return {};
-				std::wstring result(static_cast<size_t>(length), L'\0');
-				const int written = GetWindowTextW(control_, result.data(), length + 1);
-				result.resize(static_cast<size_t>((std::max)(0, written)));
-				return result;
+				return input_ ? pf::utf8_to_utf16(input_->text()) : std::wstring{};
 			}
-
 			void set_text(const std::wstring_view value) override
 			{
-				if (!control_ || text() == value) return;
-				suppress_ = true;
-				SetWindowTextW(control_, std::wstring(value).c_str());
-				suppress_ = false;
+				if (input_) input_->set_text(pf::utf16_to_utf8(value));
 			}
-
-			void set_font(const FontPtr& font) override
+			void set_font(const FontPtr&) override
 			{
-				if (!control_ || !font || !*font) return;
-				SendMessageW(control_, WM_SETFONT,
-				             reinterpret_cast<WPARAM>(reinterpret_cast<HFONT>(font->native_handle())), TRUE);
+				if (input_) input_->set_font({"Segoe UI", 9});
 			}
 
 		private:
-			static LRESULT CALLBACK parent_proc(const HWND window, const UINT message, const WPARAM wparam,
-			                                    const LPARAM lparam, UINT_PTR, const DWORD_PTR reference)
-			{
-				auto* self = reinterpret_cast<WinTextInput*>(reference);
-				if (self && message == WM_COMMAND && reinterpret_cast<HWND>(lparam) == self->control_ &&
-					HIWORD(wparam) == EN_CHANGE && !self->suppress_ && self->options_.changed)
-					self->options_.changed(self->text());
-				return DefSubclassProc(window, message, wparam, lparam);
-			}
-
-			static LRESULT CALLBACK control_proc(const HWND window, const UINT message, const WPARAM wparam,
-			                                     const LPARAM lparam, UINT_PTR, const DWORD_PTR reference)
-			{
-				auto* self = reinterpret_cast<WinTextInput*>(reference);
-				if (self && wparam == VK_RETURN && (message == WM_KEYDOWN || message == WM_CHAR))
-				{
-					// A single-line edit beeps on Enter unless the key is consumed here.
-					if (message == WM_KEYDOWN)
-						if (const auto accepted = self->options_.accepted) accepted();
-					return 0;
-				}
-				if (self && message == WM_KEYDOWN && wparam == 'A' && (GetKeyState(VK_CONTROL) & 0x8000))
-				{
-					SendMessageW(window, EM_SETSEL, 0, -1);
-					return 0;
-				}
-				if (self && (message == WM_KEYDOWN || message == WM_CHAR) &&
-					(wparam == VK_ESCAPE || wparam == VK_TAB))
-				{
-					if (message == WM_KEYDOWN)
-					{
-						if (wparam == VK_ESCAPE)
-						{
-							if (const auto escaped = self->options_.escaped) escaped();
-						}
-						else if (const auto tabbed = self->options_.tabbed)
-							tabbed((GetKeyState(VK_SHIFT) & 0x8000) != 0);
-					}
-					return 0;
-				}
-				return DefSubclassProc(window, message, wparam, lparam);
-			}
-
 			TextInputOptions options_;
-			HWND parent_{};
-			HWND control_{};
-			UINT_PTR subclassId_{};
-			bool suppress_{};
+			pf::text_input_ptr input_;
 		};
 	}
 
 	TextInputPtr create_text_input(const WindowFramePtr& owner, TextInputOptions options)
 	{
-		const HWND parent = win32::owner_window(owner);
-		if (!parent) return {};
-		return std::make_shared<WinTextInput>(parent, std::move(options));
+		return std::make_shared<PfTextInput>(owner, std::move(options));
 	}
 
 	Runtime::Runtime(const RuntimeMode mode) : mode_(mode)
@@ -2004,8 +1239,7 @@ namespace iw::platform
 		}
 
 		if (FAILED(OleInitialize(nullptr))) return;
-		INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_WIN95_CLASSES | ICC_BAR_CLASSES};
-		initialized_ = InitCommonControlsEx(&controls) != FALSE && start_ui_work_window();
+		initialized_ = true;
 		if (!initialized_) OleUninitialize();
 	}
 
@@ -2015,58 +1249,52 @@ namespace iw::platform
 		if (mode_ == RuntimeMode::multithreaded) CoUninitialize();
 		else
 		{
-			stop_ui_work_window();
 			OleUninitialize();
 		}
 	}
 
 	void show_error(const std::wstring_view message, const std::wstring_view title, const WindowFramePtr& owner)
 	{
-		const std::wstring messageText(message);
-		const std::wstring titleText(title);
-		MessageBoxW(win32::owner_window(owner), messageText.c_str(), titleText.c_str(), MB_OK | MB_ICONERROR);
+		if (const auto frame = std::dynamic_pointer_cast<LibdesktopWindowFrame>(owner))
+		{
+			frame->native_frame()->message_box(pf::utf16_to_utf8(message), pf::utf16_to_utf8(title),
+			                                   pf::msg_box_style::ok);
+			return;
+		}
+		::platform::show_startup_failure(
+			pf::utf16_to_utf8(std::wstring(title) + L": " + std::wstring(message)));
 	}
 
 	void write_diagnostic(const std::wstring_view text)
 	{
 		if (diagnostics::run_log().write(text))
-			OutputDebugStringW(L"ImageWalker: diagnostic file write failed; debugger/console output follows.\n");
-		// A windowed process owns no console, so a headless run borrows the one that launched it.
-		[[maybe_unused]] static const bool attached = AttachConsole(ATTACH_PARENT_PROCESS) != FALSE;
-		const std::wstring value(text);
-		OutputDebugStringW(value.c_str());
-		const HANDLE console = GetStdHandle(STD_OUTPUT_HANDLE);
-		if (!console || console == INVALID_HANDLE_VALUE) return;
-		DWORD written = 0;
-		if (WriteConsoleW(console, value.c_str(), static_cast<DWORD>(value.size()), &written, nullptr)) return;
-		// WriteConsoleW only accepts a console handle, so a redirected run needs bytes instead.
-		const int length = WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()),
-		                                       nullptr, 0, nullptr, nullptr);
-		if (length <= 0) return;
-		std::string bytes(static_cast<size_t>(length), '\0');
-		WideCharToMultiByte(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), bytes.data(), length,
-		                    nullptr, nullptr);
-		WriteFile(console, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
+			::platform::trace(std::string("ImageWalker: diagnostic file write failed."));
+		const auto value = ::platform::utf16_to_utf8(text);
+		::platform::trace(value);
+		pf::write_stdout(value);
 	}
 
 	std::filesystem::path unique_temp_folder(const std::wstring_view name)
 	{
-		std::error_code error;
-		auto folder = std::filesystem::temp_directory_path(error);
-		if (error) return {};
-		folder /= std::format(L"{}-{}", name, GetCurrentProcessId());
+		auto folder = ::platform::to_stream_path(::platform::temp_folder());
+		if (folder.empty()) return {};
+		folder /= std::format(L"{}-{}", name, ::platform::process_id());
 		return folder;
 	}
 
 	FileAttributes read_file_attributes(const std::filesystem::path& path)
 	{
 		FileAttributes result;
-		const DWORD attributes = GetFileAttributesW(path.c_str());
-		if (attributes == INVALID_FILE_ATTRIBUTES) return result;
+		std::error_code directoryError;
+		const bool directory = std::filesystem::is_directory(files::native_path(path), directoryError);
+		const auto attributes = directory
+			                        ? ::platform::file_attributes(desktop::folder_path(path))
+			                        : ::platform::file_attributes(desktop::file_path(path));
+		if (!attributes.exists()) return result;
 		result.known = true;
-		result.hidden = (attributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)) != 0;
-		result.directory = (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-		result.reparse = (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+		result.hidden = attributes.is_hidden;
+		result.directory = directory;
+		result.reparse = attributes.is_reparse;
 		return result;
 	}
 
@@ -2082,53 +1310,7 @@ namespace iw::platform
 
 	void open_uri(const std::wstring_view uri)
 	{
-		const std::wstring value(uri);
-		ShellExecuteW(nullptr, L"open", value.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+		::platform::open(pf::utf16_to_utf8(uri));
 	}
 
-	bool win32::wait_for_message()
-	{
-		return MsgWaitForMultipleObjectsEx(0, nullptr, INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE) ==
-			WAIT_OBJECT_0;
-	}
-
-	int run_ui_loop(const WindowFramePtr& window)
-	{
-		if (!start_ui_work_window()) return 1;
-		const auto nativeFrame = std::dynamic_pointer_cast<WinWindowFrame>(window);
-		MSG message{};
-		while (GetMessageW(&message, nullptr, 0, 0) > 0)
-		{
-			if (!nativeFrame || !nativeFrame->translate_accelerator(message))
-			{
-				TranslateMessage(&message);
-				DispatchMessageW(&message);
-			}
-		}
-		exit_request().request_stop();
-		// Joining the queues before the caller's state unwinds is what lets work items capture it directly.
-		for (const auto queue : {
-			     WorkQueue::image, WorkQueue::thumbnail, WorkQueue::metadata, WorkQueue::folder, WorkQueue::shell,
-			     WorkQueue::task
-		     })
-			serial_queue(queue).stop();
-		stop_ui_work_window();
-		return static_cast<int>(message.wParam);
-	}
-}
-
-int WINAPI wWinMain(const HINSTANCE instance, HINSTANCE, PWSTR, const int showCommand)
-{
-	iw::platform::resourceInstance = instance;
-	int argumentCount = 0;
-	const auto nativeArguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
-	std::vector<std::wstring_view> arguments;
-	if (nativeArguments)
-	{
-		arguments.reserve(argumentCount > 1 ? static_cast<size_t>(argumentCount - 1) : 0);
-		for (int index = 1; index < argumentCount; ++index) arguments.emplace_back(nativeArguments[index]);
-	}
-	const int result = imagewalker_main(showCommand, arguments);
-	if (nativeArguments) LocalFree(nativeArguments);
-	return result;
 }

@@ -4,7 +4,7 @@
 #include "Selection.h"
 #include "Jobs.h"
 #include "LoadAny.h"
-#include <libiw/Pixel.h>
+#include <iw/imaging/Pixel.h>
 #include <setjmp.h>
 extern "C"
 {

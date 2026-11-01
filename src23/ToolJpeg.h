@@ -13,7 +13,7 @@
 #pragma once
 
 #include "ToolDlg.h"
-#include "iw/imaging/FileJpegTran.h"
+#include "iw/legacy/JpegTransform.h"
 
 class CToolJpeg;
 
@@ -52,19 +52,8 @@ protected:
 
 	CToolJpegOptions _options;
 
-	JCOPY_OPTION m_copyoption;	// -copy switch
-	jpeg_transform_info m_transformoption; // image transformation options
-
 	void SetTransformOptions();
-	void ApplyCompressorSwitches(j_compress_ptr cinfo);
-
-
-	struct jpeg_decompress_struct m_srcinfo;
-	struct jpeg_compress_struct m_dstinfo;
-	struct jpeg_error_mgr m_jsrcerr, m_jdsterr;
-	
-	jvirt_barray_ptr * src_coef_arrays;
-	jvirt_barray_ptr * dst_coef_arrays;
+	JXFORM_CODE m_transform{JXFORM_NONE};
  
 public:
 	
@@ -99,4 +88,3 @@ public:
 		App.InvokeHelp(m_hWnd, HELP_TOOL_JPEG);
 	}
 };
-

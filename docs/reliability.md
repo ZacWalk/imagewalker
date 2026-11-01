@@ -35,6 +35,8 @@ threading and user interaction.
   lossy reconstruction. ImageWalker 3.0 carries a JPEG's metadata segments byte
   for byte, correcting values in place; EXIF it cannot follow is dropped rather
   than left stating the old orientation.
+- Other native upright saves use libfiles' metadata normalization. If existing
+  EXIF or XMP cannot be verified or corrected, encoding fails before publication.
 - A carried colour profile must describe RGB, because saved pixels are RGB.
 - Image and undo metadata blobs are deep copies wherever mutation is possible.
 - A decoded document owns its frames and metadata, and a copy of it is an

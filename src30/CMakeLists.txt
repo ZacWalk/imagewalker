@@ -42,12 +42,38 @@ set(IW30_SOURCES
 )
 list(TRANSFORM IW30_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 
-add_executable(imagewalker30 WIN32 ${IW30_SOURCES} app.rc)
+if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_LIBDESKTOP
+   AND EXISTS "${CMAKE_SOURCE_DIR}/../libdesktop/CMakeLists.txt")
+    set(FETCHCONTENT_SOURCE_DIR_LIBDESKTOP "${CMAKE_SOURCE_DIR}/../libdesktop" CACHE PATH
+        "A libdesktop checkout to build instead of the published revision")
+endif()
+set(LIBDESKTOP_SYSTEM ON CACHE BOOL
+    "Build libdesktop-system for ImageWalker 3.0" FORCE)
+
+include(FetchContent)
+FetchContent_Declare(libdesktop
+    GIT_REPOSITORY https://github.com/ZacWalk/libdesktop.git
+    GIT_TAG        31aae322af6e0696a9597726705b1121bd31580b
+    EXCLUDE_FROM_ALL)
+FetchContent_MakeAvailable(libdesktop)
+
+platform_add_app(imagewalker30
+    SOURCES ${IW30_SOURCES} app.rc
+    EMBED
+        "${CMAKE_CURRENT_SOURCE_DIR}/Res/ToolbarSymbols.bmp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Res/FileTypes/audio.bmp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Res/FileTypes/document.bmp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Res/FileTypes/folder.bmp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Res/FileTypes/other.bmp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Res/FileTypes/photo.bmp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Res/FileTypes/status-symbols.bmp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Res/FileTypes/video.bmp"
+    DESCRIPTION "ImageWalker 3.0"
+    VERSION "3.0.0.0"
+    OUTPUT_NAME imagewalker30)
 
 target_include_directories(imagewalker30 PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}"
-    "${CMAKE_SOURCE_DIR}/include"
-    "${CMAKE_SOURCE_DIR}/include/core")
+    "${CMAKE_SOURCE_DIR}/include")
 
 target_compile_features(imagewalker30 PRIVATE cxx_std_20)
 target_compile_definitions(imagewalker30 PRIVATE UNICODE _UNICODE STRICT
@@ -61,7 +87,13 @@ target_compile_options(imagewalker30 PRIVATE
     $<$<NOT:$<CONFIG:Debug>>:/Zi /guard:cf>)
 
 target_link_libraries(imagewalker30 PRIVATE comctl32 windowscodecs ole32 shlwapi htmlhelp
-    mfuuid bcrypt iw::libiw)
+    mfuuid bcrypt
+    iw_imaging
+    iw::jpeg iw::png iw::tiff iw::gif iw::zlib
+    libfiles::libfiles
+    libdesktop::core
+    libdesktop::ui
+    libdesktop::system)
 
 # Optimised builds keep their PDBs.
 target_link_options(imagewalker30 PRIVATE

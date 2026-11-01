@@ -3,6 +3,7 @@
 
 #include "TaskConvert.h"
 
+#include "DesktopServices.h"
 #include "ImageResampler.h"
 #include "Paths.h"
 
@@ -10,7 +11,6 @@
 #include <format>
 #include <limits>
 #include <stdexcept>
-#include <windows.h>
 
 namespace iw
 {
@@ -55,7 +55,7 @@ namespace iw
 
 	}
 
-	sizei limited_output_size(const int width, const int height, const int limit)
+	app::sizei limited_output_size(const int width, const int height, const int limit)
 	{
 		if (limit <= 0 || width <= 0 || height <= 0) return {width, height};
 		const int longest = (std::max)(width, height);
@@ -380,32 +380,24 @@ namespace iw::convert
 			int width{};
 			int height{};
 			std::filesystem::path parent;
-			BY_HANDLE_FILE_INFORMATION source{};
+			files::FileSnapshot source{};
 			bool sourceKnown{};
 			std::optional<files::FileSnapshot> destination;
 		};
 
-		bool file_information(const std::filesystem::path& path, BY_HANDLE_FILE_INFORMATION& info)
+		bool file_information(const std::filesystem::path& path, files::FileSnapshot& snapshot)
 		{
-			const HANDLE file = CreateFileW(files::native_path(path).c_str(), FILE_READ_ATTRIBUTES,
-				FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
-				FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
-			if (file == INVALID_HANDLE_VALUE) return false;
-			const bool read = GetFileInformationByHandle(file, &info) != FALSE;
-			CloseHandle(file);
-			return read && !(info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT));
+			const auto current = files::snapshot_file(path);
+			if (!current || !current->exists || current->directory || current->reparse) return false;
+			snapshot = *current;
+			return true;
 		}
 
 		bool unchanged_source(const std::filesystem::path& path, const Reviewed& reviewed)
 		{
-			BY_HANDLE_FILE_INFORMATION current{};
 			const auto& original = reviewed.source;
-			return reviewed.sourceKnown && file_information(path, current) &&
-				current.dwVolumeSerialNumber == original.dwVolumeSerialNumber &&
-				current.nFileIndexHigh == original.nFileIndexHigh && current.nFileIndexLow == original.nFileIndexLow &&
-				current.nFileSizeHigh == original.nFileSizeHigh && current.nFileSizeLow == original.nFileSizeLow &&
-				current.ftLastWriteTime.dwHighDateTime == original.ftLastWriteTime.dwHighDateTime &&
-				current.ftLastWriteTime.dwLowDateTime == original.ftLastWriteTime.dwLowDateTime;
+			files::FileSnapshot current;
+			return reviewed.sourceKnown && file_information(path, current) && current == original;
 		}
 
 		std::filesystem::path resolved_path(const std::filesystem::path& path)
@@ -547,9 +539,9 @@ namespace iw::convert
 			}
 			else if (row.replace)
 			{
-				const auto attributes = GetFileAttributesW(files::native_path(row.destination).c_str());
-				if (attributes == INVALID_FILE_ATTRIBUTES ||
-					(attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_READONLY | FILE_ATTRIBUTE_REPARSE_POINT)))
+				const auto destination = files::snapshot_file(row.destination);
+				if (!destination || !destination->exists || destination->directory || destination->readOnly ||
+					destination->reparse)
 				{
 					row.state = tasks::RowState::blocked;
 					row.change = L"The replacement destination is not a writable regular file.";

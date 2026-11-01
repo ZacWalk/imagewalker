@@ -68,19 +68,16 @@ independently with `/permissive-`, `/W4`, `/EHsc` and `/guard:cf`, and takes no
 warning suppressions. Release is `RelWithDebInfo` and keeps PDB files for crash
 reports. See [warnings.md](warnings.md) and [porting.md](porting.md).
 
-All five applications link `libiw` statically. The library owns codec and
-image-processing translation units and uses the same static CRT. Its public
-API and modern sources use `/permissive-`; only native-page compatibility
-sources use `/permissive` and the applicable historical warning exceptions.
-The backend uses ATL but does not include WTL or application headers.
+The applications consume the header-only `iw_imaging` or historical `iw_legacy`
+interface and link libfiles/libdesktop directly. The shared definitions are
+inline under `include/iw`; there is no shared imaging object library.
+Modern headers compile with `/permissive-` and include no ATL, WTL, application
+or Windows SDK headers. Historical applications retain `/permissive` and their
+applicable warning exceptions.
 
-Compile `libiw` with `/EHs`, removing CMake's default `/EHsc` in the library
-directory: JPEG/PNG callbacks can unwind through C frames, and `/EHsc` lets
-the optimizer assume those calls cannot throw. Keep optimized library builds
-eligible for LTCG and restrict `/arch:AVX2` to the runtime-dispatched source.
-RelWithDebInfo lowers `/O2`'s `/Ob2` to `/Ob1`, which also limits LTCG's
-cross-module inlining, so the library and 2.x directories replace it with
-`/Ob2`.
+libfiles owns codec callbacks and their exception policy. Runtime-dispatched
+AVX2 code is compiled privately by libdesktop; application headers and targets
+must not acquire `/arch:AVX2`.
 
 Exception unwinding is set explicitly on every application target. Dependency
 recipes may replace CMake's cached default flags; they must not remove the
@@ -99,19 +96,28 @@ Each executable accepts `/test` and returns its failure count. `dd.ps1 test`
 builds Debug and Release, runs CTest in both, then smoke-tests all five GUI
 targets in each configuration with crash-file checks and bounded cleanup.
 
-CTest has nine entries with 120-second deadlines: the five serial application
+CTest entries have 120-second deadlines: the five serial application
 suites run from `exe\`, `dd-contract` checks the driver contract, `help-compiler`
-checks strict-build output safety, and `libiw` runs
-the standalone imaging suite, and `libiw-boundary` checks source ownership,
-forwarding headers and public-header isolation. The library test executable
+checks strict-build output safety, and `imagewalker-imaging` runs the shared
+imaging suite while `imagewalker-boundary` checks source ownership,
+direct dependencies and public-header isolation. `imagewalker-headers` links
+multiple translation units using only shared headers and dependent libraries,
+including reverse include order and process-wide inline diagnostic state.
+The imaging test executables
 stays in the preset's build tree, not the portable application output directory.
 
 `dd.ps1 test --app iw30` builds both configurations and selects that target's
-CTest label, including both shared-library checks. Use `dd.ps1 test --label libiw`
-to select only those shared checks. `--label` and `--name` filter further, and an
-empty selection fails. Runs filtered by label or name omit GUI smoke tests;
+CTest label, including both shared-imaging checks. Use
+`dd.ps1 test --label imagewalker-imaging` to select only those shared checks.
+`--label` and `--name` filter further, and an empty selection fails. Runs
+filtered by label or name omit GUI smoke tests;
 application-scoped runs smoke-test the selected application. Neither replaces
 a full `dd.ps1 test`.
+
+For a local run when the system clipboard is unavailable, run
+`.\exe\imagewalker30d.exe /test-no-clipboard | Out-String` (or
+`imagewalker30.exe` for Release). This omits only the real clipboard round trip;
+the default `/test` and CTest commands retain it.
 
 The 3.0 media suite always checks metadata, poster pixels, malformed inputs,
 cancellation, optional-component failures and the absence of mandatory Media
@@ -176,9 +182,11 @@ use WTL.
 shares with Diffractor, is pinned by commit (`IW_LIBFILES_REVISION`). It
 builds libjpeg-turbo, libpng over zlib-ng, libwebp, giflib and libtiff by its own recipes, each
 pinned by SHA-256 in its own manifest, and `iw::jpeg`, `iw::png`, `iw::zlib`
-and `iw::webp`, `iw::gif` and `iw::tiff` name its targets. libiw links libfiles itself:
-native JPEG, PNG, GIF, TIFF, PCX, PSD, WPG and uncompressed BMP reading goes
-through its document row stream; WebP uses its display decoder and its encoder. The 2.x property
+and `iw::webp`, `iw::gif` and `iw::tiff` name its targets. The applications
+link libfiles directly: native JPEG, PNG, GIF, TIFF, PCX, PSD, WPG and
+uncompressed BMP reading goes through its document row stream, and native
+indexed/packed/multipage writes use its document encoder. WebP uses its
+display decoder and encoder. The 2.x property
 pages list EXIF through its `list_exif`, read XMP through its data model, and
 read IPTC through its `list_iptc`; the property pages, and the TIFF and PSD
 loaders, find the IPTC among Photoshop image resources through its
@@ -196,14 +204,14 @@ whatever its HEAD; CI and a fresh clone build the pin.
 
 | Dependency | Version | Acquired by | Primary owner |
 |---|---|---|---|
-| libfiles | `4481ded` | FetchContent, git commit; a sibling `..\libfiles` when present | libiw |
-| zlib-ng, zlib-compatible | 2.3.3 | libfiles' recipe, tag archive with SHA-256 | libiw |
-| libjpeg-turbo | 3.2.1 | libfiles' recipe, release tarball with SHA-256; SIMD and the libjpeg 8 API | libiw |
-| libpng | 1.6.59 | libfiles' recipe, tag archive with SHA-256 | libiw |
+| libfiles | `27de9d9` | FetchContent, git commit; a sibling `..\libfiles` when present | libfiles |
+| zlib-ng, zlib-compatible | 2.3.3 | libfiles' recipe, tag archive with SHA-256 | libfiles |
+| libjpeg-turbo | 3.2.1 | libfiles' recipe, release tarball with SHA-256; SIMD and the libjpeg 8 API | libfiles |
+| libpng | 1.6.59 | libfiles' recipe, tag archive with SHA-256 | libfiles |
 | libwebp | 1.6.0 | libfiles' recipe, tag archive with SHA-256 | libfiles |
 | NASM | 3.02 | libfiles' recipe, release build with SHA-256, when none is on the path | libjpeg-turbo |
-| libtiff | 4.7.2 | libfiles' recipe, tag archive with SHA-256 | libiw |
-| giflib | 6.1.3 | libfiles' recipe, release archive with SHA-256 | libiw |
+| libtiff | 4.7.2 | libfiles' recipe, tag archive with SHA-256 | libfiles |
+| giflib | 6.1.3 | libfiles' recipe, release archive with SHA-256 | libfiles |
 | hunspell | 1.7.6 | FetchContent, release tarball with SHA-256 | 2.x only |
 
 libtiff finds libfiles' zlib through libfiles' own CMake lookup. libfiles builds the

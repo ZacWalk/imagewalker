@@ -5,10 +5,10 @@ dates and feature highlights belong in [versions.md](versions.md) and
 [features.md](features.md).
 
 - Keep each application independently buildable, with its own UI translation
-  units and a static link to `libiw`, not a runtime dependency on another
-  ImageWalker executable.
-- Put reusable header-only UI helpers in `include/`. Keep compiled image
-  processing, codecs and metadata in `libiw`; see [libiw-plan.md](libiw-plan.md).
+  units and header-only shared imaging, not a runtime dependency on
+  another ImageWalker executable.
+- Put reusable UI helpers, image algorithms and adapters inline in `include/`, and use
+  libfiles for formats, documents, codecs and metadata; see [libiw-plan.md](libiw-plan.md).
 - Fix common imaging behaviour once in the library. Apply equivalent UI,
   tool, printing, settings, logging and worker-ownership fixes consistently
   across `src20`, `src22` and `src23`.
