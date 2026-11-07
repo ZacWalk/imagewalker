@@ -53,7 +53,7 @@ set(LIBDESKTOP_SYSTEM ON CACHE BOOL
 include(FetchContent)
 FetchContent_Declare(libdesktop
     GIT_REPOSITORY https://github.com/ZacWalk/libdesktop.git
-    GIT_TAG        31aae322af6e0696a9597726705b1121bd31580b
+    GIT_TAG        38a23099e761082346b3a39978bd3613b2c2aca2
     EXCLUDE_FROM_ALL)
 FetchContent_MakeAvailable(libdesktop)
 

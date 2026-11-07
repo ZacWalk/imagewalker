@@ -271,6 +271,9 @@ the parts that actually completed, including partially transferred sidecars.
 Recovery copies are secured before destructive changes. Undo checks file
 identity, contents, parent identity and bundle relationships; later external
 edits and newly appeared destinations are refused rather than overwritten.
+A file or folder whose file system gives no usable identity - a share that
+reports none, or a ReFS volume whose file IDs are wider than 64 bits - cannot be
+checked, so Undo refuses it rather than proceeding unverified.
 Directory merges record only the nodes and files actually changed. An unrelated
 child prevents removal of a created directory.
 
