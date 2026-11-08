@@ -734,7 +734,7 @@ namespace iw
 					const auto moved = edits::drag_crop(dragCrop_,
 						app::recti{edits::crop_bounds(original_size(), edits_)}, cropDrag_, delta);
 					if (moved == dragCrop_) edits_.crop = beforeDrag_.crop;
-					else edits_.crop = static_cast<::recti>(moved);
+					else edits_.crop = static_cast<::core::recti>(moved);
 				}
 				set_status_for_photo();
 				invalidate();

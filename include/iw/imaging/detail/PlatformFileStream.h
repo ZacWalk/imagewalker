@@ -11,16 +11,17 @@
 
 #include <iw/imaging/Geometry.h>
 #include <libfiles/stream.h>
+#include <libdesktop/platform.h>
 #include <cstdint>
 #include <filesystem>
 #include <string>
 
 namespace iw::imaging
 {
-	inline df::file_path desktop_file_path(const std::filesystem::path& path)
+	inline ::core::file_path desktop_file_path(const std::filesystem::path& path)
 	{
 		const auto utf8 = path.u8string();
-		return df::file_path(std::string(
+		return ::core::file_path(std::string(
 			reinterpret_cast<const char*>(utf8.data()), utf8.size()));
 	}
 

@@ -349,7 +349,7 @@ namespace iw::imaging
 		if (extension == L".ppt" || extension == L".pps" || extension == L".vsd")
 		{
 			result = {};
-			const auto loaded = pf::load_compound_preview_result(bytes, codec_detail::bitmap_options(options));
+			const auto loaded = ::platform::load_compound_preview(bytes, codec_detail::bitmap_options(options));
 			const auto decoded = codec_detail::map_bitmap_result(loaded, options);
 			decode_result_to_document(decoded, result);
 			return result;

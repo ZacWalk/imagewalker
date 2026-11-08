@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <libdesktop/system.h>
+#include <libdesktop/core.h>
 
 #include <algorithm>
 #include <cmath>
@@ -18,8 +18,8 @@ namespace iw::app
 
 		constexpr sizei() = default;
 		constexpr sizei(int w, int h) : width(w), height(h) {}
-		constexpr sizei(::sizei value) : width(value.cx), height(value.cy) {}
-		constexpr operator ::sizei() const { return {width, height}; }
+		constexpr sizei(::core::sizei value) : width(value.cx), height(value.cy) {}
+		constexpr operator ::core::sizei() const { return {width, height}; }
 		constexpr bool operator==(const sizei&) const = default;
 		constexpr bool is_empty() const { return width <= 0 || height <= 0; }
 		constexpr int area() const { return width * height; }
@@ -43,8 +43,8 @@ namespace iw::app
 
 		constexpr pointi() = default;
 		constexpr pointi(int xValue, int yValue) : x(xValue), y(yValue) {}
-		constexpr pointi(::pointi value) : x(value.x), y(value.y) {}
-		constexpr operator ::pointi() const { return {x, y}; }
+		constexpr pointi(::core::pointi value) : x(value.x), y(value.y) {}
+		constexpr operator ::core::pointi() const { return {x, y}; }
 		constexpr bool operator==(const pointi&) const = default;
 		constexpr pointi operator+(const sizei value) const { return {x + value.width, y + value.height}; }
 		constexpr pointi operator-(const sizei value) const { return {x - value.width, y - value.height}; }
@@ -66,9 +66,9 @@ namespace iw::app
 		constexpr recti(sizei value) : width(value.width), height(value.height) {}
 		constexpr recti(pointi location, sizei extent)
 			: x(location.x), y(location.y), width(extent.width), height(extent.height) {}
-		constexpr recti(::recti value)
+		constexpr recti(::core::recti value)
 			: x(value.left), y(value.top), width(value.width()), height(value.height()) {}
-		constexpr operator ::recti() const { return {x, y, x + width, y + height}; }
+		constexpr operator ::core::recti() const { return {x, y, x + width, y + height}; }
 
 		constexpr int right() const { return x + width; }
 		constexpr int bottom() const { return y + height; }
@@ -91,12 +91,12 @@ namespace iw::app
 		}
 		constexpr recti intersection(recti value) const
 		{
-			const auto result = static_cast<::recti>(*this).intersection(static_cast<::recti>(value));
+			const auto result = static_cast<::core::recti>(*this).intersection(static_cast<::core::recti>(value));
 			return recti(result);
 		}
 		constexpr recti make_union(recti value) const
 		{
-			const auto result = static_cast<::recti>(*this).make_union(static_cast<::recti>(value));
+			const auto result = static_cast<::core::recti>(*this).make_union(static_cast<::core::recti>(value));
 			return recti(result);
 		}
 		constexpr recti inflate(int value) const
@@ -126,11 +126,11 @@ namespace iw::app
 
 	inline constexpr double to_radian(const double value) noexcept
 	{
-		return ::to_radian(value);
+		return ::core::to_radian(value);
 	}
 
 	inline constexpr double to_degrees(const double value) noexcept
 	{
-		return ::to_degrees(value);
+		return ::core::to_degrees(value);
 	}
 }

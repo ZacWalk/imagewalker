@@ -358,6 +358,20 @@ namespace iw::tests
 			canvas.set_items({{gone, files::ItemKind::folder}, {kept, files::ItemKind::folder}}, 2);
 			canvas.load(gone);
 			reporter.check(paths::equal(canvas.path(), gone), L"the folder is displayed");
+			std::vector<app::pointi> contextPoints;
+			canvas.set_context_menu_handler([&contextPoints](const app::pointi point) { contextPoints.push_back(point); });
+			host.canvas()->mouse(platform::MouseMessage::contextMenu, {17, 23});
+			reporter.check(contextPoints == std::vector<app::pointi>{{17, 23}},
+				L"the canvas receives a screen-space context-menu request");
+			ImageCanvasAccess::gesture(canvas, host.canvas(), {platform::GestureKind::zoom, {20, 20}, 480, true, false});
+			ImageCanvasAccess::gesture(canvas, host.canvas(), {platform::GestureKind::zoom, {20, 20}, 576, false, false});
+			reporter.check(!canvas.fit(), L"a pinch distance change leaves fit mode");
+			// A fitted picture has nowhere to pan to, so the pan follows the pinch.
+			const int panInvalidations = host.canvas()->invalidations;
+			ImageCanvasAccess::gesture(canvas, host.canvas(), {platform::GestureKind::pan, {10, 10}, 0, true, false});
+			ImageCanvasAccess::gesture(canvas, host.canvas(), {platform::GestureKind::pan, {24, 31}, 0, false, false});
+			reporter.check(host.canvas()->invalidations > panInvalidations,
+				L"a forwarded pan invalidates the image canvas");
 			canvas.set_items({{gone, files::ItemKind::folder}, {kept, files::ItemKind::folder}}, 2);
 			reporter.check(paths::equal(canvas.path(), gone), L"a refresh keeps a displayed item that is still listed");
 			canvas.select_index(0, false, false);
@@ -877,8 +891,8 @@ namespace iw::tests
 		{
 			reporter.section(L"startup UI dispatch");
 			const auto delivered = std::make_shared<std::atomic_bool>(false);
-			pf::run_ui([delivered] { delivered->store(true); });
-			pf::pump_ui_tasks(1000);
+			::platform::run_ui([delivered] { delivered->store(true); });
+			::platform::pump_ui_tasks(1000);
 			reporter.check(delivered->load(),
 				L"startup workers can queue UI completion before the outer message loop starts");
 			platform::WindowOptions options;
@@ -887,40 +901,40 @@ namespace iw::tests
 			options.bounds = {80, 90, 400, 300};
 			options.visible = false;
 			const auto frame = platform::create_top_level_frame(std::make_shared<platform::FrameReactor>(), options);
-			reporter.check(frame != nullptr, L"headless tests create a shared pf frame");
+			reporter.check(frame != nullptr, L"headless tests create a shared platform frame");
 			reporter.check(frame && frame->native_handle() == 0,
-				L"headless tests use the shared pf fake frame rather than a private HWND");
+				L"headless tests use the hidden platform frame rather than a private HWND");
 			if (frame)
 			{
-				reporter.check(!frame->has_focus(), L"the shared pf fake starts unfocused");
+				reporter.check(!frame->has_focus(), L"the hidden platform frame starts unfocused");
 				frame->set_focus();
-				reporter.check(frame->has_focus(), L"the shared pf fake records focus through the frame contract");
+				reporter.check(frame->has_focus(), L"the hidden platform frame records focus through the frame contract");
 				reporter.check(frame->screen_to_client({3, 4}) == app::pointi{3, 4},
-					L"shared pf screen-to-client mapping is testable without a native handle");
+					L"headless screen-to-client mapping is testable through the platform fake");
 				reporter.check(frame->client_to_screen({3, 4}) == app::pointi{3, 4},
-					L"shared pf client-to-screen mapping is testable without a native handle");
+					L"headless client-to-screen mapping is testable through the platform fake");
 				const auto child = frame->create_child(std::make_shared<platform::FrameReactor>(), options);
-				reporter.check(child != nullptr, L"the shared pf fake creates child frames without native handles");
+				reporter.check(child != nullptr, L"the hidden platform frame creates child frames without native handles");
 				reporter.check(child && child->native_handle() == 0,
-					L"shared pf child frames remain free of private native handles");
+					L"shared platform child frames remain free of native handles");
 				if (child)
 				{
 					child->set_focus();
-					reporter.check(child->has_focus(), L"shared pf child focus is observable through the app contract");
+					reporter.check(child->has_focus(), L"shared platform child focus is observable through the app contract");
 				}
 				const auto surface = platform::create_command_surface(frame);
-				reporter.check(surface != nullptr, L"the command surface is hosted by shared pf child frames");
+				reporter.check(surface != nullptr, L"the command surface is hosted by shared platform child frames");
 				if (surface)
 				{
 					const auto content = surface->layout(frame->client_rect(), false);
 					reporter.check(content.width >= 0 && content.height >= 0,
-						L"the shared pf command surface returns a bounded content layout");
+						L"the shared platform command surface returns a bounded content layout");
 					surface->refresh();
 				}
 				frame->set_maximized(false);
-				reporter.check(!frame->placement().maximized, L"shared pf placement leaves the fake unmaximized");
+				reporter.check(!frame->placement().maximized, L"shared platform placement leaves the hidden frame unmaximized");
 				frame->set_fullscreen(false);
-				reporter.check(!frame->placement().maximized, L"shared pf fullscreen state is safe in headless mode");
+				reporter.check(!frame->placement().maximized, L"shared platform fullscreen state is safe in headless mode");
 			}
 		}
 
@@ -3851,7 +3865,7 @@ namespace iw::tests
 			               L"the usable rectangle stays centred in the frame");
 
 			value = {};
-			value.crop = static_cast<::recti>(app::recti{10, 10, 1000, 1000});
+			value.crop = static_cast<::core::recti>(app::recti{10, 10, 1000, 1000});
 			const app::recti clamped = edits::effective_crop(source, value);
 			reporter.check(clamped.width == 400 && clamped.height == 300,
 			               L"a crop larger than the picture is pulled back inside it");
@@ -3905,7 +3919,7 @@ namespace iw::tests
 
 			value = {};
 			value.rotation = 1;
-			value.crop = static_cast<::recti>(app::recti{30, 40, 120, 200});
+			value.crop = static_cast<::core::recti>(app::recti{30, 40, 120, 200});
 			const auto scaled = edits::scaled_edits(value, {400, 300}, {100, 75});
 			reporter.check(rect_equals(scaled.crop, {7, 10, 30, 50}),
 				L"preview crop coordinates scale in the rotated frame, not the original orientation");
@@ -3943,7 +3957,7 @@ namespace iw::tests
 			               L"a clockwise turn puts the bottom-left pixel top-left");
 
 			edits::ImageEdits cropped;
-			cropped.crop = static_cast<::recti>(app::recti{1, 1, 2, 2});
+			cropped.crop = static_cast<::core::recti>(app::recti{1, 1, 2, 2});
 			const auto cut = edits::apply(photo, cropped);
 			reporter.check(cut.width == 2 && cut.height == 2 && cut.pixels[0] == photo.pixels[5],
 			               L"a crop takes exactly the reviewed rectangle");

@@ -8,7 +8,6 @@ namespace iw::platform {}
 #include <iw/imaging/Diagnostics.h>
 #include <cstdio>
 
-extern const std::string_view s_app_name = "ImageWalker-Header-Tests";
 bool check_other_translation_unit();
 bool check_legacy_headers();
 void set_sink_from_other_translation_unit(iw::imaging::DiagnosticSink sink);
@@ -21,6 +20,7 @@ namespace
 
 int main()
 {
+	::core::set_app_name("ImageWalker-Header-Tests");
 	set_sink_from_other_translation_unit(receive);
 	iw::imaging::report_diagnostic(L"shared diagnostic state");
 	iw::imaging::set_diagnostic_sink(nullptr);

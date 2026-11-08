@@ -65,7 +65,7 @@ namespace iw::files
 			}
 
 			std::filesystem::path path() const { return ::platform::to_stream_path(path_); }
-			const df::file_path& desktop_path() const { return path_; }
+			const ::core::file_path& desktop_path() const { return path_; }
 
 			std::error_code commit(const std::filesystem::path& destination, const bool overwrite)
 			{
@@ -78,7 +78,7 @@ namespace iw::files
 			}
 
 		private:
-			df::file_path path_;
+			::core::file_path path_;
 		};
 
 		ItemKind classify_extension(const std::wstring& extension)

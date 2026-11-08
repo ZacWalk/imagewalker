@@ -69,7 +69,7 @@ foreach(path IN LISTS app_headers)
     endif()
 endforeach()
 
-# IW30's active presentation boundary is libdesktop's pf layer. Retired
+# IW30's active presentation boundary is libdesktop's ui/render layers. Retired
 # Win32/GDI implementations must not remain in source (even behind #if 0),
 # because they are routinely re-enabled by an accidental merge conflict.
 foreach(path IN ITEMS

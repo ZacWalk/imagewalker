@@ -11,7 +11,7 @@
 #include "iw/imaging/WebPCodec.h"
 #include <iw/imaging/detail/PlatformFileStream.h>
 
-#include <platform.h>
+#include <libdesktop/platform.h>
 #include <libfiles/document.h>
 #include <libfiles/encode.h>
 #include <libfiles/icc.h>
@@ -57,16 +57,16 @@ namespace iw::imaging
 			return result;
 		}
 
-		inline df::file_path desktop_path(const std::filesystem::path& path)
+		inline ::core::file_path desktop_path(const std::filesystem::path& path)
 		{
 			const auto utf8 = path.u8string();
-			return df::file_path(std::string(
+			return ::core::file_path(std::string(
 				reinterpret_cast<const char*>(utf8.data()), utf8.size()));
 		}
 
-		inline pf::file_path core_path(const std::filesystem::path& path)
+		inline ::core::file_path core_path(const std::filesystem::path& path)
 		{
-			return pf::file_path(desktop_path(path).pack());
+			return desktop_path(path);
 		}
 
 		inline std::wstring lower_extension(const std::filesystem::path& path)
@@ -95,9 +95,9 @@ namespace iw::imaging
 				static_cast<std::uint64_t>(INT_MAX)));
 		}
 
-		inline pf::bitmap_load_options bitmap_options(const DecodeOptions& options)
+		inline ::platform::image_load_options bitmap_options(const DecodeOptions& options)
 		{
-			pf::bitmap_load_options result;
+			::platform::image_load_options result;
 			result.max_decoded_bytes = options.maximumBytes;
 			result.target_width = options.maximumWidth > 0
 				? static_cast<std::uint32_t>(options.maximumWidth) : 0;
@@ -115,19 +115,19 @@ namespace iw::imaging
 			return result;
 		}
 
-		inline DecodeResult map_bitmap_result(pf::bitmap_load_result loaded,
+		inline DecodeResult map_bitmap_result(::platform::image_load_result loaded,
 		                              const DecodeOptions& options)
 		{
 			DecodeResult result;
 			result.orientation = static_cast<int>(loaded.stored_orientation);
-			if (loaded.error == pf::bitmap_load_error::cancelled ||
+			if (loaded.error == ::platform::image_load_error::cancelled ||
 				cancelled(options))
 			{
 				result.error = ImageError::cancelled;
 				result.message = L"Image decoding was cancelled.";
 				return result;
 			}
-			if (loaded.error == pf::bitmap_load_error::too_large)
+			if (loaded.error == ::platform::image_load_error::too_large)
 			{
 				result.error = ImageError::resource_limit;
 				result.message = L"The image exceeds the decoded-memory limit.";
@@ -135,34 +135,68 @@ namespace iw::imaging
 			}
 			if (!loaded.image)
 			{
-				result.error = loaded.error == pf::bitmap_load_error::unavailable
+				result.error = loaded.error == ::platform::image_load_error::unavailable
 					? ImageError::unsupported : ImageError::read_failed;
 				result.message = loaded.diagnostic.empty()
 					? L"The Windows image codec could not decode the image."
 					: std::wstring(loaded.diagnostic.begin(), loaded.diagnostic.end());
 				return result;
 			}
-			auto& bitmap = *loaded.image;
-			if (bitmap.width <= 0 || bitmap.height <= 0 ||
-				static_cast<std::uint64_t>(bitmap.width) * bitmap.height >
-					std::numeric_limits<std::size_t>::max() / sizeof(std::uint32_t))
+			const auto& surface = *loaded.image;
+			const auto width = surface.width();
+			const auto height = surface.height();
+			const auto max_size = (std::numeric_limits<std::size_t>::max)();
+			if (width == 0 || height == 0 ||
+				width > static_cast<std::uint32_t>(INT_MAX) ||
+				height > static_cast<std::uint32_t>(INT_MAX) ||
+				static_cast<std::uint64_t>(width) * height >
+					static_cast<std::uint64_t>(max_size / sizeof(std::uint32_t)) ||
+				static_cast<std::size_t>(width) > max_size / sizeof(std::uint32_t))
 			{
 				result.error = ImageError::resource_limit;
 				result.message = L"The decoded image dimensions are too large.";
 				return result;
 			}
-			result.image.width = bitmap.width;
-			result.image.height = bitmap.height;
-			result.image.pixels = std::move(bitmap.pixels);
-			result.image.originalWidth = loaded.source_width
-				? static_cast<int>(loaded.source_width) : bitmap.width;
-			result.image.originalHeight = loaded.source_height
-				? static_cast<int>(loaded.source_height) : bitmap.height;
+			const auto row_bytes = static_cast<std::size_t>(width) * sizeof(std::uint32_t);
+			if (surface.stride() < row_bytes || surface.stride() > max_size / height ||
+				surface.size() < surface.stride() * height)
+			{
+				result.error = ImageError::resource_limit;
+				result.message = L"The decoded image dimensions are too large.";
+				return result;
+			}
+			const auto original_width = loaded.source_width ? loaded.source_width : width;
+			const auto original_height = loaded.source_height ? loaded.source_height : height;
+			if (original_width > static_cast<std::uint32_t>(INT_MAX) ||
+				original_height > static_cast<std::uint32_t>(INT_MAX))
+			{
+				result.error = ImageError::resource_limit;
+				result.message = L"The decoded image dimensions are too large.";
+				return result;
+			}
+			try
+			{
+				result.image.width = static_cast<int>(width);
+				result.image.height = static_cast<int>(height);
+				result.image.pixels.resize(static_cast<std::size_t>(width) * height);
+				for (std::uint32_t y = 0; y < height; ++y)
+					std::memcpy(result.image.pixels.data() +
+						static_cast<std::size_t>(y) * width,
+						surface.pixels_line(static_cast<int>(y)), row_bytes);
+			}
+			catch (const std::bad_alloc&)
+			{
+				result.image = {};
+				result.error = ImageError::resource_limit;
+				result.message = L"The decoded image dimensions are too large.";
+				return result;
+			}
+			result.image.originalWidth = static_cast<int>(original_width);
+			result.image.originalHeight = static_cast<int>(original_height);
 			result.reduced = result.image.width != result.image.originalWidth ||
 				result.image.height != result.image.originalHeight;
 			return result;
 		}
-
 		inline std::optional<libfiles::image_format> image_format(
 			const ImageSaveFormat format)
 		{
@@ -369,7 +403,7 @@ namespace iw::imaging
 			return webp::probe(path, width, height);
 		if (backend == PixelDecoder::native)
 			return detail::modern_native_dimensions(path, width, height);
-		const auto probe = pf::probe_bitmap_file(core_path(path));
+		const auto probe = ::platform::probe_image_file(core_path(path));
 		if (!probe || probe->width > INT_MAX || probe->height > INT_MAX)
 			return false;
 		width = static_cast<int>(probe->width);
@@ -383,7 +417,7 @@ namespace iw::imaging
 	{
 		using namespace codec_detail;
 		if (lowercase_extension(path) == L".webp") return 1;
-		const auto probe = pf::probe_bitmap_file(core_path(path));
+		const auto probe = ::platform::probe_image_file(core_path(path));
 		return probe && probe->orientation ? probe->orientation : 1;
 	}
 
@@ -469,7 +503,7 @@ namespace iw::imaging
 	{
 		using namespace codec_detail;
 		std::vector<std::wstring> result;
-		for (const auto& extension : pf::installed_bitmap_extensions())
+		for (const auto& extension : ::platform::installed_image_extensions())
 		{
 			if (extension.empty()) continue;
 			std::wstring value(extension.begin(), extension.end());
@@ -503,7 +537,7 @@ namespace iw::imaging
 		if (backend == PixelDecoder::native || backend == PixelDecoder::webp)
 			return detail::modern_decode_native(path, options);
 
-		const auto loaded = pf::load_bitmap_file_result(core_path(path),
+		const auto loaded = ::platform::load_image_file(core_path(path),
 			bitmap_options(options));
 		return map_bitmap_result(std::move(loaded), options);
 	}
@@ -527,7 +561,7 @@ namespace iw::imaging
 		if (backend == PixelDecoder::native || backend == PixelDecoder::webp)
 			return detail::modern_decode_native(bytes, extension, options);
 
-		return map_bitmap_result(pf::load_bitmap_memory_result(bytes,
+		return map_bitmap_result(::platform::load_image_memory(bytes,
 			bitmap_options(options)), options);
 	}
 
@@ -541,7 +575,7 @@ namespace iw::imaging
 			return detail::modern_decode_native(bytes, extension, options);
 		if (decoder == PixelDecoder::webp)
 			return decode(bytes, L".webp", options);
-		return map_bitmap_result(pf::load_bitmap_memory_result(bytes,
+		return map_bitmap_result(::platform::load_image_memory(bytes,
 			bitmap_options(options)), options);
 	}
 

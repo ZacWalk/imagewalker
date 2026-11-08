@@ -18,8 +18,6 @@
 #include <iw/imaging/detail/PlatformFileStream.h>
 #include "iw/testrunner.h"
 
-extern const std::string_view s_app_name = "ImageWalker-Imaging-Tests";
-
 IW_TEST(QuarterTurnsPreserveEveryPixelAndAlpha)
 {
 	const iw::imaging::PixelImage source{3, 2,
@@ -696,5 +694,6 @@ IW_TEST(NativeDecodesStopWhenCancelledPartWayThroughThePixels)
 
 int main()
 {
+	::core::set_app_name("ImageWalker-Imaging-Tests");
 	return IW::Test::RunAll("imagewalker-imaging");
 }

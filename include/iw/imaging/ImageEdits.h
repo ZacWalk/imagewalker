@@ -15,6 +15,9 @@
 
 namespace iw::edits
 {
+	using ::core::recti;
+	using ::core::sizei;
+
 	// Every value is neutral at zero, so a default-constructed stack is the identity.
 	struct ImageEdits
 	{

@@ -2,8 +2,8 @@
 
 Development requirements for all five applications.
 
-- Each is a standalone x64 executable with one entry-point file and one test
-  file.
+- Each is a standalone x64 executable with its entry point and application
+  tests.
 - Use the shared inline imaging headers and dependent libraries directly for image
   loading and manipulation. Keep UI, resources, settings, worker scheduling
   and final file publication in the application. See [libiw-plan.md](libiw-plan.md).

@@ -827,7 +827,8 @@ namespace iw
 		if (!batch.empty())
 		{
 			thumbnailsInFlight_ = true;
-			platform::queue_work(platform::WorkQueue::thumbnail, [this, batch = std::move(batch)]
+			platform::queue_work(platform::WorkQueue::thumbnail,
+			                     [this, alive = std::weak_ptr(alive_), batch = std::move(batch)]
 			{
 				const auto exiting = platform::exit_token();
 				for (const auto& request : batch)
@@ -841,15 +842,16 @@ namespace iw
 						static_cast<ThumbnailRequest&>(result) = request;
 						result.width = result.height = 0;
 					}
-					platform::queue_ui([this, result = std::move(result)]() mutable
+					platform::queue_ui([this, alive, result = std::move(result)]() mutable
 					{
-						apply_thumbnail(std::move(result));
+						if (!alive.expired()) apply_thumbnail(std::move(result));
 					});
 				}
 				// The batch is only re-primed once its results have landed, so each new batch
 				// is chosen from the viewport as it stands then rather than as it was.
-				platform::queue_ui([this]
+				platform::queue_ui([this, alive]
 				{
+					if (alive.expired()) return;
 					thumbnailsInFlight_ = false;
 					rebuild_layout();
 					queue_thumbnails();
@@ -986,7 +988,7 @@ namespace iw
 		const std::uint64_t generation = collageGeneration_;
 		const int requestSize = collageDecodeSize_;
 		platform::queue_work(platform::WorkQueue::thumbnail,
-		                     [this, generation, requestSize, batch = std::move(batch)]
+		                     [this, alive = std::weak_ptr(alive_), generation, requestSize, batch = std::move(batch)]
 		                     {
 			                     const auto exiting = platform::exit_token();
 			                     for (const auto& [cell, path] : batch)
@@ -996,13 +998,14 @@ namespace iw
 				                     try { image = files::load_thumbnail(path, requestSize, requestSize); }
 				                     catch (...) { image = {}; }
 				                     platform::queue_ui(
-					                     [this, generation, cell, image = std::move(image)]() mutable
+					                     [this, alive, generation, cell, image = std::move(image)]() mutable
 					                     {
-						                     apply_collage(generation, cell, std::move(image));
+						                     if (!alive.expired()) apply_collage(generation, cell, std::move(image));
 					                     });
 			                     }
-			                     platform::queue_ui([this]
+			                     platform::queue_ui([this, alive]
 			                     {
+				                     if (alive.expired()) return;
 				                     collageInFlight_ = false;
 				                     rebuild_layout();
 				                     invalidate();
@@ -1072,7 +1075,7 @@ namespace iw
 		else if (pendingComparison_) request = std::exchange(pendingComparison_, std::nullopt);
 		else return;
 		imageInFlight_ = true;
-		platform::queue_work(platform::WorkQueue::image, [this, request = std::move(*request)]
+		platform::queue_work(platform::WorkQueue::image, [this, alive = std::weak_ptr(alive_), request = std::move(*request)]
 		{
 			ImageResult result;
 			static_cast<ImageRequest&>(result) = request;
@@ -1100,7 +1103,10 @@ namespace iw
 				result.half = {};
 				result.quarter = {};
 			}
-			platform::queue_ui([this, result = std::move(result)]() mutable { apply_image(std::move(result)); });
+			platform::queue_ui([this, alive, result = std::move(result)]() mutable
+			{
+				if (!alive.expired()) apply_image(std::move(result));
+			});
 		});
 	}
 
@@ -1115,7 +1121,7 @@ namespace iw
 			invalidate();
 			return;
 		}
-		platform::queue_work(platform::WorkQueue::metadata, [this, job = std::move(job)]() mutable
+		platform::queue_work(platform::WorkQueue::metadata, [this, alive = std::weak_ptr(alive_), job = std::move(job)]() mutable
 		{
 			constexpr size_t chunk = 8;
 			const size_t end = (std::min)(job.offset + chunk, job.paths.size());
@@ -1130,7 +1136,10 @@ namespace iw
 				catch (...) {}
 				job.values.push_back(std::move(value));
 			}
-			platform::queue_ui([this, job = std::move(job)]() mutable { pump_metadata(std::move(job)); });
+			platform::queue_ui([this, alive, job = std::move(job)]() mutable
+			{
+				if (!alive.expired()) pump_metadata(std::move(job));
+			});
 		});
 	}
 
@@ -1246,15 +1255,15 @@ namespace iw
 				if (comparisonLoading_.apply(result.generation, ui::LoadingModel::Phase::source,
 			                                  result.image.width, result.image.height))
 				{
-				comparisonImage_ = std::move(result.image);
-				comparisonView_.sourceWidth = comparisonImage_.originalWidth
-					                              ? comparisonImage_.originalWidth
-					                              : comparisonImage_.width;
-				comparisonView_.sourceHeight = comparisonImage_.originalHeight
-					                               ? comparisonImage_.originalHeight
-					                               : comparisonImage_.height;
-				comparisonView_.zoom.set_source({comparisonView_.sourceWidth, comparisonView_.sourceHeight});
-				changed = true;
+					comparisonImage_ = std::move(result.image);
+					comparisonView_.sourceWidth = comparisonImage_.originalWidth
+					                                  ? comparisonImage_.originalWidth
+					                                  : comparisonImage_.width;
+					comparisonView_.sourceHeight = comparisonImage_.originalHeight
+					                                   ? comparisonImage_.originalHeight
+					                                   : comparisonImage_.height;
+					comparisonView_.zoom.set_source({comparisonView_.sourceWidth, comparisonView_.sourceHeight});
+					changed = true;
 				}
 			}
 		}
@@ -1382,6 +1391,8 @@ namespace iw
 		case platform::MouseMessage::leftButtonDoubleClick: event = InputEvent::leftButtonDoubleClick;
 			break;
 		case platform::MouseMessage::rightButtonDown: event = InputEvent::rightButtonDown;
+			break;
+		case platform::MouseMessage::rightButtonUp: event = InputEvent::rightButtonUp;
 			break;
 		case platform::MouseMessage::leftButtonUp: event = InputEvent::leftButtonUp;
 			break;
@@ -1632,6 +1643,8 @@ namespace iw
 				}
 				return 0;
 			}
+		case InputEvent::rightButtonUp:
+			return 0;
 		case InputEvent::move:
 			{
 				const int x = mouse.point.x;

@@ -1,8 +1,7 @@
 # ImageWalker 3.0 -> imagewalker30.exe
 #
-# Not a port: 3.0 is written from scratch against the modern SDK, so it does not
-# take iw::flags -- that interface exists to keep the 2005-era ATL/WTL trees
-# compiling under /permissive and suppresses warnings this code does not need.
+# ImageWalker 3.0 uses the shared ui frame, render context and platform services.
+# The historical ATL/WTL releases keep their own build targets and adapters.
 # Its own topic set is included in the portable ImageWalker.chm.
 
 set(IW30_SOURCES
@@ -47,17 +46,14 @@ if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_LIBDESKTOP
     set(FETCHCONTENT_SOURCE_DIR_LIBDESKTOP "${CMAKE_SOURCE_DIR}/../libdesktop" CACHE PATH
         "A libdesktop checkout to build instead of the published revision")
 endif()
-set(LIBDESKTOP_SYSTEM ON CACHE BOOL
-    "Build libdesktop-system for ImageWalker 3.0" FORCE)
-
 include(FetchContent)
 FetchContent_Declare(libdesktop
     GIT_REPOSITORY https://github.com/ZacWalk/libdesktop.git
-    GIT_TAG        38a23099e761082346b3a39978bd3613b2c2aca2
+    GIT_TAG        04109ee82a500db38d439fa281bbc3f43124adfe
     EXCLUDE_FROM_ALL)
 FetchContent_MakeAvailable(libdesktop)
 
-platform_add_app(imagewalker30
+libdesktop_add_app(imagewalker30
     SOURCES ${IW30_SOURCES} app.rc
     EMBED
         "${CMAKE_CURRENT_SOURCE_DIR}/Res/ToolbarSymbols.bmp"
@@ -86,18 +82,12 @@ target_compile_options(imagewalker30 PRIVATE
     /EHsc /W4 /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8 /MP
     $<$<NOT:$<CONFIG:Debug>>:/Zi /guard:cf>)
 
-target_link_libraries(imagewalker30 PRIVATE comctl32 windowscodecs ole32 shlwapi htmlhelp
+target_link_libraries(imagewalker30 PRIVATE libdesktop::ui comctl32 windowscodecs ole32 shlwapi htmlhelp
     mfuuid bcrypt
     iw_imaging
     iw::jpeg iw::png iw::tiff iw::gif iw::zlib
-    libfiles::libfiles
-    libdesktop::core
-    libdesktop::ui
-    libdesktop::system)
+    libfiles::libfiles)
 
 # Optimised builds keep their PDBs.
 target_link_options(imagewalker30 PRIVATE
     $<$<NOT:$<CONFIG:Debug>>:/DEBUG /OPT:REF /OPT:ICF /INCREMENTAL:NO>)
-
-# The app embeds its own manifest as resource 1.
-target_link_options(imagewalker30 PRIVATE /MANIFEST:NO)

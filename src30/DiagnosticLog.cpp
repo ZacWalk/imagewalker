@@ -102,7 +102,7 @@ namespace iw::diagnostics
 		if (!error_)
 		{
 			if (run_log().write(L"ImageWalker 3.0 exiting"))
-				::platform::trace(std::string("ImageWalker: unable to finish the diagnostic log."));
+				::core::debug_output(std::string("ImageWalker: unable to finish the diagnostic log."));
 		}
 		run_log().close();
 	}

@@ -67,6 +67,7 @@ namespace iw::tests
 				const auto keepAlive = reactor;
 				platform::MouseInput input;
 				input.point = point;
+				input.screenPoint = point;
 				keepAlive->mouse(shared_from_this(), message, input);
 			}
 		}
@@ -78,6 +79,16 @@ namespace iw::tests
 		}
 	};
 
+
+	class ImageCanvasAccess
+	{
+	public:
+		static void gesture(ImageCanvas& canvas, const platform::WindowFramePtr& frame,
+		                    const platform::GestureInput& input)
+		{
+			canvas.gesture(frame, input);
+		}
+	};
 	class RecordingChrome final : public platform::CommandSurface
 	{
 	public:

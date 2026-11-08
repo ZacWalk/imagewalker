@@ -116,7 +116,7 @@ namespace iw::tests
 		edits::ImageEdits stack;
 		stack.perspective = trapezoid;
 		stack.rotation = 1;
-		stack.crop = static_cast<::recti>(app::recti{10, 20, 50, 60});
+		stack.crop = static_cast<::core::recti>(app::recti{10, 20, 50, 60});
 		stack.brightness = 20;
 		const auto saved = edits::apply(image, stack);
 		auto geometryOnly = stack;

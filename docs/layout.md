@@ -44,9 +44,11 @@ entry point and tests in its directory. Embed `ImageWalker.chm` in every
 resource script. Preserve independent builds of the 2.x applications; see
 [architecture-2x.md](architecture-2x.md).
 
-For ImageWalker 3.0, use libdesktop's `pf::`/system contracts and
-`include/iw/imaging`, not the historical compatibility headers or WTL utility
-geometry. Keep ordinary codec acquisition in libfiles; the explicit Windows
-display adapter calls libdesktop-core's bitmap API. `third-party/` pins the
+For ImageWalker 3.0, use libdesktop's `core`, `platform`, `render` and `ui`
+contracts and `include/iw/imaging`, not the historical compatibility headers or
+WTL utility geometry. The application frame and drawn menu bar come from
+libdesktop::ui; the folder tree remains an application-owned Win32 child. Keep
+ordinary codec acquisition in libfiles; the explicit Windows display adapter
+calls libdesktop's platform image API. `third-party/` pins the
 library and the application-owned Hunspell recipe. Place 3.0's help topics in
 the common `ImageWalker.chm`.

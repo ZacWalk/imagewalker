@@ -17,14 +17,18 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace iw
 {
+	namespace tests { class ImageCanvasAccess; }
+
 	class ImageCanvas final : public platform::FrameReactor
 	{
+		friend class tests::ImageCanvasAccess;
 	public:
 		enum class ItemMode { details, thumbnails, matrix, single };
 
@@ -209,6 +213,7 @@ namespace iw
 			leftButtonDown,
 			leftButtonDoubleClick,
 			rightButtonDown,
+			rightButtonUp,
 			leftButtonUp,
 			move,
 			wheel,
@@ -460,5 +465,9 @@ namespace iw
 		std::function<void(const std::filesystem::path&)> loadErrorHandler_;
 		std::function<void(size_t, size_t)> informationProgressHandler_;
 		std::function<void(std::vector<std::filesystem::path>)> fileDragHandler_;
+
+		// Expires with the canvas, so a completion its workers queued can tell that it has gone: a
+		// headless pump may run one after the canvas that asked for it.
+		std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 	};
 }

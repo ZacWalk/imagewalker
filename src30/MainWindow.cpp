@@ -157,6 +157,12 @@ namespace iw
 			return 0;
 		case platform::WindowMessage::destroy:
 			++folderScanGeneration_;
+			if (task_ && task_->frame()) task_->frame()->set_reactor({});
+			if (modeBar_ && modeBar_->frame()) modeBar_->frame()->set_reactor({});
+			if (canvas_.frame()) canvas_.frame()->set_reactor({});
+			if (centerFrame_) centerFrame_->set_reactor({});
+			if (treeSplitterFrame_) treeSplitterFrame_->set_reactor({});
+			if (contentFrame_) contentFrame_->set_reactor({});
 			shellTree_.reset();
 			chrome_.reset();
 			save_settings();

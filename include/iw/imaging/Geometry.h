@@ -14,9 +14,11 @@
 #pragma push_macro("min")
 #undef max
 #undef min
-#include <libdesktop/system.h>
+#include <libdesktop/core.h>
+
 #pragma pop_macro("min")
 #pragma pop_macro("max")
+
 
 #pragma pop_macro("max")
 #pragma pop_macro("min")

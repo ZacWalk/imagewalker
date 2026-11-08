@@ -24,7 +24,7 @@ namespace iw::imaging
 	using DecodedImage = PixelImage;
 
 	// Compatibility path for the 3.0 file workflow. The implementation delegates
-	// normalization and extended-path handling to libdesktop-system.
+	// normalization and extended-path handling to libdesktop's platform layer.
 	std::filesystem::path native_path(const std::filesystem::path& path);
 
 	enum class ImageSaveFormat { png = 0, jpeg = 1, bmp = 2, tiff = 3, webp = 4 };

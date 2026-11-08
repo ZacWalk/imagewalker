@@ -50,7 +50,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib" CACHE PATH "" FORCE
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib" CACHE PATH "" FORCE)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" CACHE PATH "" FORCE)
 
-# libdesktop system and core are consumed by the shared imaging headers. Declare
+# libdesktop's pf and platform layers are consumed by the shared imaging headers. Declare
 # the dependency before any consumer targets so their public usage
 # requirements, including include paths, remain target-owned.
 include(FetchContent)
@@ -59,11 +59,9 @@ if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_LIBDESKTOP
     set(FETCHCONTENT_SOURCE_DIR_LIBDESKTOP "${PROJECT_SOURCE_DIR}/../libdesktop" CACHE PATH
         "A libdesktop checkout to build instead of the published revision")
 endif()
-set(LIBDESKTOP_SYSTEM ON CACHE BOOL
-    "Build libdesktop-system for ImageWalker" FORCE)
 FetchContent_Declare(libdesktop
     GIT_REPOSITORY https://github.com/ZacWalk/libdesktop.git
-    GIT_TAG        38a23099e761082346b3a39978bd3613b2c2aca2
+    GIT_TAG        04109ee82a500db38d439fa281bbc3f43124adfe
     EXCLUDE_FROM_ALL)
 FetchContent_MakeAvailable(libdesktop)
 

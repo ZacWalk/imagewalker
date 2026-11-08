@@ -4,7 +4,7 @@ add_library(iw_imaging INTERFACE)
 target_include_directories(iw_imaging INTERFACE "${PROJECT_SOURCE_DIR}/include")
 target_compile_features(iw_imaging INTERFACE cxx_std_20)
 target_link_libraries(iw_imaging INTERFACE
-    libdesktop::core libdesktop::system libfiles::libfiles)
+    libdesktop::core libdesktop::platform libfiles::libfiles)
 
 add_library(iw_legacy INTERFACE)
 target_include_directories(iw_legacy INTERFACE

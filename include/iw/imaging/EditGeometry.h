@@ -17,6 +17,9 @@
 
 namespace iw::edits
 {
+	using ::core::pointi;
+	using ::core::sizei;
+
 	struct Corner
 	{
 		double x{};

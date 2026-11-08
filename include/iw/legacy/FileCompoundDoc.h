@@ -10,7 +10,13 @@
 #include <iw/legacy/LegacyPch.h>
 #include "FileFormat.h"
 
-#include <platform.h>
+#pragma push_macro("min")
+#pragma push_macro("max")
+#undef min
+#undef max
+#include <libdesktop/platform/image.h>
+#pragma pop_macro("max")
+#pragma pop_macro("min")
 
 class  CLoadCompoundDoc : public CLoad<CLoadCompoundDoc>
 {

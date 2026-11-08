@@ -219,8 +219,6 @@ inline bool CLoadBmp::Write(const CString& strType, IW::IStreamOut* pStreamOut, 
 #include "LegacyPch.h"
 #include "FileCompoundDoc.h"
 
-#include <platform.h>
-
 namespace iw::legacy_detail::compound_doc
 {
 	inline std::span<const std::uint8_t> read_input(IW::IStreamIn& input,
@@ -250,9 +248,9 @@ namespace iw::legacy_detail::compound_doc
 		return owned;
 	}
 
-	inline void set_failure(IW::IStatus& status, const pf::bitmap_load_result& result)
+	inline void set_failure(IW::IStatus& status, const ::platform::image_load_result& result)
 	{
-		if (result.error == pf::bitmap_load_error::cancelled)
+		if (result.error == ::platform::image_load_error::cancelled)
 		{
 			status.SetError(L"Compound preview decoding was cancelled.");
 			return;
@@ -260,7 +258,7 @@ namespace iw::legacy_detail::compound_doc
 		const auto message = result.diagnostic.empty()
 			? CString(L"The compound document thumbnail could not be decoded.")
 			: CString(CA2W(result.diagnostic.c_str(), CP_UTF8));
-		if (result.error == pf::bitmap_load_error::too_large)
+		if (result.error == ::platform::image_load_error::too_large)
 			status.SetResourceError(message);
 		else
 			status.SetError(message);
@@ -289,7 +287,7 @@ try
 		*pStreamIn, owned, *pStatus);
 	if (bytes.empty()) return false;
 
-	pf::bitmap_load_options options;
+	::platform::image_load_options options;
 	options.max_pixels = IW::kMaxPageBytes / sizeof(std::uint32_t);
 	options.max_decoded_bytes = IW::kMaxPageBytes;
 	const auto thumbnail = pImageOut->GetThumbnailSize();
@@ -307,40 +305,48 @@ try
 			static_cast<int>((std::min)(total, static_cast<std::uint64_t>(INT_MAX))));
 	};
 
-	const auto decoded = pf::load_compound_preview_result(bytes, options);
+	const auto decoded = ::platform::load_compound_preview(bytes, options);
 	if (!decoded.success())
 	{
 		iw::legacy_detail::compound_doc::set_failure(*pStatus, decoded);
 		return false;
 	}
 	const auto& bitmap = *decoded.image;
-	if (bitmap.width <= 0 || bitmap.height <= 0 ||
-		bitmap.pixels.size() != static_cast<std::size_t>(bitmap.width) * bitmap.height)
+	const auto width = bitmap.width();
+	const auto height = bitmap.height();
+	const auto row_bytes = static_cast<std::size_t>(width) * sizeof(std::uint32_t);
+	if (width == 0 || height == 0 || width > static_cast<std::uint32_t>(INT_MAX) ||
+		height > static_cast<std::uint32_t>(INT_MAX) ||
+		bitmap.format() != ::core::texture_format::ARGB ||
+		bitmap.stride() < row_bytes ||
+		bitmap.stride() > (std::numeric_limits<std::size_t>::max)() / height ||
+		bitmap.size() != bitmap.stride() * height)
 	{
 		pStatus->SetError(L"The compound document thumbnail has invalid pixel storage.");
 		return false;
 	}
 
+	const auto image_width = static_cast<int>(width);
+	const auto image_height = static_cast<int>(height);
 	IW::CameraSettings settings;
 	settings.OriginalImageSize = CSize(
-		static_cast<int>(decoded.source_width ? decoded.source_width : bitmap.width),
-		static_cast<int>(decoded.source_height ? decoded.source_height : bitmap.height));
+		static_cast<int>(decoded.source_width ? decoded.source_width : width),
+		static_cast<int>(decoded.source_height ? decoded.source_height : height));
 	settings.OriginalBpp = IW::PixelFormat::PF32;
 	settings.Orientation = decoded.stored_orientation;
 	pImageOut->SetCameraSettings(settings);
 	pImageOut->SetStatistics(GetTitle());
 	pImageOut->SetLoaderName(GetKey());
-	pImageOut->CreatePage(CRect(0, 0, bitmap.width, bitmap.height),
+	pImageOut->CreatePage(CRect(0, 0, image_width, image_height),
 		IW::PixelFormat::PF32, true);
-	const auto* pixels = bitmap.pixels.data();
-	for (int y = 0; y < bitmap.height; ++y)
+	for (int y = 0; y < image_height; ++y)
 	{
 		if (pStatus->QueryCancel())
 		{
 			pStatus->SetError(L"Compound preview decoding was cancelled.");
 			return false;
 		}
-		pImageOut->SetBitmap(y, pixels + static_cast<std::size_t>(y) * bitmap.width);
+		pImageOut->SetBitmap(y, bitmap.pixels_line(y));
 	}
 	pImageOut->Flush();
 	return true;

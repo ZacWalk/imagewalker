@@ -72,7 +72,7 @@ Test one-item worker failure followed by successful work, stop and start reuse,
 image conversion and lock boundaries, alpha edits, format round trips, damaged
 and misnamed images, temporary-file commit behaviour and rename rollback.
 Compressed Undo streams report consumed input bytes and zero-length transfers
-consistently. Cover search negation and self-assignment in all three 2.x suites. For
+consistently. Cover search negation and self-assignment in each 2.x suite. For
 ImageWalker 3.0, also
 test reviewed writes, identity changes, cancellation, rename cycles and
 sidecars, edit previews, saves and backups, all eight orientations, carried and

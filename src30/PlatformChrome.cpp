@@ -1,5 +1,5 @@
 // ImageWalker by Zac Walker
-// Draws the command surface through the shared pf frame and draw contracts.
+// Draws the command surface through shared ui child frames and render contracts.
 
 #include "Platform.h"
 
@@ -168,8 +168,11 @@ namespace iw::platform
 
 			app::recti layout(const app::recti client, const bool fullscreen) override
 			{
-				fullscreen_ = fullscreen;
-				set_frame_menu(owner_, fullscreen ? std::vector<Menu>{} : menus_);
+				if (fullscreen_ != fullscreen)
+				{
+					fullscreen_ = fullscreen;
+					set_frame_menu(owner_, fullscreen ? std::vector<Menu>{} : menus_);
+				}
 				if (!top_ || !statusFrame_) return client;
 				if (fullscreen)
 				{
@@ -177,17 +180,18 @@ namespace iw::platform
 					statusFrame_->show(false);
 					return client;
 				}
-				const int topHeight = (std::min)(scale_metric(36, dpi_), (std::max)(0, client.height));
+				const int menuHeight = menus_.empty() ? 0 : scale_metric(24, dpi_);
+				const int topHeight = (std::min)(scale_metric(36, dpi_), (std::max)(0, client.height - menuHeight));
 				const int statusHeight = (std::min)(
-					scale_metric(28, dpi_), (std::max)(0, client.height - topHeight));
-				top_->move({client.x, client.y, client.width, topHeight});
+					scale_metric(28, dpi_), (std::max)(0, client.height - menuHeight - topHeight));
+				top_->move({client.x, client.y + menuHeight, client.width, topHeight});
 				statusFrame_->move({client.x, client.bottom() - statusHeight, client.width, statusHeight});
 				top_->show(true);
 				statusFrame_->show(true);
 				top_->invalidate();
 				statusFrame_->invalidate();
-				return {client.x, client.y + topHeight, client.width,
-				        (std::max)(0, client.height - topHeight - statusHeight)};
+				return {client.x, client.y + menuHeight + topHeight, client.width,
+				        (std::max)(0, client.height - menuHeight - topHeight - statusHeight)};
 			}
 
 			void set_dpi(const unsigned int dpi) override
@@ -199,7 +203,11 @@ namespace iw::platform
 				invalidate();
 			}
 
-			void refresh() override { invalidate(); }
+			void refresh() override
+			{
+				set_frame_menu(owner_, fullscreen_ ? std::vector<Menu>{} : menus_);
+				invalidate();
+			}
 
 			void paint(const WindowFramePtr& frame, DrawContext& draw)
 			{

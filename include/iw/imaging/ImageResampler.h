@@ -18,6 +18,8 @@
 
 namespace iw::imaging
 {
+	using ::core::sizei;
+
 	struct SampleRect
 	{
 		double x{};

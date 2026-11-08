@@ -5,8 +5,8 @@
 
 #ifndef RC_INVOKED
 #include <map>
-#include <platform.h>
-#include <libdesktop/system.h>
+#include <libdesktop/ui.h>
+#include <libdesktop/ui/menu_bar.h>
 #include <iw/imaging/Color.h>
 #include "Geometry.h"
 
@@ -68,6 +68,7 @@ namespace iw::platform
 		leftButtonDown,
 		leftButtonDoubleClick,
 		rightButtonDown,
+		rightButtonUp,
 		leftButtonUp,
 		move,
 		wheel,
@@ -327,11 +328,13 @@ namespace iw::platform
 	};
 
 	WindowFramePtr create_top_level_frame(FrameReactorPtr reactor, const WindowOptions& options);
-	// Binds the frame supplied by libdesktop's app_init callback.  The adapter keeps
-	// ImageWalker's event model local while the actual window remains pf::owned.
-	void bind_main_frame(const pf::window_frame_ptr& frame);
+	// Binds the frame and host created by ui::create_app_frame before MainWindow builds
+	// its legacy-shaped child tree on top of the shared UI frame.
+	void bind_main_frame(const ::ui::frame_ptr& frame, const std::shared_ptr<::ui::frame_host>& host);
+	std::shared_ptr<::ui::frame_host> create_frame_host(FrameReactorPtr reactor);
+	::ui::frame_ptr native_ui_frame(const WindowFramePtr& frame);
+	bool dispatch_menu_accelerator(char32_t key, ::platform::key_state keys);
 	void shutdown_runtime();
-	pf::window_frame_ptr native_frame(const WindowFramePtr& frame);
 	FontPtr create_message_font(unsigned int dpi);
 	enum class BitmapAsset
 	{
@@ -520,8 +523,8 @@ namespace iw::platform
 	};
 
 	std::optional<DialogValues> show_modal_dialog(const WindowFramePtr& owner, DialogDefinition definition);
-	// Runs owned work on the task queue while a non-cancellable status window pumps UI messages.
-	// Returns its result; worker exceptions are rethrown on the caller after completion.
+	// Runs owned work on the task queue while the shared dialog layer supplies the modal wait.
+	// The platform dialog does not support an owned status dialog for this contract.
 	bool run_with_status(const WindowFramePtr& owner, std::wstring_view title, std::wstring_view message,
 	                     std::function<bool()> work);
 

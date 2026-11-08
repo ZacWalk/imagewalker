@@ -27,6 +27,7 @@ namespace iw
 		// An injected history must outlive the window; an absent service disables file Undo.
 		explicit MainWindow(undo::History* history = nullptr) : undoHistory_(history) {}
 		bool create(int showCommand, const std::filesystem::path& initialPath);
+		bool can_exit();
 		const platform::WindowFramePtr& frame() const { return frame_; }
 
 	private:

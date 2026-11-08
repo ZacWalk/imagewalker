@@ -93,10 +93,10 @@ and JUnit reports for 14 days. No self-hosted runner or extra credentials are
 required.
 
 Each executable accepts `/test` and returns its failure count. `dd.ps1 test`
-builds Debug and Release, runs CTest in both, then smoke-tests all five GUI
+builds Debug and Release, runs CTest in both, then smoke-tests each GUI
 targets in each configuration with crash-file checks and bounded cleanup.
 
-CTest entries have 120-second deadlines: the five serial application
+CTest entries have 120-second deadlines: the serial application
 suites run from `exe\`, `dd-contract` checks the driver contract, `help-compiler`
 checks strict-build output safety, and `imagewalker-imaging` runs the shared
 imaging suite while `imagewalker-boundary` checks source ownership,

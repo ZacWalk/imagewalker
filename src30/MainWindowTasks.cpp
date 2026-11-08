@@ -327,6 +327,11 @@ namespace iw
 		return true;
 	}
 
+	bool MainWindow::can_exit()
+	{
+		return !task_ || close_task();
+	}
+
 	void MainWindow::request_exit()
 	{
 		if (close_task()) frame_->close();

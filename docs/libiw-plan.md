@@ -21,20 +21,20 @@ Application UI and workflow
 | [Modern implementation details](../include/iw/imaging/detail) | Inline libdesktop/libfiles adapters; application image processing remains in the relevant public header |
 | [Historical headers](../include/iw/legacy) | Inline 2.x types, stream/storage adapters, metadata presentation and historical algorithms |
 | [Regression consumer](../tests/imaging) | Shared imaging cases and ownership/direct-dependency checks |
-| [Shared regression definitions](../include/iw/imagingtests.h) | Engine cases also exercised by the three 2.x application suites |
+| [Shared regression definitions](../include/iw/imagingtests.h) | Engine cases also exercised by the 2.x application suites |
 
 Consume the `iw_imaging` and `iw_legacy` CMake interface targets.
 Modern headers provide their inline definitions directly. Historical consumers
 include [Legacy.h](../include/iw/legacy/Legacy.h), which composes the compatibility
 models and their inline implementations; no implementation macro is required.
-The libdesktop-core bitmap and pixel adapters are compiled library services and
-do not reintroduce application callbacks. Keep shared application definitions
-inline and shared state in inline variables; do not include implementation `.cpp`
-files or add a one-definition implementation macro. Do not include an application
-precompiled header in modern headers, read application globals or open
-application dialogs. Keep `include/iw/imaging` free of ATL, WTL, Win32 handles
-and `TCHAR`; historical headers and sink adapters may retain the ATL/WTL
-contracts required by the 2.x releases.
+`libdesktop::core` pixel and surface types and `libdesktop::platform`'s OS image
+adapter are compiled library services with no application callbacks. Keep shared
+application definitions inline and shared state in inline variables; do not
+include implementation `.cpp` files or add a one-definition implementation
+macro. Do not include an application precompiled header in modern headers, read
+application globals or open application dialogs. Keep `include/iw/imaging` free
+of ATL, WTL, Win32 handles and `TCHAR`; historical headers and sink adapters may
+retain the ATL/WTL contracts required by the 2.x releases.
 
 Keep resource loading, drawing into application canvases, clipboard/OLE objects,
 printing and contact-sheet layout with the applications. Reusable platform
@@ -86,7 +86,7 @@ capability queries, dimensions/orientation, photo properties and encoding.
   retained metadata. Use the BGRA path for display/editing and installed Windows
   formats. Bundled WebP does not require a machine-installed WIC extension.
 - Select a BGRA decoder only through the rule in
-  [NativeCodec.h](../include/iw/imaging/detail/NativeCodec.h): libfiles for WebP,
+  [NativeCodecModern.h](../include/iw/imaging/detail/NativeCodecModern.h): libfiles for WebP,
   identified by signature for encoded bytes and by extension for a path; an
   installed Windows codec where one claims the extension; otherwise the native
   decoders. Native-storage decodes start with the native loaders and reach
@@ -100,7 +100,7 @@ capability queries, dimensions/orientation, photo properties and encoding.
   files retain positional buffered I/O. WebP is encoded by libfiles, exact
   under transparent pixels, and a re-encoded JPEG keeps its source's segments
   through libfiles' `carry_jpeg_metadata`. Keep only the explicit
-  libdesktop-core bitmap adapter,
+  `libdesktop::core` surface adapter,
   compressed DIB, metafile and OLE compatibility paths local; do not add a
   second native JPEG/PNG/BMP/GIF/TIFF encoder.
 - Historical save adapters turn their existing `IW::Image` into one
@@ -132,7 +132,7 @@ capability queries, dimensions/orientation, photo properties and encoding.
 - Check `OperationResult`/`DecodeResult`. Distinguish invalid input, unsupported
   input, decoding/encoding failure, resource limits and cancellation. Preserve
   warnings rather than replacing them with a successful-looking default.
-- Let libdesktop-core own its intrinsic container orientation, then apply only the remaining
+- Let `libdesktop::core` own its intrinsic container orientation, then apply only the remaining
   orientation it reports. This avoids turning HEIF twice. Native orientation
   handling supports all eight EXIF values and resets the tag only after changing
   the corresponding pixels.
