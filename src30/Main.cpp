@@ -61,14 +61,7 @@ namespace iw
 		bool pre_init() override
 		{
 			diagnostic_session_ = std::make_unique<diagnostics::Session>();
-			imaging::set_diagnostic_sink([](std::wstring_view message)
-			{
-				iw::platform::write_diagnostic(message);
-			});
-			::render::decode_embedded_image = [](const core::cspan data) -> core::surface_ptr
-			{
-				return ::platform::load_image_memory(std::span<const std::uint8_t>(data.data, data.size));
-			};
+			imaging::set_diagnostic_sink([](std::wstring_view message) { iw::platform::write_diagnostic(message); });
 			return true;
 		}
 
@@ -84,13 +77,13 @@ namespace iw
 					runTests_ = true;
 				}
 				else if (argument == "/test-no-clipboard" || argument == "--test-no-clipboard" ||
-					argument == "-test-no-clipboard")
+				         argument == "-test-no-clipboard")
 				{
 					runTests_ = true;
 					skipClipboardTests_ = true;
 				}
 				else if (initialPath_.empty() && !argument.empty() && argument.front() != '/' &&
-					argument.front() != '-')
+				         argument.front() != '-')
 					initialPath_ = std::filesystem::path(::core::utf8_to_utf16(argument));
 			}
 			return runTests_;
@@ -134,7 +127,7 @@ namespace iw
 			style.hardware_accelerated = true;
 			style.timer_milliseconds = 50;
 			style.colors = {::ui::style::colors.view_background, ::ui::style::colors.view_text,
-				::ui::style::colors.view_selected_background};
+			                ::ui::style::colors.view_selected_background};
 			const auto frame = ::ui::create_app_frame(shared_from_this(), store, host, style);
 			if (!frame)
 			{
@@ -147,7 +140,7 @@ namespace iw
 				iw::platform::write_diagnostic(L"Unable to create the ImageWalker diagnostic log.\n");
 				iw::platform::show_error(L"The diagnostic log could not be created beside the executable. Check that "
 				                         L"the application folder is writable.",
-					L"ImageWalker 3.0 logging");
+				                         L"ImageWalker 3.0 logging");
 			}
 			if (!main_window_->create(1, initialPath_))
 			{
@@ -159,6 +152,11 @@ namespace iw
 
 		bool wants_gpu() const override { return true; }
 
+		void system_event(const ::platform::os_event_type event) override
+		{
+			if (event == ::platform::os_event_type::graphics_device_lost) iw::platform::release_graphics();
+		}
+
 		bool key_down(char32_t key, ::platform::key_state keys) override
 		{
 			return iw::platform::dispatch_menu_accelerator(key, keys);
@@ -168,8 +166,8 @@ namespace iw
 
 		::ui::focus_mode focus_mode() const override { return ::ui::focus_mode::view; }
 
-		void track_menu(
-			const ::ui::frame_ptr& parent, core::recti bounds, const std::vector<::ui::command_ptr>& commands) override
+		void track_menu(const ::ui::frame_ptr& parent, core::recti bounds,
+		                const std::vector<::ui::command_ptr>& commands) override
 		{
 			if (parent) parent->track_menu(bounds, commands);
 		}

@@ -1,318 +1,255 @@
 // ImageWalker by Zac Walker
-// Hosts the folder tree as an application-owned Win32 child of the shared ui frame.
+// Shows the drawn folder tree in a frame of its own, and lists drives and folders off the UI thread.
 
-#include "DesktopServices.h"
-#include "Platform.h"
 #include "PlatformWin32.h"
+#include "DesktopServices.h"
+#include "Files.h"
+#include "FolderTree.h"
+#include "Paths.h"
+#include "Platform.h"
 
-#include <commctrl.h>
-#include <shellapi.h>
-#include <algorithm>
+#include <cstdint>
 #include <filesystem>
+#include <format>
 #include <memory>
+#include <optional>
+#include <stop_token>
 #include <vector>
 
 namespace iw::platform
 {
 	namespace
 	{
-		class Win32ShellTree final : public ShellTree, public std::enable_shared_from_this<Win32ShellTree>
+		std::vector<folders::Folder> list_drives()
+		{
+			std::vector<folders::Folder> result;
+			const DWORD length = GetLogicalDriveStringsW(0, nullptr);
+			std::wstring drives(length, L'\0');
+			if (!length || !GetLogicalDriveStringsW(length, drives.data())) return result;
+			for (size_t position = 0; position < drives.size();)
+			{
+				const auto end = drives.find(L'\0', position);
+				if (end == std::wstring::npos || end == position) break;
+				std::filesystem::path root(drives.substr(position, end - position));
+				auto label = root.root_name().wstring();
+				result.push_back({std::move(root), std::move(label), true});
+				position = end + 1;
+			}
+			return result;
+		}
+
+		// The folders in folder the tree shows, neither hidden nor system ones, in name order regardless of case;
+		// nullopt when it cannot be read.
+		std::optional<std::vector<folders::Folder>> list_subfolders(const std::filesystem::path& folder,
+		                                                            const std::stop_token& exiting)
+		{
+			const auto pattern = files::native_path(folder) / L"*";
+			WIN32_FIND_DATAW entry{};
+			const HANDLE find = FindFirstFileExW(pattern.c_str(), FindExInfoBasic, &entry,
+			                                     FindExSearchLimitToDirectories, nullptr, FIND_FIRST_EX_LARGE_FETCH);
+			if (find == INVALID_HANDLE_VALUE)
+			{
+				if (GetLastError() == ERROR_FILE_NOT_FOUND) return std::vector<folders::Folder>{};
+				return std::nullopt;
+			}
+			std::vector<folders::Folder> result;
+			DWORD error = ERROR_NO_MORE_FILES;
+			for (;;)
+			{
+				if (exiting.stop_requested())
+				{
+					error = ERROR_CANCELLED;
+					break;
+				}
+				const std::wstring_view name = entry.cFileName;
+				if ((entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+				    !(entry.dwFileAttributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)) && name != L"." &&
+				    name != L"..")
+					result.push_back({folder / name, std::wstring(name), false});
+				if (!FindNextFileW(find, &entry))
+				{
+					error = GetLastError();
+					break;
+				}
+			}
+			FindClose(find);
+			if (error != ERROR_NO_MORE_FILES) return std::nullopt;
+			std::ranges::sort(result, [](const auto& left, const auto& right)
+			{ return paths::icompare(left.label, right.label) < 0; });
+			return result;
+		}
+
+		class DrawnShellTree;
+
+		// The tree's frame reaches the tree without owning it, so the two make no cycle.
+		class TreeReactor final : public FrameReactor
 		{
 		public:
-			Win32ShellTree(const WindowFramePtr& owner, ShellTreeOptions options)
-				: owner_(owner), options_(std::move(options))
+			explicit TreeReactor(std::weak_ptr<DrawnShellTree> tree) : tree_(std::move(tree)) {}
+
+			void paint(const WindowFramePtr& frame, DrawContext& draw) override;
+			void size(const WindowFramePtr& frame, app::sizei extent, MeasureContext& measure) override;
+			MessageResult files_dropped(const WindowFramePtr& frame, const FileDrop& drop) override;
+
+		private:
+			std::weak_ptr<DrawnShellTree> tree_;
+		};
+
+		class DrawnShellTree final : public ShellTree, public std::enable_shared_from_this<DrawnShellTree>
+		{
+		public:
+			DrawnShellTree(const WindowFramePtr& owner, ShellTreeOptions options) :
+				owner_(owner), options_(std::move(options))
 			{
-				const auto locked_owner = owner_.lock();
-				const auto frame = native_ui_frame(locked_owner);
-				const auto handle = frame ? frame->handle() : std::any{};
-				const auto parent =
-					handle.has_value() && handle.type() == typeid(HWND) ? std::any_cast<HWND>(handle) : nullptr;
-				if (!parent) return;
-				register_class();
-				host_ = CreateWindowExW(WS_EX_CLIENTEDGE, class_name, L"",
-					WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_CLIPCHILDREN, 0, 0, 0, 0, parent, nullptr,
-					GetModuleHandleW(nullptr), this);
-				if (!host_) return;
-				tree_ = CreateWindowExW(0, WC_TREEVIEWW, L"",
-					WS_CHILD | WS_VISIBLE | TVS_HASBUTTONS | TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS |
-						TVS_TRACKSELECT,
-					0, 0, 0, 0, host_, nullptr, GetModuleHandleW(nullptr), nullptr);
-				if (!tree_) return;
-				SetWindowSubclass(tree_, tree_subclass_proc, 1, reinterpret_cast<DWORD_PTR>(this));
-				DragAcceptFiles(host_, TRUE);
+			}
+
+			~DrawnShellTree() override
+			{
+				element_.reset();
+				if (!frame_) return;
+				frame_->set_reactor({});
+				frame_->close();
+			}
+
+			DrawnShellTree(const DrawnShellTree&) = delete;
+			DrawnShellTree& operator=(const DrawnShellTree&) = delete;
+
+			bool create()
+			{
+				const auto owner = owner_.lock();
+				if (!owner) return false;
+				WindowOptions options;
+				options.className = "ImageWalker30.FolderTree";
+				options.child = true;
+				options.visible = true;
+				frame_ = owner->create_child(std::make_shared<TreeReactor>(weak_from_this()), options);
+				if (!frame_) return false;
+				const auto weak = weak_from_this();
+				view_ = std::make_shared<folders::FolderTreeView>(
+					folders::FolderTreeView::Events{[weak](const std::filesystem::path& folder)
+				{
+					const auto self = weak.lock();
+					if (const auto changed = self ? self->options_.selectionChanged : nullptr) changed(folder);
+				}, [weak](const std::filesystem::path& folder)
+				{
+					if (const auto self = weak.lock()) self->list(folder);
+				}});
+				element_ = add_frame_element(frame_, view_);
+				if (!element_) return false;
+				const auto client = frame_->client_rect();
+				resize({client.width, client.height});
 				refresh();
+				return true;
 			}
 
-			~Win32ShellTree() override
+			void set_bounds(const app::recti bounds) override
 			{
-				if (tree_) RemoveWindowSubclass(tree_, tree_subclass_proc, 1);
-				if (host_) DestroyWindow(host_);
+				if (frame_) frame_->move(bounds);
 			}
 
-			bool valid() const { return host_ && tree_; }
-
-			void set_bounds(app::recti r) override
+			void show(const bool visible) override
 			{
-				if (host_) SetWindowPos(host_, nullptr, r.x, r.y, r.width, r.height, SWP_NOZORDER | SWP_NOACTIVATE);
-			}
-
-			void show(bool v) override
-			{
-				if (host_) ShowWindow(host_, v ? SW_SHOW : SW_HIDE);
+				if (frame_) frame_->show(visible);
 			}
 
 			void set_focus() override
 			{
-				if (tree_) SetFocus(tree_);
+				if (view_) view_->focus();
 			}
 
-			bool has_focus() const override { return tree_ && GetFocus() == tree_; }
+			bool has_focus() const override { return view_ && view_->has_focus(); }
 
 			void set_current_path(const std::filesystem::path& path) override
 			{
-				if (!tree_ || path.empty()) return;
-				const bool was_suppressed = suppressSelection_;
-				suppressSelection_ = true;
-				const auto target = normal(path);
-				HTREEITEM item = TreeView_GetRoot(tree_);
-				while (item)
-				{
-					const auto current = node_path(item);
-					if (current && equal_path(*current, target))
-					{
-						TreeView_SelectItem(tree_, item);
-						break;
-					}
-					if (current && target.wstring().starts_with(current->wstring()))
-					{
-						expand(item);
-						if (select_descendant(TreeView_GetChild(tree_, item), target)) break;
-					}
-					item = TreeView_GetNextSibling(tree_, item);
-				}
-				suppressSelection_ = was_suppressed;
+				if (view_ && !path.empty()) view_->reveal(path);
 			}
 
+			// Lists the drives again; the folder selected is shown again under them.
 			void refresh() override
 			{
-				if (!tree_) return;
-				TreeView_DeleteAllItems(tree_);
-				nodes_.clear();
-				DWORD length = GetLogicalDriveStringsW(0, nullptr);
-				std::wstring drives(length, L'\0');
-				if (length && GetLogicalDriveStringsW(length, drives.data()))
+				const auto weak = weak_from_this();
+				const auto generation = ++rootsGeneration_;
+				queue_work(WorkQueue::shell, [weak, generation]
 				{
-					for (size_t pos = 0; pos < drives.size();)
+					auto drives = list_drives();
+					queue_ui([weak, generation, drives = std::move(drives)]() mutable
 					{
-						const auto end = drives.find(L'\0', pos);
-						if (end == std::wstring::npos || end == pos) break;
-						insert_root(std::filesystem::path(drives.substr(pos, end - pos)));
-						pos = end + 1;
-					}
-				}
+						const auto self = weak.lock();
+						if (self && self->view_ && generation == self->rootsGeneration_)
+							self->view_->set_roots(std::move(drives));
+					});
+				});
+			}
+
+			void resize(const app::sizei extent)
+			{
+				if (element_) element_->set_bounds({0, 0, extent.width, extent.height});
+			}
+
+			// Files dropped on a folder are copied there, or moved with Shift; the selected folder takes a drop
+			// below the last one.
+			void drop(const FileDrop& drop)
+			{
+				if (!view_) return;
+				auto target = view_->folder_at({drop.point.x, drop.point.y});
+				if (!target) target = view_->model().selected_path();
+				if (!target) return;
+				const auto files = paths::outside_folder(drop.files, *target);
+				if (files.empty()) return;
+				const bool move = ::platform::current_key_state().shift;
+				perform_file_operation(owner_.lock(), move ? FileOperation::move : FileOperation::copy, files, *target);
+				if (const auto changed = options_.filesChanged) changed();
 			}
 
 		private:
-			static constexpr wchar_t class_name[] = L"ImageWalker30.ShellTreeHost";
-
-			struct Node
+			void list(const std::filesystem::path& folder)
 			{
-				std::unique_ptr<std::filesystem::path> path;
-				HTREEITEM item{};
-			};
-
-			static std::filesystem::path normal(const std::filesystem::path& p) { return p.lexically_normal(); }
-
-			static bool equal_path(const std::filesystem::path& a, const std::filesystem::path& b)
-			{
-				return _wcsicmp(a.c_str(), b.c_str()) == 0;
-			}
-
-			static bool visible_directory(const std::filesystem::directory_entry& entry)
-			{
-				std::error_code error;
-				if (!entry.is_directory(error) || error) return false;
-				const auto attributes = GetFileAttributesW(entry.path().c_str());
-				return attributes != INVALID_FILE_ATTRIBUTES &&
-					(attributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)) == 0;
-			}
-
-			std::filesystem::path* node_path(HTREEITEM item) const
-			{
-				TVITEMW value{};
-				value.hItem = item;
-				value.mask = TVIF_PARAM;
-				if (!TreeView_GetItem(tree_, &value) || !value.lParam) return nullptr;
-				return reinterpret_cast<std::filesystem::path*>(value.lParam);
-			}
-
-			bool select_descendant(HTREEITEM item, const std::filesystem::path& target)
-			{
-				for (; item; item = TreeView_GetNextSibling(tree_, item))
+				const auto weak = weak_from_this();
+				queue_work(WorkQueue::shell, [weak, folder]
 				{
-					if (const auto p = node_path(item); p && equal_path(*p, target))
+					const auto exiting = exit_token();
+					auto subfolders = list_subfolders(folder, exiting);
+					if (exiting.stop_requested()) return;
+					if (!subfolders)
+						write_diagnostic(std::format(L"The folder tree could not list {}.\n", folder.wstring()));
+					queue_ui([weak, folder,
+					          subfolders = std::move(subfolders).value_or(std::vector<folders::Folder>{})]() mutable
 					{
-						TreeView_SelectItem(tree_, item);
-						return true;
-					}
-					if (TreeView_GetChild(tree_, item) && select_descendant(TreeView_GetChild(tree_, item), target))
-						return true;
-				}
-				return false;
-			}
-
-			void insert_root(const std::filesystem::path& path) { insert_item(TVI_ROOT, path, true); }
-
-			HTREEITEM insert_item(HTREEITEM parent, const std::filesystem::path& path, const bool root = false)
-			{
-				auto node = std::make_unique<Node>();
-				node->path = std::make_unique<std::filesystem::path>(path);
-				const auto label = root ? path.root_name().wstring() : path.filename().wstring();
-				TVINSERTSTRUCTW insert{};
-				insert.hParent = parent;
-				insert.hInsertAfter = TVI_LAST;
-				insert.item.mask = TVIF_TEXT | TVIF_PARAM | TVIF_CHILDREN;
-				insert.item.pszText = const_cast<wchar_t*>(label.c_str());
-				insert.item.lParam = reinterpret_cast<LPARAM>(node->path.get());
-				insert.item.cChildren = 1;
-				const auto item = TreeView_InsertItem(tree_, &insert);
-				node->item = item;
-				nodes_.push_back(std::move(node));
-				return item;
-			}
-
-			void expand(HTREEITEM item)
-			{
-				if (!item || TreeView_GetChild(tree_, item) != nullptr)
-				{
-					if (TreeView_GetChild(tree_, item) && node_path(TreeView_GetChild(tree_, item)) == nullptr)
-						remove_placeholder(item);
-					else return;
-				}
-				const auto path = node_path(item);
-				if (!path) return;
-				std::vector<std::filesystem::path> folders;
-				std::error_code error;
-				for (std::filesystem::directory_iterator it(*path, error), end; !error && it != end;
-					it.increment(error))
-					if (visible_directory(*it)) folders.push_back(it->path());
-				std::sort(folders.begin(), folders.end(), [](const auto& a, const auto& b)
-				{
-					return _wcsicmp(a.filename().c_str(), b.filename().c_str()) < 0;
+						if (const auto self = weak.lock(); self && self->view_)
+							self->view_->listed(folder, std::move(subfolders));
+					});
 				});
-				for (const auto& folder : folders) insert_item(item, folder);
-				TVITEMW state{};
-				state.hItem = item;
-				state.mask = TVIF_CHILDREN;
-				state.cChildren = folders.empty() ? 0 : 1;
-				TreeView_SetItem(tree_, &state);
-			}
-
-			void remove_placeholder(HTREEITEM parent)
-			{
-				auto child = TreeView_GetChild(tree_, parent);
-				if (child && node_path(child) == nullptr) TreeView_DeleteItem(tree_, child);
-			}
-
-			static void register_class()
-			{
-				static const auto registered = []()
-				{
-					WNDCLASSW c{};
-					c.hInstance = GetModuleHandleW(nullptr);
-					c.lpfnWndProc = window_proc;
-					c.lpszClassName = class_name;
-					c.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-					RegisterClassW(&c);
-					return true;
-				}();
-				(void)registered;
-			}
-
-			static LRESULT CALLBACK tree_subclass_proc(
-				HWND hwnd, UINT message, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data)
-			{
-				auto* self = reinterpret_cast<Win32ShellTree*>(data);
-				if (self && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN) &&
-					dispatch_menu_accelerator(static_cast<char32_t>(wp), ::platform::current_key_state()))
-					return 0;
-				return DefSubclassProc(hwnd, message, wp, lp);
-			}
-
-			static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp)
-			{
-				auto* self = reinterpret_cast<Win32ShellTree*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
-				if (message == WM_NCCREATE)
-				{
-					auto* create = reinterpret_cast<CREATESTRUCTW*>(lp);
-					self = reinterpret_cast<Win32ShellTree*>(create->lpCreateParams);
-					SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
-				}
-				if (!self) return DefWindowProcW(hwnd, message, wp, lp);
-				switch (message)
-				{
-				case WM_SIZE:
-					if (self->tree_) MoveWindow(self->tree_, 0, 0, LOWORD(lp), HIWORD(lp), TRUE);
-					break;
-				case WM_NOTIFY:
-				{
-					auto* note = reinterpret_cast<NMHDR*>(lp);
-					if (note->code == TVN_ITEMEXPANDINGW)
-					{
-						auto* tree = reinterpret_cast<NMTREEVIEWW*>(lp);
-						if (tree->action == TVE_EXPAND) self->expand(tree->itemNew.hItem);
-					}
-					else if (note->code == TVN_SELCHANGEDW)
-					{
-						auto* tree = reinterpret_cast<NMTREEVIEWW*>(lp);
-						if (const auto path = self->node_path(tree->itemNew.hItem);
-							path && !self->suppressSelection_ && self->options_.selectionChanged)
-							self->options_.selectionChanged(*path);
-					}
-					break;
-				}
-				case WM_DROPFILES:
-				{
-					auto drop = reinterpret_cast<HDROP>(wp);
-					const UINT count = DragQueryFileW(drop, 0xffffffff, nullptr, 0);
-					std::vector<std::filesystem::path> files;
-					for (UINT i = 0; i < count; ++i)
-					{
-						wchar_t buffer[32768]{};
-						if (DragQueryFileW(drop, i, buffer, std::size(buffer))) files.emplace_back(buffer);
-					}
-					DragFinish(drop);
-					if (!files.empty())
-					{
-						const auto target = self->node_path(TreeView_GetSelection(self->tree_));
-						if (target)
-						{
-							const bool move = GetKeyState(VK_SHIFT) < 0;
-							if (const auto owner = self->owner_.lock())
-								perform_file_operation(
-									owner, move ? FileOperation::move : FileOperation::copy, files, *target);
-							if (self->options_.filesChanged) self->options_.filesChanged();
-						}
-					}
-					break;
-				}
-				default: break;
-				}
-				return DefWindowProcW(hwnd, message, wp, lp);
 			}
 
 			std::weak_ptr<WindowFrame> owner_;
 			ShellTreeOptions options_;
-			HWND host_{}, tree_{};
-			std::vector<std::unique_ptr<Node>> nodes_;
-			bool suppressSelection_{};
+			WindowFramePtr frame_;
+			std::shared_ptr<folders::FolderTreeView> view_;
+			FrameElementPtr element_;
+			std::uint64_t rootsGeneration_{};
 		};
+
+		void TreeReactor::paint(const WindowFramePtr& frame, DrawContext& draw)
+		{
+			draw.fill(frame->client_rect(), system_color(SystemColor::window));
+		}
+
+		void TreeReactor::size(const WindowFramePtr&, const app::sizei extent, MeasureContext&)
+		{
+			if (const auto tree = tree_.lock()) tree->resize(extent);
+		}
+
+		MessageResult TreeReactor::files_dropped(const WindowFramePtr&, const FileDrop& drop)
+		{
+			if (const auto tree = tree_.lock()) tree->drop(drop);
+			return 1;
+		}
 	}
 
 	ShellTreePtr create_shell_tree(const WindowFramePtr& owner, ShellTreeOptions options)
 	{
-		auto result = std::make_shared<Win32ShellTree>(owner, std::move(options));
-		return result->valid() ? result : ShellTreePtr{};
+		auto result = std::make_shared<DrawnShellTree>(owner, std::move(options));
+		return result->create() ? result : ShellTreePtr{};
 	}
 
 	bool begin_file_drag(const WindowFramePtr&, std::span<const std::filesystem::path> paths)

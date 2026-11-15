@@ -1,5 +1,5 @@
 // ImageWalker by Zac Walker
-// Wires native transport, metadata, keyboard commands and deterministic close into task chrome.
+// Wires the player's transport, metadata, keyboard commands and deterministic close into task chrome.
 
 #include "TaskMedia.h"
 
@@ -10,8 +10,17 @@ namespace iw
 {
 	namespace
 	{
-		enum ControlId { fileName = 1, instructions, playButton, pauseButton, stopButton,
-			seekSlider, volumeSlider, metadataLabel };
+		enum ControlId
+		{
+			fileName = 1,
+			instructions,
+			playButton,
+			pauseButton,
+			stopButton,
+			seekSlider,
+			volumeSlider,
+			metadataLabel
+		};
 
 		const wchar_t* state_text(const media::PlaybackState state)
 		{
@@ -58,10 +67,9 @@ namespace iw
 			panel_.add(std::move(control));
 		};
 		label(fileName, path_.filename().wstring());
-		label(instructions, L"Windows-native playback using installed codecs. Space: play/pause. "
-			L"Left/Right: seek 5 seconds. Close returns to Items and stops playback.");
-		for (const auto& [id, name] : {std::pair{playButton, L"Play"}, {pauseButton, L"Pause"},
-			{stopButton, L"Stop"}})
+		label(instructions, L"Plays with the codecs installed in Windows. Space: play/pause. "
+		                    L"Left/Right: seek 5 seconds. Close returns to Items and stops playback.");
+		for (const auto& [id, name] : {std::pair{playButton, L"Play"}, {pauseButton, L"Pause"}, {stopButton, L"Stop"}})
 		{
 			ui::Control control;
 			control.id = id;
@@ -102,12 +110,14 @@ namespace iw
 	{
 		std::vector<platform::ToolbarItem> items;
 		const auto weak = std::weak_ptr<TaskMedia>(std::static_pointer_cast<TaskMedia>(shared_from_this()));
-		for (const auto& [id, name] : {std::pair{playButton, L"Play"}, {pauseButton, L"Pause"},
-			{stopButton, L"Stop"}})
+		for (const auto& [id, name] : {std::pair{playButton, L"Play"}, {pauseButton, L"Pause"}, {stopButton, L"Stop"}})
 		{
 			auto command = std::make_shared<platform::Command>();
 			command->name = command->tooltip = name;
-			command->toolbarText = [name] { return std::wstring(name); };
+			command->toolbarText = [name]
+			{
+				return std::wstring(name);
+			};
 			command->enabled = [weak, id]
 			{
 				const auto self = weak.lock();
@@ -150,8 +160,14 @@ namespace iw
 		platform::queue_work(platform::WorkQueue::metadata, [weak, path = path_, stop]
 		{
 			media::Info info;
-			try { info = media::probe(path, stop); }
-			catch (...) { info.error = L"Unable to read media information."; }
+			try
+			{
+				info = media::probe(path, stop);
+			}
+			catch (...)
+			{
+				info.error = L"Unable to read media information.";
+			}
 			if (stop.stop_requested()) return;
 			platform::queue_ui([weak, info = std::move(info), stop]
 			{
@@ -178,10 +194,21 @@ namespace iw
 
 	void TaskMedia::draw_content(const ui::CanvasRenderer& renderer, const app::recti bounds)
 	{
-		if (!player_)
-			renderer.text(playback_.error.empty() ? L"Opening media..." : playback_.error, bounds,
-				platform::system_color(platform::SystemColor::windowText),
-				platform::TextFormat::left);
+		// The player draws the video over this once its first picture is decoded.
+		renderer.fill(bounds, colors::black);
+		const auto text = playback_.state == media::PlaybackState::error ? playback_.error
+		                  : !player_ || playback_.state == media::PlaybackState::opening
+		                      ? std::wstring(L"Opening media...")
+		                  : playback_.hasVideo ? std::wstring{}
+		                                       : path_.filename().wstring();
+		if (text.empty()) return;
+		const int inset = metric(24);
+		renderer.text(text,
+		              {bounds.x + inset, bounds.y + inset, (std::max)(0, bounds.width - inset * 2),
+		               (std::max)(0, bounds.height - inset * 2)},
+		              {230, 230, 230},
+		              platform::TextFormat::center | platform::TextFormat::verticalCenter |
+		                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
 	}
 
 	void TaskMedia::update_playback(const media::PlaybackStatus& status)
@@ -191,19 +218,27 @@ namespace iw
 		panel_.set_enabled(playButton, media::can_play(status.state));
 		panel_.set_enabled(pauseButton, status.state == media::PlaybackState::playing);
 		panel_.set_enabled(stopButton, status.state == media::PlaybackState::playing ||
-			status.state == media::PlaybackState::paused || status.state == media::PlaybackState::opening);
+		                                   status.state == media::PlaybackState::paused ||
+		                                   status.state == media::PlaybackState::opening);
 		panel_.set_enabled(seekSlider, status.canSeek && status.hasDuration && status.duration > 0);
 		if (auto* seek = panel_.find(seekSlider))
 		{
 			const auto label = L"Position: " + media::duration_text(status.position) + L" / " +
-				(status.hasDuration ? media::duration_text(status.duration) : L"unknown");
-			if (seek->label != label) { seek->label = label; invalidate(); }
+			                   (status.hasDuration ? media::duration_text(status.duration) : L"unknown");
+			if (seek->label != label)
+			{
+				seek->label = label;
+				invalidate();
+			}
 			if (!panel_.dragging() && status.duration > 0)
-				panel_.set_value(seekSlider, static_cast<int>(std::clamp(
-					static_cast<double>(status.position) / status.duration, 0.0, 1.0) * 1000));
+				panel_.set_value(seekSlider,
+				                 static_cast<int>(
+									 std::clamp(static_cast<double>(status.position) / status.duration, 0.0, 1.0) *
+									 1000));
 		}
 		const std::wstring text = status.state == media::PlaybackState::error
-			? status.error : std::wstring(state_text(status.state)) + L" - " + path_.filename().wstring();
+		                              ? status.error
+		                              : std::wstring(state_text(status.state)) + L" - " + path_.filename().wstring();
 		if (displayedStatus_ != text)
 		{
 			displayedStatus_ = text;
@@ -237,8 +272,9 @@ namespace iw
 		{
 			const auto step = 5 * media::ticksPerSecond;
 			const auto position = playback_.position;
-			const auto target = input.key == platform::KeyCode::left ? (std::max)(std::int64_t{0}, position - step)
-				: position < playback_.duration - step ? position + step : playback_.duration;
+			const auto target = input.key == platform::KeyCode::left   ? (std::max)(std::int64_t{0}, position - step)
+			                    : position < playback_.duration - step ? position + step
+			                                                           : playback_.duration;
 			player_->seek(target);
 			return true;
 		}

@@ -22,9 +22,9 @@ namespace iw::edits
 	struct ImageEdits
 	{
 		std::optional<Quadrilateral> perspective; // source-normalized, before rotate/straighten/crop
-		int rotation{}; // quarter turns clockwise, 0..3
-		int straighten{}; // tenths of a degree, -100..100
-		recti crop; // in transformed pixels; an empty rect means the whole picture
+		int rotation{};                           // quarter turns clockwise, 0..3
+		int straighten{};                         // tenths of a degree, -100..100
+		recti crop;                               // in transformed pixels; an empty rect means the whole picture
 
 		int brightness{};
 		int contrast{};
@@ -44,8 +44,8 @@ namespace iw::edits
 
 		bool has_color() const
 		{
-			return brightness || contrast || darks || midtones || lights || saturation || vibrance ||
-				temperature || tint;
+			return brightness || contrast || darks || midtones || lights || saturation || vibrance || temperature ||
+			       tint;
 		}
 
 		bool empty() const { return !has_geometry() && !has_color(); }
@@ -105,8 +105,7 @@ namespace iw::edits
 	// Perspective, rotate, straighten, crop, then colour. An empty stack is the identity.
 	// `applyCrop` false keeps the whole straightened frame, corners and all, which is what the
 	// editing presentation shows while Preview is off.
-	imaging::PixelImage apply(const imaging::PixelImage& source, const ImageEdits& value,
-	                          bool applyCrop = true);
+	imaging::PixelImage apply(const imaging::PixelImage& source, const ImageEdits& value, bool applyCrop = true);
 
 	// The colour pass alone, exposed so its neutrality and clamping can be asserted directly.
 	void apply_color(std::vector<std::uint32_t>& pixels, const ImageEdits& value);
@@ -151,14 +150,14 @@ namespace iw::edits
 		inline bool valid_image(const imaging::PixelImage& source)
 		{
 			return source.width > 0 && source.height > 0 &&
-				static_cast<std::uint64_t>(source.width) * source.height <= source.pixels.size();
+			       static_cast<std::uint64_t>(source.width) * source.height <= source.pixels.size();
 		}
 
 		inline std::uint32_t pack(const int b, const int g, const int r, const std::uint32_t alpha)
 		{
 			return alpha | static_cast<std::uint32_t>(std::clamp(r, 0, 255)) << 16 |
-				static_cast<std::uint32_t>(std::clamp(g, 0, 255)) << 8 |
-				static_cast<std::uint32_t>(std::clamp(b, 0, 255));
+			       static_cast<std::uint32_t>(std::clamp(g, 0, 255)) << 8 |
+			       static_cast<std::uint32_t>(std::clamp(b, 0, 255));
 		}
 
 		inline imaging::PixelImage straighten_image(const imaging::PixelImage& source, const double radians)
@@ -190,20 +189,18 @@ namespace iw::edits
 					const double fractionX = sourceX - left;
 					const double fractionY = sourceY - top;
 
-					double weights[4]{
-						(1 - fractionX) * (1 - fractionY), fractionX * (1 - fractionY),
-						(1 - fractionX) * fractionY, fractionX * fractionY
-					};
+					double weights[4]{(1 - fractionX) * (1 - fractionY), fractionX * (1 - fractionY),
+					                  (1 - fractionX) * fractionY, fractionX * fractionY};
 					const int columns[4]{left, left + 1, left, left + 1};
 					const int rows[4]{top, top, top + 1, top + 1};
 					double blue = 0, green = 0, red = 0, alpha = 0;
 					for (int tap = 0; tap < 4; ++tap)
 					{
 						if (columns[tap] < 0 || rows[tap] < 0 || columns[tap] >= source.width ||
-							rows[tap] >= source.height)
+						    rows[tap] >= source.height)
 							continue;
-						const std::uint32_t pixel = source.pixels[
-							static_cast<size_t>(rows[tap]) * source.width + columns[tap]];
+						const std::uint32_t pixel =
+							source.pixels[static_cast<size_t>(rows[tap]) * source.width + columns[tap]];
 						const double weight = weights[tap] * (pixel >> 24);
 						blue += (pixel & 0xff) * weight;
 						green += (pixel >> 8 & 0xff) * weight;
@@ -211,11 +208,10 @@ namespace iw::edits
 						alpha += weight;
 					}
 					if (alpha <= 0.0) continue;
-					target[x] = pack(static_cast<int>(blue / alpha + 0.5),
-					                 static_cast<int>(green / alpha + 0.5),
+					target[x] = pack(static_cast<int>(blue / alpha + 0.5), static_cast<int>(green / alpha + 0.5),
 					                 static_cast<int>(red / alpha + 0.5),
-					                 static_cast<std::uint32_t>(std::clamp(
-						                 static_cast<int>(alpha + 0.5), 0, 255)) << 24);
+					                 static_cast<std::uint32_t>(std::clamp(static_cast<int>(alpha + 0.5), 0, 255))
+					                     << 24);
 				}
 			}
 			return result;
@@ -224,89 +220,90 @@ namespace iw::edits
 	}
 
 	inline imaging::PixelImage resize_image(const imaging::PixelImage& source, const sizei pane)
+	{
+		using namespace image_editor_detail;
+		if (!valid_image(source) || pane.cx <= 0 || pane.cy <= 0)
 		{
-			using namespace image_editor_detail;
-			if (!valid_image(source) || pane.cx <= 0 || pane.cy <= 0)
-			{
-				return {};
-			}
-			imaging::PixelImage image;
-			if (pane.cx == source.width && pane.cy == source.height) image = source;
-			else
-			{
-				image.width = pane.cx;
-				image.height = pane.cy;
-				image.originalWidth = source.originalWidth;
-				image.originalHeight = source.originalHeight;
-				const bool hasAlpha = std::ranges::any_of(source.pixels,
-					[](const auto pixel) { return (pixel >> 24) != 255; });
-				std::vector<std::uint32_t> premultiplied;
-				if (hasAlpha)
-				{
-					premultiplied = source.pixels;
-					for (auto& pixel : premultiplied)
-					{
-						const auto alpha = pixel >> 24;
-						pixel = pack(((pixel & 0xff) * alpha + 127) / 255,
-							((pixel >> 8 & 0xff) * alpha + 127) / 255,
-							((pixel >> 16 & 0xff) * alpha + 127) / 255, alpha << 24);
-					}
-				}
-				image.pixels = imaging::resample_bgra(hasAlpha ? premultiplied : source.pixels, {source.width, source.height},
-					{0.0, 0.0, static_cast<double>(source.width), static_cast<double>(source.height)},
-					{image.width, image.height});
-				if (image.pixels.empty()) return {};
-				if (hasAlpha)
-					for (auto& pixel : image.pixels)
-					{
-						const auto alpha = pixel >> 24;
-						pixel = alpha == 0 ? 0u : pack(((pixel & 0xff) * 255 + alpha / 2) / alpha,
-							((pixel >> 8 & 0xff) * 255 + alpha / 2) / alpha,
-							((pixel >> 16 & 0xff) * 255 + alpha / 2) / alpha, alpha << 24);
-					}
-			}
-			return image;
+			return {};
 		}
+		imaging::PixelImage image;
+		if (pane.cx == source.width && pane.cy == source.height) image = source;
+		else
+		{
+			image.width = pane.cx;
+			image.height = pane.cy;
+			image.originalWidth = source.originalWidth;
+			image.originalHeight = source.originalHeight;
+			const bool hasAlpha = std::ranges::any_of(source.pixels,
+			                                          [](const auto pixel) { return (pixel >> 24) != 255; });
+			std::vector<std::uint32_t> premultiplied;
+			if (hasAlpha)
+			{
+				premultiplied = source.pixels;
+				for (auto& pixel : premultiplied)
+				{
+					const auto alpha = pixel >> 24;
+					pixel = pack(((pixel & 0xff) * alpha + 127) / 255, ((pixel >> 8 & 0xff) * alpha + 127) / 255,
+					             ((pixel >> 16 & 0xff) * alpha + 127) / 255, alpha << 24);
+				}
+			}
+			image.pixels = imaging::resample_bgra(hasAlpha ? premultiplied : source.pixels,
+			                                      {source.width, source.height},
+			                                      {0.0, 0.0, static_cast<double>(source.width),
+			                                       static_cast<double>(source.height)},
+			                                      {image.width, image.height});
+			if (image.pixels.empty()) return {};
+			if (hasAlpha)
+				for (auto& pixel : image.pixels)
+				{
+					const auto alpha = pixel >> 24;
+					pixel = alpha == 0 ? 0u
+					                   : pack(((pixel & 0xff) * 255 + alpha / 2) / alpha,
+					                          ((pixel >> 8 & 0xff) * 255 + alpha / 2) / alpha,
+					                          ((pixel >> 16 & 0xff) * 255 + alpha / 2) / alpha, alpha << 24);
+				}
+		}
+		return image;
+	}
 
 	inline imaging::PixelImage make_preview(const imaging::PixelImage& source, const sizei pane)
 	{
 		using namespace image_editor_detail;
 		if (!valid_image(source) || pane.cx <= 0 || pane.cy <= 0) return {};
 		const double scale = (std::min)({1.0, static_cast<double>(pane.cx) / source.width,
-			static_cast<double>(pane.cy) / source.height});
+		                                 static_cast<double>(pane.cy) / source.height});
 		return resize_image(source, {(std::max)(1, static_cast<int>(source.width * scale)),
-			(std::max)(1, static_cast<int>(source.height * scale))});
+		                             (std::max)(1, static_cast<int>(source.height * scale))});
 	}
 
-		inline ImageEdits scaled_edits(const ImageEdits& value, const sizei source, const sizei preview)
+	inline ImageEdits scaled_edits(const ImageEdits& value, const sizei source, const sizei preview)
+	{
+		using namespace image_editor_detail;
+		auto result = value;
+		if (!value.has_crop()) return result;
+		const auto original = transformed_size(source, value);
+		const auto scaled = transformed_size(preview, value);
+		if (original.cx <= 0 || original.cy <= 0 || scaled.cx <= 0 || scaled.cy <= 0)
 		{
-			using namespace image_editor_detail;
-			auto result = value;
-			if (!value.has_crop()) return result;
-			const auto original = transformed_size(source, value);
-			const auto scaled = transformed_size(preview, value);
-			if (original.cx <= 0 || original.cy <= 0 || scaled.cx <= 0 || scaled.cy <= 0)
-			{
-				result.crop = {};
-				return result;
-			}
-			const auto crop = effective_crop(source, value);
-			const auto scaleX = static_cast<double>(scaled.cx) / original.cx;
-			const auto scaleY = static_cast<double>(scaled.cy) / original.cy;
-			const int left = static_cast<int>(crop.left * scaleX);
-			const int top = static_cast<int>(crop.top * scaleY);
-			result.crop = {left, top,
-				left + (std::max)(1, static_cast<int>(crop.right * scaleX) - left),
-				top + (std::max)(1, static_cast<int>(crop.bottom * scaleY) - top)};
+			result.crop = {};
 			return result;
 		}
+		const auto crop = effective_crop(source, value);
+		const auto scaleX = static_cast<double>(scaled.cx) / original.cx;
+		const auto scaleY = static_cast<double>(scaled.cy) / original.cy;
+		const int left = static_cast<int>(crop.left * scaleX);
+		const int top = static_cast<int>(crop.top * scaleY);
+		result.crop = {left, top, left + (std::max)(1, static_cast<int>(crop.right * scaleX) - left),
+		               top + (std::max)(1, static_cast<int>(crop.bottom * scaleY) - top)};
+		return result;
+	}
 
 	namespace image_editor_detail
 	{
 		inline imaging::PixelImage crop_image(const imaging::PixelImage& source, const recti bounds)
 		{
 			if (bounds.left == 0 && bounds.top == 0 && bounds.width() == source.width &&
-				bounds.height() == source.height)
+			    bounds.height() == source.height)
 				return source;
 			imaging::PixelImage result;
 			result.width = bounds.width();
@@ -316,8 +313,8 @@ namespace iw::edits
 			result.pixels.resize(static_cast<size_t>(result.width) * result.height);
 			for (int y = 0; y < result.height; ++y)
 			{
-				const auto* row = source.pixels.data() +
-					static_cast<size_t>(bounds.top + y) * source.width + bounds.left;
+				const auto* row = source.pixels.data() + static_cast<size_t>(bounds.top + y) * source.width +
+				                  bounds.left;
 				std::copy_n(row, static_cast<size_t>(result.width),
 				            result.pixels.data() + static_cast<size_t>(y) * result.width);
 			}
@@ -408,8 +405,7 @@ namespace iw::edits
 		const int top = static_cast<int>(std::ceil((height - fittedHeight) * 0.5 - 1e-9));
 		const int right = static_cast<int>(std::floor((width + fittedWidth) * 0.5 + 1e-9));
 		const int bottom = static_cast<int>(std::floor((height + fittedHeight) * 0.5 + 1e-9));
-		return {left, top, left + (std::max)(0, right - left + 1),
-			top + (std::max)(0, bottom - top + 1)};
+		return {left, top, left + (std::max)(0, right - left + 1), top + (std::max)(0, bottom - top + 1)};
 	}
 
 	inline recti effective_crop(const sizei source, const ImageEdits& value)
@@ -423,14 +419,14 @@ namespace iw::edits
 			std::clamp(value.crop.left, bounds.left, bounds.right - width),
 			std::clamp(value.crop.top, bounds.top, bounds.bottom - height),
 			std::clamp(value.crop.left, bounds.left, bounds.right - width) + width,
-			std::clamp(value.crop.top, bounds.top, bounds.bottom - height) + height
+			std::clamp(value.crop.top, bounds.top, bounds.bottom - height) + height,
 		};
 	}
 
-	inline ColorTransform::ColorTransform(const ImageEdits& value)
-		: tables_(image_editor_detail::build_tone_tables(value)), saturation_(1.0 + value.saturation / 100.0),
-		  vibrance_(value.vibrance / 100.0), changed_(value.has_color()),
-		  changeSaturation_(value.saturation != 0 || value.vibrance != 0)
+	inline ColorTransform::ColorTransform(const ImageEdits& value) :
+		tables_(image_editor_detail::build_tone_tables(value)), saturation_(1.0 + value.saturation / 100.0),
+		vibrance_(value.vibrance / 100.0), changed_(value.has_color()),
+		changeSaturation_(value.saturation != 0 || value.vibrance != 0)
 	{
 		using namespace image_editor_detail;
 	}
@@ -465,8 +461,7 @@ namespace iw::edits
 		for (auto& pixel : pixels) pixel = transform.apply_pixel(pixel);
 	}
 
-	inline imaging::PixelImage apply(const imaging::PixelImage& source, const ImageEdits& value,
-	                          const bool applyCrop)
+	inline imaging::PixelImage apply(const imaging::PixelImage& source, const ImageEdits& value, const bool applyCrop)
 	{
 		using namespace image_editor_detail;
 		if (!valid_image(source)) return {};
@@ -490,11 +485,9 @@ namespace iw::edits
 		constexpr int histogramLevels = 256;
 
 		inline int histogram_percentile(const std::array<std::uint64_t, histogramLevels>& counts,
-		                         const std::uint64_t total,
-		                         const double fraction)
+		                                const std::uint64_t total, const double fraction)
 		{
-			const auto target = (std::max<std::uint64_t>)(1,
-				static_cast<std::uint64_t>(std::ceil(total * fraction)));
+			const auto target = (std::max<std::uint64_t>)(1, static_cast<std::uint64_t>(std::ceil(total * fraction)));
 			std::uint64_t running = 0;
 			for (int level = 0; level < histogramLevels; ++level)
 			{
@@ -516,18 +509,16 @@ namespace iw::edits
 		// share a band once the angle matches the line, so the sum of squares peaks at the angle
 		// that undoes the tilt. `horizontal` picks the family of lines being tested: bands stacked
 		// up the picture, or across it.
-		inline double band_sharpness(const std::vector<EdgePoint>& points, const double cosine,
-		                      const double sine, const bool horizontal, std::vector<double>& bins,
-		                      const int offset)
+		inline double band_sharpness(const std::vector<EdgePoint>& points, const double cosine, const double sine,
+		                             const bool horizontal, std::vector<double>& bins, const int offset)
 		{
 			if (points.empty()) return 0.0;
 			std::ranges::fill(bins, 0.0);
 			const auto count = static_cast<int>(bins.size());
 			for (const auto& point : points)
 			{
-				const double distance = horizontal
-					                        ? point.y * cosine - point.x * sine
-					                        : point.x * cosine + point.y * sine;
+				const double distance = horizontal ? point.y * cosine - point.x * sine
+				                                   : point.x * cosine + point.y * sine;
 				const int bin = static_cast<int>(distance + 0.5) + offset;
 				if (bin >= 0 && bin < count) bins[static_cast<size_t>(bin)] += point.weight;
 			}
@@ -543,8 +534,7 @@ namespace iw::edits
 		for (const auto pixel : pixels)
 		{
 			const auto alpha = pixel >> 24;
-			const auto tone = ((pixel >> 16 & 0xff) * 77 + (pixel >> 8 & 0xff) * 150 +
-				(pixel & 0xff) * 29) >> 8;
+			const auto tone = ((pixel >> 16 & 0xff) * 77 + (pixel >> 8 & 0xff) * 150 + (pixel & 0xff) * 29) >> 8;
 			blues[pixel & 0xff] += alpha;
 			luminance[tone] += alpha;
 			reds[pixel >> 16 & 0xff] += alpha;
@@ -586,8 +576,7 @@ namespace iw::edits
 			// the clamped one, not the one asked for. Without it an underexposed picture came back
 			// underexposed by exactly the gain.
 			const double applied = 1.0 + value.contrast / 100.0;
-			value.brightness = std::clamp(
-				static_cast<int>(applied * (127.5 - middle) / 127.5 * 100.0), -100, 100);
+			value.brightness = std::clamp(static_cast<int>(applied * (127.5 - middle) / 127.5 * 100.0), -100, 100);
 		}
 
 		// Grey-world white balance across the red and blue means.
@@ -626,10 +615,12 @@ namespace iw::edits
 			for (int x = 0; x < width; ++x)
 			{
 				const std::uint32_t pixel = row[static_cast<size_t>(x) * step];
-				luma[static_cast<size_t>(y) * width + x] =
-					(pixel >> 24) == 0 ? 0 :
-					(static_cast<int>(pixel >> 16 & 0xff) * 77 + static_cast<int>(pixel >> 8 & 0xff) * 151 +
-						static_cast<int>(pixel & 0xff) * 28) >> 8;
+				luma[static_cast<size_t>(y) * width + x] = (pixel >> 24) == 0
+				                                               ? 0
+				                                               : (static_cast<int>(pixel >> 16 & 0xff) * 77 +
+				                                                  static_cast<int>(pixel >> 8 & 0xff) * 151 +
+				                                                  static_cast<int>(pixel & 0xff) * 28) >>
+				                                                     8;
 			}
 		}
 
@@ -642,7 +633,8 @@ namespace iw::edits
 		const int width = size.cx;
 		const int height = size.cy;
 		if (width < 3 || height < 3 || width > INT_MAX - height ||
-			static_cast<std::uint64_t>(width) * height > luma.size()) return false;
+		    static_cast<std::uint64_t>(width) * height > luma.size())
+			return false;
 		// Edges running across the picture and edges running up it are two separate votes on the
 		// same tilt, so they are scored against their own family of lines.
 		std::vector<EdgePoint> across, upright;
@@ -651,15 +643,13 @@ namespace iw::edits
 			for (int x = 1; x < width - 1; ++x)
 			{
 				const int* point = luma.data() + static_cast<size_t>(y) * width + x;
-				const int gradientX = point[-width + 1] + 2 * point[1] + point[width + 1] -
-					point[-width - 1] - 2 * point[-1] - point[width - 1];
-				const int gradientY = point[width - 1] + 2 * point[width] + point[width + 1] -
-					point[-width - 1] - 2 * point[-width] - point[-width + 1];
+				const int gradientX = point[-width + 1] + 2 * point[1] + point[width + 1] - point[-width - 1] -
+				                      2 * point[-1] - point[width - 1];
+				const int gradientY = point[width - 1] + 2 * point[width] + point[width + 1] - point[-width - 1] -
+				                      2 * point[-width] - point[-width + 1];
 				const int magnitude = std::abs(gradientX) + std::abs(gradientY);
 				if (magnitude < 120) continue;
-				const EdgePoint edge{
-					static_cast<float>(x), static_cast<float>(y), static_cast<float>(magnitude)
-				};
+				const EdgePoint edge{static_cast<float>(x), static_cast<float>(y), static_cast<float>(magnitude)};
 				// The gradient is perpendicular to the edge, so a mostly vertical gradient belongs
 				// to a line running across the picture.
 				if (std::abs(gradientY) > std::abs(gradientX)) across.push_back(edge);
@@ -680,7 +670,7 @@ namespace iw::edits
 			const double cosine = std::cos(angle);
 			const double sine = std::sin(angle);
 			const double score = band_sharpness(across, cosine, sine, true, bins, offset) +
-				band_sharpness(upright, cosine, sine, false, bins, offset);
+			                     band_sharpness(upright, cosine, sine, false, bins, offset);
 			if (score <= bestScore) continue;
 			bestScore = score;
 			best = tenth;

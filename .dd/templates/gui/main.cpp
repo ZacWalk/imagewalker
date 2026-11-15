@@ -1,43 +1,72 @@
-#include "platform.h"
+#include "libdesktop/ui.h"
 
 namespace
 {
-    pf::window_frame_ptr main_frame;
+    // The window's content: what it lays out and paints.
+    class app_view final : public ui::frame_host
+    {
+        core::sizei _extent;
+
+    public:
+        void on_window_layout(render::measure_context&, const core::sizei extent, bool) override
+        {
+            _extent = extent;
+        }
+
+        void on_window_paint(render::draw_context& dc) override
+        {
+            const core::recti bounds(_extent);
+            dc.draw_rect(bounds, core::color(core::rgba(245, 247, 249)));
+            const auto inset = core::round(24 * dc.scale_factor);
+            dc.draw_text("@NAME@", bounds.inflate(-inset), render::font_face::title, render::text_style::single_line,
+                         core::color(core::rgba(25, 35, 45)), {});
+        }
+    };
+
+    class app final : public ui::app, public std::enable_shared_from_this<app>
+    {
+        platform::setting_file_ptr _settings;
+        std::shared_ptr<app_view> _view = std::make_shared<app_view>();
+        ui::frame_ptr _frame;
+
+    public:
+        bool load_settings(const platform::setting_file_ptr& store) override
+        {
+            _settings = store;
+            return true;
+        }
+
+        bool init(std::string_view) override
+        {
+            ui::frame_style style;
+            style.drawn_caption = false;
+            style.client_size = {960, 640};
+            _frame = ui::create_app_frame(shared_from_this(), _settings, _view, style);
+            if (!_frame) return false;
+            _frame->window_text("@NAME@");
+            return true;
+        }
+
+        void final_exit() override
+        {
+            _frame.reset();
+        }
+
+        bool wants_gpu() const override { return false; }
+        bool key_down(char32_t, platform::key_state) override { return false; }
+        bool text_input(std::string_view) override { return false; }
+        ui::focus_mode focus_mode() const override { return ui::focus_mode::none; }
+
+        void track_menu(const ui::frame_ptr& parent, const core::recti bounds,
+                        const std::vector<ui::command_ptr>& commands) override
+        {
+            if (parent) parent->track_menu(bounds, commands);
+        }
+    };
 }
 
-class app_view final : public pf::frame_reactor
+int main(int argc, char** argv)
 {
-public:
-    uint32_t handle_message(pf::window_frame_ptr window, pf::message_type message, const pf::message_params&) override
-    {
-        // libdesktop returns this result for WM_CLOSE without DefWindowProc.
-        if (message == pf::message_type::close) window->close();
-        return 0;
-    }
-    void handle_size(pf::window_frame_ptr&, pf::isize, pf::measure_context&) override {}
-    void handle_paint(pf::window_frame_ptr& frame, pf::draw_context& draw) override
-    {
-        const auto bounds = frame->get_client_rect();
-        draw.fill_solid_rect(bounds, {245, 247, 249});
-        draw.draw_text(24, 24, {24, 24, bounds.right - 24, 64}, "@NAME@",
-            {20, pf::font_name::calibri}, {25, 35, 45}, {245, 247, 249});
-    }
-};
-
-app_init_result app_init(const pf::window_frame_ptr& frame, std::span<const std::string_view>)
-{
-    main_frame = frame;
-    frame->set_reactor(std::make_shared<app_view>());
-    return {};
+    core::set_app_name("@NAME@");
+    return platform::run(std::make_shared<app>(), argc, argv);
 }
-
-void app_idle()
-{
-    if (main_frame)
-    {
-        main_frame->set_text("@NAME@");
-        main_frame.reset();
-    }
-}
-
-void app_destroy() { main_frame.reset(); }

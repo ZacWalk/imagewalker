@@ -35,10 +35,8 @@ namespace iw::ui
 		if (visible.is_empty() || destination.width <= 0 || destination.height <= 0) return;
 		const double scaleX = static_cast<double>(imageValue.width) / destination.width;
 		const double scaleY = static_cast<double>(imageValue.height) / destination.height;
-		const SampleRect source{
-			(visible.x - destination.x) * scaleX, (visible.y - destination.y) * scaleY,
-			visible.width * scaleX, visible.height * scaleY
-		};
+		const SampleRect source{(visible.x - destination.x) * scaleX, (visible.y - destination.y) * scaleY,
+		                        visible.width * scaleX, visible.height * scaleY};
 		const auto pixels = cache.resample(imageValue.pixels, {imageValue.width, imageValue.height}, source,
 		                                   visible.extent(), imageValue.cacheToken);
 		if (!pixels.empty()) draw_.image(pixels, visible.extent(), visible, imageValue.alpha);
@@ -61,10 +59,8 @@ namespace iw::ui
 		const int maximumInset = (std::max)(0, (std::min)(scroll.thumb.width, scroll.thumb.height) - 1) / 2;
 		const int thickness = scroll.vertical() ? scroll.track.width : scroll.track.height;
 		const int inset = std::clamp(thickness / 6, 0, maximumInset);
-		fill({
-			     scroll.thumb.x + inset, scroll.thumb.y + inset,
-			     scroll.thumb.width - inset * 2, scroll.thumb.height - inset * 2
-		     },
+		fill({scroll.thumb.x + inset, scroll.thumb.y + inset, scroll.thumb.width - inset * 2,
+		      scroll.thumb.height - inset * 2},
 		     platform::system_color(platform::SystemColor::shadow));
 	}
 
@@ -73,5 +69,8 @@ namespace iw::ui
 		draw_.clip(rect);
 	}
 
-	void CanvasRenderer::reset_clip() const { draw_.reset_clip(); }
+	void CanvasRenderer::reset_clip() const
+	{
+		draw_.reset_clip();
+	}
 }

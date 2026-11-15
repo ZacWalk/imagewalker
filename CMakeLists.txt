@@ -35,10 +35,18 @@ find_program(IW_PWSH_EXECUTABLE NAMES pwsh
     HINTS "$ENV{ProgramFiles}/PowerShell/7" "$ENV{ProgramW6432}/PowerShell/7" REQUIRED)
 add_test(NAME dd-contract COMMAND "${IW_PWSH_EXECUTABLE}" -NoProfile -File
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/test-dd.ps1")
-set_tests_properties(dd-contract PROPERTIES TIMEOUT 120)
+set_tests_properties(dd-contract PROPERTIES TIMEOUT 120 LABELS headless)
 
 # Static CRT: these exes are meant to be dropped in a folder and run.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+add_executable(imagewalker_test_windows tests/native-test-windows.cpp)
+target_include_directories(imagewalker_test_windows PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_compile_options(imagewalker_test_windows PRIVATE /EHsc /W4)
+target_link_libraries(imagewalker_test_windows PRIVATE comctl32)
+add_test(NAME imagewalker-test-windows COMMAND imagewalker_test_windows)
+set_tests_properties(imagewalker-test-windows PROPERTIES TIMEOUT 30
+    LABELS "iw10;iw20;iw22;iw23;headless")
 
 # Safe to share between the debug and release build trees: the debug exes carry
 # a 'd' suffix, so the two configurations never write the same file.
@@ -61,7 +69,7 @@ if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_LIBDESKTOP
 endif()
 FetchContent_Declare(libdesktop
     GIT_REPOSITORY https://github.com/ZacWalk/libdesktop.git
-    GIT_TAG        04109ee82a500db38d439fa281bbc3f43124adfe
+    GIT_TAG        d172a12c6e3df0831a641133b96d073559a99db5
     EXCLUDE_FROM_ALL)
 FetchContent_MakeAvailable(libdesktop)
 
@@ -159,7 +167,7 @@ foreach(ver IN LISTS IW_VERSIONS)
             WORKING_DIRECTORY "${IW_OUTPUT_DIR}"
             TIMEOUT 120
             RUN_SERIAL TRUE
-            LABELS "iw${ver}")
+            LABELS "iw${ver};headless")
     endif()
 endforeach()
 
@@ -194,9 +202,13 @@ endif()
 # the top of that script.
 find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
 
+add_test(NAME imagewalker30-icon COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_icon.py")
+set_tests_properties(imagewalker30-icon PROPERTIES LABELS "iw;iw30;headless" TIMEOUT 30)
+
 add_test(NAME help-compiler COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_chmbuild.py")
-set_tests_properties(help-compiler PROPERTIES TIMEOUT 120)
+set_tests_properties(help-compiler PROPERTIES TIMEOUT 120 LABELS headless)
 
 set(IW_HELP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Help")
 set(IW_HELP_PROJECT "${IW_HELP_DIR}/imagewalker.hhp")

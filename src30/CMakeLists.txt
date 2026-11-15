@@ -10,6 +10,7 @@ set(IW30_SOURCES
     DiagnosticLog.cpp
     EditGeometry.cpp
     Files.cpp
+    FolderTree.cpp
     Format.cpp
     ImageCanvas.cpp
     ImageEditor.cpp
@@ -49,7 +50,7 @@ endif()
 include(FetchContent)
 FetchContent_Declare(libdesktop
     GIT_REPOSITORY https://github.com/ZacWalk/libdesktop.git
-    GIT_TAG        04109ee82a500db38d439fa281bbc3f43124adfe
+    GIT_TAG        d172a12c6e3df0831a641133b96d073559a99db5
     EXCLUDE_FROM_ALL)
 FetchContent_MakeAvailable(libdesktop)
 
@@ -68,6 +69,9 @@ libdesktop_add_app(imagewalker30
     VERSION "3.0.0.0"
     OUTPUT_NAME imagewalker30)
 
+set_property(SOURCE app.rc APPEND PROPERTY OBJECT_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/Res/ImageWalker.ico")
+
 target_include_directories(imagewalker30 PRIVATE
     "${CMAKE_SOURCE_DIR}/include")
 
@@ -82,7 +86,7 @@ target_compile_options(imagewalker30 PRIVATE
     /EHsc /W4 /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8 /MP
     $<$<NOT:$<CONFIG:Debug>>:/Zi /guard:cf>)
 
-target_link_libraries(imagewalker30 PRIVATE libdesktop::ui comctl32 windowscodecs ole32 shlwapi htmlhelp
+target_link_libraries(imagewalker30 PRIVATE libdesktop::ui windowscodecs ole32 shlwapi htmlhelp
     mfuuid bcrypt
     iw_imaging
     iw::jpeg iw::png iw::tiff iw::gif iw::zlib

@@ -70,7 +70,8 @@ namespace iw::sync
 				pending.pop_back();
 				if (!ordinary_path(folder, false))
 				{
-					result.error = std::format(L"Cannot safely read {}: unreadable folder or reparse point.", folder.wstring());
+					result.error = std::format(L"Cannot safely read {}: unreadable folder or reparse point.",
+					                           folder.wstring());
 					return result;
 				}
 				std::error_code error;
@@ -88,7 +89,8 @@ namespace iw::sync
 					const auto attributes = platform::read_file_attributes(path);
 					if (!attributes.known || attributes.reparse)
 					{
-						result.error = std::format(L"Cannot safely read {}: unreadable entry or reparse point.", path.wstring());
+						result.error = std::format(L"Cannot safely read {}: unreadable entry or reparse point.",
+						                           path.wstring());
 						return result;
 					}
 					++scanned;
@@ -161,7 +163,8 @@ namespace iw::sync
 				for (;;)
 				{
 					std::error_code error;
-					if (std::filesystem::equivalent(files::native_path(child), files::native_path(parent), error) && !error)
+					if (std::filesystem::equivalent(files::native_path(child), files::native_path(parent), error) &&
+					    !error)
 						return true;
 					const auto next = child.parent_path();
 					if (next.empty() || next == child) return false;
@@ -175,28 +178,30 @@ namespace iw::sync
 		{
 			if (!ordinary_path(root, false)) return false;
 			const auto current = files::snapshot_file(root);
-			if (!current || !current->exists || !current->directory ||
-				current->identity != expected.identity || current->volume != expected.volume) return false;
+			if (!current || !current->exists || !current->directory || current->identity != expected.identity ||
+			    current->volume != expected.volume)
+				return false;
 			std::error_code error;
 			if (!std::filesystem::is_directory(files::native_path(root), error) || error) return false;
 			const std::filesystem::directory_iterator iterator(files::native_path(root), error);
 			return !error;
 		}
 
-		std::pair<std::filesystem::path, FileState> existing_parent(
-			const std::filesystem::path& path, const std::filesystem::path& root)
+		std::pair<std::filesystem::path, FileState> existing_parent(const std::filesystem::path& path,
+		                                                            const std::filesystem::path& root)
 		{
 			for (auto current = path.parent_path();;)
 			{
 				const auto state = files::snapshot_file(current);
 				if (!state) return {};
-				if (state->exists) return state->directory
-					                          ? std::pair{current, *state}
-					                          : std::pair<std::filesystem::path, FileState>{};
+				if (state->exists)
+					return state->directory ? std::pair{current, *state}
+					                        : std::pair<std::filesystem::path, FileState>{};
 				if (paths::equal(current, root)) return {};
 				const auto parent = current.parent_path();
 				if (parent.empty() || parent == current ||
-					(!paths::equal(parent, root) && !paths::contains(root, parent))) return {};
+				    (!paths::equal(parent, root) && !paths::contains(root, parent)))
+					return {};
 				current = parent;
 			}
 		}
@@ -238,16 +243,15 @@ namespace iw::sync
 	void save_options(const Options& options, const std::wstring_view section)
 	{
 		if (section.empty()) return;
-		const std::array integers{
-			platform::IntegerSetting{L"WholeCollection", options.wholeCollection ? 1 : 0},
-			platform::IntegerSetting{L"CopyToRemote", options.toRemote ? 1 : 0},
-			platform::IntegerSetting{L"CopyToLocal", options.toLocal ? 1 : 0},
-			platform::IntegerSetting{L"DeleteLocal", options.deleteLocal ? 1 : 0},
-			platform::IntegerSetting{L"DeleteRemote", options.deleteRemote ? 1 : 0},
-			platform::IntegerSetting{L"CollectionCount", static_cast<int>(options.collection.size())}};
-		std::vector texts{
-			platform::TextSetting{L"Local", options.local.wstring()},
-			platform::TextSetting{L"Remote", options.remote.wstring()}};
+		const std::array integers{platform::IntegerSetting{L"WholeCollection", options.wholeCollection ? 1 : 0},
+		                          platform::IntegerSetting{L"CopyToRemote", options.toRemote ? 1 : 0},
+		                          platform::IntegerSetting{L"CopyToLocal", options.toLocal ? 1 : 0},
+		                          platform::IntegerSetting{L"DeleteLocal", options.deleteLocal ? 1 : 0},
+		                          platform::IntegerSetting{L"DeleteRemote", options.deleteRemote ? 1 : 0},
+		                          platform::IntegerSetting{L"CollectionCount",
+		                                                   static_cast<int>(options.collection.size())}};
+		std::vector texts{platform::TextSetting{L"Local", options.local.wstring()},
+		                  platform::TextSetting{L"Remote", options.remote.wstring()}};
 		const int previousCount = (std::max)(0, platform::read_integer_setting(section, L"CollectionCount", 0));
 		for (size_t index = 0; index < options.collection.size(); ++index)
 			texts.push_back({std::format(L"Collection{}", index), options.collection[index].wstring()});
@@ -266,8 +270,7 @@ namespace iw::sync
 		if (options.remote.empty()) return L"Choose a remote folder.";
 		if (options.wholeCollection && localRoots.empty())
 			return L"Add at least one folder to the saved Sync collection.";
-		if (!options.wholeCollection && options.local.empty())
-			return L"Choose a valid local folder scope.";
+		if (!options.wholeCollection && options.local.empty()) return L"Choose a valid local folder scope.";
 		if (!options.remote.is_absolute()) return L"The remote folder must be an absolute path.";
 		const auto remote = normalized(options.remote);
 		tasks::detail::PathSet mapped;
@@ -317,7 +320,11 @@ namespace iw::sync
 			plan.blockReason = L"Analysis was cancelled.";
 			review.snapshots.clear();
 		};
-		if (stop.stop_requested()) { cancel(); return review; }
+		if (stop.stop_requested())
+		{
+			cancel();
+			return review;
+		}
 		plan.blockReason = configuration_error(options);
 		if (!plan.blockReason.empty()) return review;
 
@@ -330,8 +337,16 @@ namespace iw::sync
 			return review;
 		}
 		const auto remoteTree = walk(remoteRoot, stop, progress, scanned);
-		if (stop.stop_requested()) { cancel(); return review; }
-		if (!remoteTree.error.empty()) { plan.blockReason = remoteTree.error; return review; }
+		if (stop.stop_requested())
+		{
+			cancel();
+			return review;
+		}
+		if (!remoteTree.error.empty())
+		{
+			plan.blockReason = remoteTree.error;
+			return review;
+		}
 
 		tasks::detail::PathSet comparedRemote;
 		for (const auto& localRoot : roots(options))
@@ -345,7 +360,11 @@ namespace iw::sync
 				return review;
 			}
 			const auto localTree = walk(localRoot, stop, progress, scanned);
-			if (stop.stop_requested()) { cancel(); return review; }
+			if (stop.stop_requested())
+			{
+				cancel();
+				return review;
+			}
 			if (!localTree.error.empty())
 			{
 				plan.rows.clear();
@@ -377,7 +396,11 @@ namespace iw::sync
 			for (const auto& [name, state] : remoteFiles) names.insert(name);
 			for (const auto& name : names)
 			{
-				if (stop.stop_requested()) { cancel(); return review; }
+				if (stop.stop_requested())
+				{
+					cancel();
+					return review;
+				}
 				const auto remoteName = (prefix / name).wstring();
 				comparedRemote.insert(remoteName);
 				const auto left = localTree.files.find(name);
@@ -410,9 +433,8 @@ namespace iw::sync
 					row.detail = L"A file maps to a folder on the other side. Choose separate destinations.";
 					plan.blockReason = row.detail;
 				}
-				const bool readOnlyTarget =
-					(row.tag == copyToRemote && row.replace && remote.readOnly) ||
-					(row.tag == copyToLocal && row.replace && local.readOnly);
+				const bool readOnlyTarget = (row.tag == copyToRemote && row.replace && remote.readOnly) ||
+				                            (row.tag == copyToLocal && row.replace && local.readOnly);
 				if (readOnlyTarget)
 				{
 					row.state = tasks::RowState::blocked;
@@ -431,15 +453,20 @@ namespace iw::sync
 					plan.blockReason = row.detail;
 				}
 				review.snapshots.emplace(row.source.wstring(),
-					RowSnapshot{row, local, remote, localRoot, remoteRoot, *localRootState, *remoteRootState,
-						localParent, remoteParent, localParentState, remoteParentState});
+				                         RowSnapshot{row, local, remote, localRoot, remoteRoot, *localRootState,
+				                                     *remoteRootState, localParent, remoteParent, localParentState,
+				                                     remoteParentState});
 				plan.rows.push_back(std::move(row));
 			}
 		}
 		// Collection backup folders with no local root have no unambiguous destination or delete authority.
 		for (const auto& [name, state] : remoteTree.files)
 		{
-			if (stop.stop_requested()) { cancel(); return review; }
+			if (stop.stop_requested())
+			{
+				cancel();
+				return review;
+			}
 			if (comparedRemote.contains(name)) continue;
 			tasks::TaskRow row;
 			row.destination = remoteRoot / name;
@@ -455,7 +482,7 @@ namespace iw::sync
 		return review;
 	}
 
-	tasks::RunOptions run_options(std::shared_ptr<const Review> review)
+	tasks::RunOptions run_options(const std::shared_ptr<const Review>& review)
 	{
 		tasks::RunOptions options;
 		options.undoLabel = L"Synchronize";
@@ -475,22 +502,28 @@ namespace iw::sync
 			const auto found = review->snapshots.find(row.source.wstring());
 			if (found == review->snapshots.end()) return refuse();
 			const auto& snapshot = found->second;
-			if (!paths::equal(row.source, snapshot.row.source) ||
-				row.tag != snapshot.row.tag || row.replace != snapshot.row.replace ||
-				!paths::equal(row.destination, snapshot.row.destination)) return refuse();
+			if (!paths::equal(row.source, snapshot.row.source) || row.tag != snapshot.row.tag ||
+			    row.replace != snapshot.row.replace || !paths::equal(row.destination, snapshot.row.destination))
+				return refuse();
 			if (!readable_directory(snapshot.localRoot, snapshot.localRootState) ||
-				!readable_directory(snapshot.remoteRoot, snapshot.remoteRootState) ||
-				!readable_directory(snapshot.localParent, snapshot.localParentState) ||
-				!readable_directory(snapshot.remoteParent, snapshot.remoteParentState)) return refuse();
+			    !readable_directory(snapshot.remoteRoot, snapshot.remoteRootState) ||
+			    !readable_directory(snapshot.localParent, snapshot.localParentState) ||
+			    !readable_directory(snapshot.remoteParent, snapshot.remoteParentState))
+				return refuse();
 			FileState local, remote;
-			if (!read_state(row.source, local) || !read_state(row.destination, remote) ||
-				local != snapshot.local || remote != snapshot.remote) return refuse();
+			if (!read_state(row.source, local) || !read_state(row.destination, remote) || local != snapshot.local ||
+			    remote != snapshot.remote)
+				return refuse();
 			return true;
 		};
 		const auto revalidate = options.revalidate;
 		options.act = [revalidate](tasks::TaskRow& row)
 		{
-			if (!revalidate(row)) { row.state = tasks::RowState::failed; return; }
+			if (!revalidate(row))
+			{
+				row.state = tasks::RowState::failed;
+				return;
+			}
 			switch (row.tag)
 			{
 			case copyToRemote:
@@ -499,7 +532,7 @@ namespace iw::sync
 				const auto& source = row.tag == copyToRemote ? row.source : row.destination;
 				const auto& target = row.tag == copyToRemote ? row.destination : row.source;
 				if (const auto failure = files::copy_file_to(source, target, row.replace,
-					[&] { return revalidate(row); }))
+				                                             [&] { return revalidate(row); }))
 				{
 					if (row.detail.empty()) throw std::runtime_error(failure.message());
 					row.state = tasks::RowState::failed;
@@ -529,9 +562,10 @@ namespace iw::sync
 		std::array<size_t, 5> counts{};
 		for (const auto& row : plan.rows)
 			if (row.tag >= ignore && row.tag <= deleteRemote) ++counts[static_cast<size_t>(row.tag)];
-		return std::format(L"{} copy to local, {} copy to remote, {} delete local, {} delete remote, {} ignore, {} replacements",
-			counts[copyToLocal], counts[copyToRemote], counts[deleteLocal], counts[deleteRemote],
-			counts[ignore], plan.replacements);
+		return std::format(
+			L"{} copy to local, {} copy to remote, {} delete local, {} delete remote, {} ignore, {} replacements",
+			counts[copyToLocal], counts[copyToRemote], counts[deleteLocal], counts[deleteRemote], counts[ignore],
+			plan.replacements);
 	}
 
 	platform::ChoiceDefinition deletion_confirmation(const tasks::TaskPlan& plan)
@@ -547,8 +581,8 @@ namespace iw::sync
 		if (!local && !remote) return definition;
 		definition.title = L"Synchronize";
 		const auto total = local + remote;
-		definition.heading = std::format(L"Synchronization will permanently delete {} file{}.",
-			total, total == 1 ? L"" : L"s");
+		definition.heading = std::format(L"Synchronization will permanently delete {} file{}.", total,
+		                                 total == 1 ? L"" : L"s");
 		definition.message = std::format(
 			L"These files cannot be recovered from the Recycle Bin.\n\n{} local file{} and {} remote file{} will be deleted."
 			L"\n\nImageWalker secures recovery copies first. After closing this task, Undo can restore completed changes during this session.",
@@ -588,16 +622,27 @@ namespace iw
 	{
 		enum ControlId
 		{
-			idDescription = 1, idScopeHeading, idScopeTree, idScopeFolder, idLocal, idRemote,
-			idOptionsHeading, idCopyToRemote, idCopyToLocal, idDeleteLocal, idDeleteRemote,
-			idCollectionFolders, idAddCollectionFolder, idRemoveCollectionFolder
+			idDescription = 1,
+			idScopeHeading,
+			idScopeTree,
+			idScopeFolder,
+			idLocal,
+			idRemote,
+			idOptionsHeading,
+			idCopyToRemote,
+			idCopyToLocal,
+			idDeleteLocal,
+			idDeleteRemote,
+			idCollectionFolders,
+			idAddCollectionFolder,
+			idRemoveCollectionFolder
 		};
 		constexpr int scopeGroup = 1;
 	}
 
-	TaskSync::TaskSync(std::wstring settingsSection, tasks::TaskRunner::Dispatcher dispatcher)
-		: TaskView(std::move(dispatcher)), options_(sync::load_options(settingsSection)),
-		  settingsSection_(std::move(settingsSection))
+	TaskSync::TaskSync(std::wstring settingsSection, tasks::TaskRunner::Dispatcher dispatcher) :
+		TaskView(std::move(dispatcher)), options_(sync::load_options(settingsSection)),
+		settingsSection_(std::move(settingsSection))
 	{
 	}
 
@@ -636,8 +681,9 @@ namespace iw
 	void TaskSync::set_options(sync::Options options)
 	{
 		options_ = std::move(options);
-		collectionSelection_ = options_.collection.empty() ? 0 :
-			(std::min)(collectionSelection_, options_.collection.size() - 1);
+		collectionSelection_ = options_.collection.empty()
+		                           ? 0
+		                           : (std::min)(collectionSelection_, options_.collection.size() - 1);
 		sync::save_options(options_, settingsSection_);
 		if (frame_) rebuild_controls();
 		review_.reset();
@@ -667,11 +713,15 @@ namespace iw
 
 	void TaskSync::build_controls()
 	{
-		const auto changed = [this] { controls_changed(); };
+		const auto changed = [this]
+		{
+			controls_changed();
+		};
 		ui::Control description;
 		description.id = idDescription;
 		description.kind = ui::ControlKind::label;
-		description.label = L"Analyze first. Review every copy and deletion before running. Deletions bypass the Recycle Bin; recovery copies are secured for session Undo.";
+		description.label =
+			L"Analyze first. Review every copy and deletion before running. Deletions bypass the Recycle Bin; recovery copies are secured for session Undo.";
 		panel_.add(std::move(description));
 		ui::Control heading;
 		heading.id = idScopeHeading;
@@ -697,16 +747,16 @@ namespace iw
 		ui::Control local;
 		local.id = idLocal;
 		local.kind = options_.wholeCollection ? ui::ControlKind::label : ui::ControlKind::folder;
-		local.label = options_.wholeCollection
-			? L"Saved Sync collection folders (including all subfolders):"
-			: L"Local folder";
+		local.label = options_.wholeCollection ? L"Saved Sync collection folders (including all subfolders):"
+		                                       : L"Local folder";
 		local.text = options_.local.wstring();
 		if (options_.wholeCollection)
 		{
 			for (const auto& folder : options_.collection)
 				local.label += std::format(L"\n{} \u2192 Remote\\{}", folder.wstring(),
-					sync::mapping_name(sync::normalized(folder)).wstring());
-			if (options_.collection.empty()) local.label += L"\nUse Add collection folder to choose the folders to synchronize.";
+				                           sync::mapping_name(sync::normalized(folder)).wstring());
+			if (options_.collection.empty())
+				local.label += L"\nUse Add collection folder to choose the folders to synchronize.";
 			else local.label += L"\nRemoving a folder from this list does not delete any files.";
 		}
 		local.changed = changed;
@@ -788,7 +838,7 @@ namespace iw
 		{
 		case 0:
 			if (finished_ || row.state == tasks::RowState::running || row.state == tasks::RowState::success ||
-				row.state == tasks::RowState::failed || row.state == tasks::RowState::notRun)
+			    row.state == tasks::RowState::failed || row.state == tasks::RowState::notRun)
 				return TaskView::review_cell(row, 2);
 			return row.change;
 		case 1: return row.source.wstring();
@@ -808,8 +858,8 @@ namespace iw
 	tasks::TaskRunner::AnalyzeFunction TaskSync::make_analyzer()
 	{
 		review_ = std::make_shared<sync::Review>();
-		return [options = options_, review = review_](const std::stop_token& stop,
-		                                             const tasks::ProgressFunction& progress)
+		return
+			[options = options_, review = review_](const std::stop_token& stop, const tasks::ProgressFunction& progress)
 		{
 			*review = sync::analyze(options, stop, progress);
 			return review->plan;
@@ -823,9 +873,7 @@ namespace iw
 		const auto reviewed = review_;
 		confirming_ = true;
 		const auto confirmed = sync::confirm_deletions(plan_, [this](const platform::ChoiceDefinition& definition)
-		{
-			return platform::show_choice(frame_, definition);
-		});
+		{ return platform::show_choice(frame_, definition); });
 		confirming_ = false;
 		if (!confirmed || reviewed != review_) return;
 		TaskView::start_run();

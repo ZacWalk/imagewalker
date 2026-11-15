@@ -21,12 +21,16 @@ namespace iw::tasks
 			return result;
 		}
 
-		template<typename Callback, typename... Args>
-		void report_safely(const Callback& callback, Args&&... args)
+		template <typename Callback, typename... Args> void report_safely(const Callback& callback, Args&&... args)
 		{
 			// Reporting is observational: a failed progress sink must not abandon the remaining rows.
-			try { if (callback) callback(std::forward<Args>(args)...); }
-			catch (...) {}
+			try
+			{
+				if (callback) callback(std::forward<Args>(args)...);
+			}
+			catch (...)
+			{
+			}
 		}
 	}
 
@@ -36,7 +40,8 @@ namespace iw::tasks
 		bool undoProtected{};
 		std::wstring protectionFailure;
 		size_t total = 0;
-		for (const auto& row : plan.rows) if (row.state == RowState::ready) ++total;
+		for (const auto& row : plan.rows)
+			if (row.state == RowState::ready) ++total;
 		report_safely(options.progress, size_t{0}, total);
 
 		size_t complete = 0;
@@ -47,7 +52,8 @@ namespace iw::tasks
 			if (row.state == RowState::blocked)
 			{
 				row.state = RowState::failed;
-				if (row.detail.empty()) row.detail = row.change.empty() ? L"The item was blocked in Review." : row.change;
+				if (row.detail.empty())
+					row.detail = row.change.empty() ? L"The item was blocked in Review." : row.change;
 			}
 			if (row.state != RowState::ready) continue;
 			if (stop.stop_requested())
@@ -80,7 +86,8 @@ namespace iw::tasks
 						if (options.undoPaths)
 						{
 							if (!undoBatch)
-								undoBatch = (options.undoHistory ? *options.undoHistory : undo::history()).begin(options.undoLabel);
+								undoBatch = (options.undoHistory ? *options.undoHistory : undo::history())
+								                .begin(options.undoLabel);
 							std::vector<std::filesystem::path> protectedPaths;
 							if (options.undoAllBeforeRun && !undoProtected)
 							{
@@ -92,8 +99,7 @@ namespace iw::tasks
 								}
 							}
 							else if (!options.undoAllBeforeRun) protectedPaths = options.undoPaths(row);
-							protectedRow = protectionFailure.empty() &&
-								undoBatch->protect(protectedPaths, row.detail);
+							protectedRow = protectionFailure.empty() && undoBatch->protect(protectedPaths, row.detail);
 							if (options.undoAllBeforeRun)
 							{
 								undoProtected = true;
@@ -105,7 +111,7 @@ namespace iw::tasks
 						else options.act(row);
 						if (row.state == RowState::running) row.state = RowState::success;
 						else if (row.state != RowState::success && row.state != RowState::failed &&
-							row.state != RowState::skipped && row.state != RowState::notRun)
+						         row.state != RowState::skipped && row.state != RowState::notRun)
 						{
 							row.state = RowState::failed;
 							if (row.detail.empty()) row.detail = L"The operation did not report a completed outcome.";
@@ -162,13 +168,12 @@ namespace iw::tasks
 		}
 	}
 
-	TaskRunner::TaskRunner()
-		: TaskRunner(Dispatcher{})
+	TaskRunner::TaskRunner() : TaskRunner(Dispatcher{})
 	{
 	}
 
-	TaskRunner::TaskRunner(Dispatcher dispatcher)
-		: dispatcher_(std::move(dispatcher)), alive_(std::make_shared<TaskRunner*>(this))
+	TaskRunner::TaskRunner(Dispatcher dispatcher) :
+		dispatcher_(std::move(dispatcher)), alive_(std::make_shared<TaskRunner*>(this))
 	{
 	}
 
@@ -185,7 +190,10 @@ namespace iw::tasks
 			if (dispatcher_.background) return dispatcher_.background(std::move(work));
 			return platform::queue_work(platform::WorkQueue::task, std::move(work));
 		}
-		catch (...) { return false; }
+		catch (...)
+		{
+			return false;
+		}
 	}
 
 	std::shared_ptr<TaskRunner::Job> TaskRunner::begin(const Phase phase, const std::uint64_t generation)
@@ -193,10 +201,9 @@ namespace iw::tasks
 		auto job = std::make_shared<Job>();
 		job->generation = generation;
 		job->phase = phase;
-		job->postUi = dispatcher_.ui
-			              ? dispatcher_.ui
-			              : std::function<bool(std::function<void()>)>(
-				              [](std::function<void()> work) { return platform::queue_ui(std::move(work)); });
+		job->postUi = dispatcher_.ui ? dispatcher_.ui
+		                             : std::function<bool(std::function<void()>)>([](std::function<void()> work)
+		{ return platform::queue_ui(std::move(work)); });
 		job_ = job;
 		phase_ = phase;
 		return job;
@@ -251,8 +258,14 @@ namespace iw::tasks
 			{
 				if (!stop.stop_requested()) plan = work(stop, report);
 			}
-			catch (const std::exception& error) { plan.blockReason = L"Analysis failed: " + widen(error.what()); }
-			catch (...) { plan.blockReason = L"Analysis failed."; }
+			catch (const std::exception& error)
+			{
+				plan.blockReason = L"Analysis failed: " + widen(error.what());
+			}
+			catch (...)
+			{
+				plan.blockReason = L"Analysis failed.";
+			}
 			plan.generation = job->generation;
 			job->postUi([guard, job, plan = std::move(plan)]() mutable
 			{
@@ -286,7 +299,8 @@ namespace iw::tasks
 		const auto job = begin(Phase::running, generation);
 		const std::weak_ptr guard = alive_;
 		const auto stop = job->stop.get_token();
-		options.progress = [guard, job, observer = std::move(options.progress)](const size_t complete, const size_t total)
+		options.progress =
+			[guard, job, observer = std::move(options.progress)](const size_t complete, const size_t total)
 		{
 			report_safely(observer, complete, total);
 			job->postUi([guard, job, complete, total]
@@ -299,7 +313,8 @@ namespace iw::tasks
 				report_safely(callback, job->phase, complete, total);
 			});
 		};
-		options.rowProgress = [guard, job, observer = std::move(options.rowProgress)](const size_t index, const TaskRow& row)
+		options.rowProgress =
+			[guard, job, observer = std::move(options.rowProgress)](const size_t index, const TaskRow& row)
 		{
 			report_safely(observer, index, row);
 			job->postUi([guard, job, index, row]
@@ -315,19 +330,19 @@ namespace iw::tasks
 
 		const bool queued = post_background(
 			[job, stop, guard, plan = std::move(plan), options = std::move(options)]() mutable
+		{
+			run_plan(plan, stop, options);
+			job->postUi([guard, job, plan = std::move(plan)]() mutable
 			{
-				run_plan(plan, stop, options);
-				job->postUi([guard, job, plan = std::move(plan)]() mutable
-				{
-					const auto target = guard.lock();
-					if (!target || !*target) return;
-					TaskRunner& runner = **target;
-					if (!runner.accepts(job)) return;
-					auto callback = runner.finished;
-					runner.complete(job);
-					if (callback) callback(std::move(plan));
-				});
+				const auto target = guard.lock();
+				if (!target || !*target) return;
+				TaskRunner& runner = **target;
+				if (!runner.accepts(job)) return;
+				auto callback = runner.finished;
+				runner.complete(job);
+				if (callback) callback(std::move(plan));
 			});
+		});
 
 		if (!queued) complete(job);
 		return queued;

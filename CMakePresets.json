@@ -55,9 +55,9 @@
     { "name": "vs-release", "configurePreset": "vs", "configuration": "RelWithDebInfo" }
   ],
   "testPresets": [
-    { "name": "x64-debug", "configurePreset": "x64-debug", "output": { "outputOnFailure": true } },
-    { "name": "x64-release", "configurePreset": "x64-release", "output": { "outputOnFailure": true } },
-    { "name": "vs-debug", "configurePreset": "vs", "configuration": "Debug", "output": { "outputOnFailure": true } },
-    { "name": "vs-release", "configurePreset": "vs", "configuration": "RelWithDebInfo", "output": { "outputOnFailure": true } }
+    { "name": "x64-debug", "configurePreset": "x64-debug", "output": { "outputOnFailure": true, "verbosity": "verbose" } },
+    { "name": "x64-release", "configurePreset": "x64-release", "output": { "outputOnFailure": true, "verbosity": "verbose" } },
+    { "name": "vs-debug", "configurePreset": "vs", "configuration": "Debug", "output": { "outputOnFailure": true, "verbosity": "verbose" } },
+    { "name": "vs-release", "configurePreset": "vs", "configuration": "RelWithDebInfo", "output": { "outputOnFailure": true, "verbosity": "verbose" } }
   ]
 }

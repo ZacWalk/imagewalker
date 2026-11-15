@@ -1,59 +1,64 @@
 # Application rules
 
-Development requirements for all five applications.
+Rules for all five applications.
 
-- Each is a standalone x64 executable with its entry point and application
-  tests.
-- Use the shared inline imaging headers and dependent libraries directly for image
-  loading and manipulation. Keep UI, resources, settings, worker scheduling
-  and final file publication in the application. See [libiw-plan.md](libiw-plan.md).
+- Each is a standalone x64 executable with its own entry point and an
+  application test suite covering its identity, layout, settings and command
+  availability.
+- Load and manipulate images through the shared imaging headers and the
+  libraries they wrap; keep UI, resources, settings, worker scheduling and
+  final file publication in the application. See [imaging.md](imaging.md).
 - Debug executables end in `d`; binaries, settings and logs all live in `exe\`.
-- Keep version resources in each application's directory: `ImageWalker.rc` for
-  1.0, `Ver.h` and `ImageWalker.rc` for 2.x, and `app.rc` for 3.0.
-  Use `ImageWalker 1.0` and `1.0.0.0` in 1.0's version resource and test the
-  product name against its application title. Follow
-  [architecture-2x.md](architecture-2x.md#version-labels) for 2.x labels.
+- Version identity lives in each application's directory: `ImageWalker.rc` for
+  1.0, `Ver.h` and `ImageWalker.rc` for 2.x, and the `libdesktop_add_app` call
+  in `src30/CMakeLists.txt` for 3.0. 1.0's version resource uses
+  `ImageWalker 1.0` and `1.0.0.0`, and its tests check the product name against
+  the application title; [architecture-2x.md](architecture-2x.md#version-labels)
+  gives the 2.x labels.
 - Settings use an ini file named after the executable. There is no runtime
   registration and no feature gating.
-- All five applications write an executable-specific latest-run log. A second
+- Each application writes an executable-specific latest-run log. A second
   instance, finding that log held by the first, writes `<exe>-<pid>.log` beside
   it rather than truncating it. ImageWalker 3.0 writes timestamped UTF-8
-  diagnostics to that file as well as the debugger and an attached console;
-  inability to open either log is reported.
+  diagnostics to that file, the debugger and an attached console, and reports
+  when it cannot open its log.
 - Image and pixel scratch uses owned containers such as `IW::CBuffer`. Fixed
   stack buffers remain only for small bounded Win32 strings, and in the crash
   reporter, which runs after a fault and must not allocate.
-- Background work is an owned work item, and worker code does not send blocking
+- Background work is an owned work item, and worker code sends no blocking
   messages to the UI thread. ImageWalker 3.0 joins its work queues at exit, so
-  an item that loops over several things polls `platform::exit_token()`
-  between them; otherwise a closed app runs on until the batch ends.
-- A worker-completion payload posted to the UI thread carries ownership, and the
-  poster reclaims it when the post fails — see
-  `CMainFrame::SignalImageLoadComplete` and `SignalSearchingFolder`.
-- Every resource script embeds a local manifest, and the application icon is the
-  lowest-numbered icon resource.
-- The four WTL applications use the shared `iw_flags` settings. ImageWalker 3.0
-  keeps its stricter compiler configuration in `src30/CMakeLists.txt`.
-- All five applications embed the compiled help and open it from an unmarked
-  copy that `include/core/help_file.h` writes to the user's temporary folder,
-  never from beside the executable: HTML Help shows blank pages for a `.chm`
-  extracted from a downloaded zip or opened from a network share. ImageWalker
-  3.0 has its own topic set and opens it through the native HTML Help API, not
-  the WTL helper.
+  an item that loops over several things polls `platform::exit_token()` between
+  them; otherwise a closed application runs on until the batch ends.
+- A worker-completion payload posted to the UI thread carries ownership, and
+  the poster reclaims it when the post fails, as the 2.x
+  `CMainFrame::SignalImageLoadComplete` and `SignalSearchingFolder` do.
+- The WTL applications' resource scripts embed their own `app.manifest`;
+  `libdesktop_add_app` generates 3.0's manifest and version resource. Each
+  application's icon is its lowest-numbered icon resource.
+- All five embed the compiled help and open it from the copy described in
+  [build.md](build.md#help). ImageWalker 3.0 has its own topics and opens them
+  through the HTML Help API, not the WTL helper.
+- Preserve ImageWalker 1.0's read-only scope and its smaller frame and views,
+  and give it the common codec registry rather than a loader set of its own.
+- Keep ImageWalker 3.0 changes in its own platform, canvas, collection and task
+  interfaces, with no dependency on a WTL application.
 
-Apply the following safety rules to reviewed batch work in ImageWalker 3.0:
-Convert, Rename and Sync. Copy, Move and Edit saves run to completion instead.
-See [workflows-3.0.md](workflows-3.0.md) for usage.
+## ImageWalker 3.0 file tasks
+
+These rules govern Convert, Rename and Sync, the reviewed batch tasks; Copy,
+Move and Edit saves run to completion instead.
+[workflows-3.0.md](workflows-3.0.md) describes their use.
 
 - A plan is immutable once analysed. A change to a source, destination, format
   or collision policy bumps the generation and discards it.
-- A completion carrying a stale generation is dropped, never merged into a newer
-  plan.
+- A completion carrying a stale generation is dropped, never merged into a
+  newer plan.
 - Cancel is partial completion, never rollback. Every row keeps an outcome.
 - No plan writes two sources to one destination, and a destination that appears
   between Review and Run is never silently overwritten.
-- A configured external tool is launched only from an executable path discovered
-  on disk, never from text in the configuration file.
+- A configured external tool is launched only from an executable path
+  discovered on disk, never from text in the configuration file.
 - File-task Undo secures originals before destructive writes and records only
-  successful mutations. It never authorizes later external changes by refreshing
-  an untouched path's fingerprint. Recovery copies are not automatically evicted.
+  successful mutations. It never authorizes later external changes by
+  refreshing an untouched path's fingerprint, and never evicts recovery copies
+  automatically.

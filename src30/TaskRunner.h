@@ -11,7 +11,10 @@
 #include <memory>
 #include <stop_token>
 
-namespace iw::undo { class History; }
+namespace iw::undo
+{
+	class History;
+}
 
 namespace iw::tasks
 {
@@ -54,7 +57,12 @@ namespace iw::tasks
 	class TaskRunner
 	{
 	public:
-		enum class Phase { idle, analyzing, running };
+		enum class Phase
+		{
+			idle,
+			analyzing,
+			running
+		};
 
 		// Both members default to the platform queues. Tests replace them to control ordering.
 		struct Dispatcher

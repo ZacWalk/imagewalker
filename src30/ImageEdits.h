@@ -13,7 +13,12 @@ namespace iw::edits
 		bool redo(ImageEdits& current);
 		bool can_undo() const { return !undo_.empty(); }
 		bool can_redo() const { return !redo_.empty(); }
-		void clear() { undo_.clear(); redo_.clear(); group_ = 0; }
+		void clear()
+		{
+			undo_.clear();
+			redo_.clear();
+			group_ = 0;
+		}
 
 	private:
 		std::vector<ImageEdits> undo_;
@@ -26,7 +31,11 @@ namespace iw::edits
 	{
 	public:
 		bool update(const files::DecodedImage& source, app::sizei pane);
-		void reset() { image_ = {}; pane_ = {}; }
+		void reset()
+		{
+			image_ = {};
+			pane_ = {};
+		}
 		const files::DecodedImage& image() const { return image_; }
 
 	private:

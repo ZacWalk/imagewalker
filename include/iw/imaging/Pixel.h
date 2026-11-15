@@ -38,7 +38,6 @@ namespace iw::imaging
 	PixelImage rotate_quarters(const PixelImage& source, int quarters);
 }
 
-
 #include <stdexcept>
 
 namespace iw::imaging
@@ -46,11 +45,11 @@ namespace iw::imaging
 	inline bool valid_pixels(const int width, const int height, const std::size_t count) noexcept
 	{
 		return width > 0 && height > 0 &&
-			static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) <= count;
+		       static_cast<std::uint64_t>(width) * static_cast<std::uint64_t>(height) <= count;
 	}
 
 	inline PixelPoint rotated_point(const int x, const int y, const int width, const int height,
-	                         const int quarters) noexcept
+	                                const int quarters) noexcept
 	{
 		switch ((quarters % 4 + 4) % 4)
 		{

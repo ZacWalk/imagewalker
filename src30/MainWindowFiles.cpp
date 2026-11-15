@@ -34,11 +34,13 @@ namespace iw
 			platform::show_error(L"Close the current task before opening another folder.", L"Open folder", frame_);
 			return;
 		}
-		if (const auto path = platform::choose_folder(frame_, L"Open folder in ImageWalker"))
-			open_folder(*path);
+		if (const auto path = platform::choose_folder(frame_, L"Open folder in ImageWalker")) open_folder(*path);
 	}
 
-	std::vector<std::filesystem::path> MainWindow::selected_paths() const { return canvas_.selected_paths(); }
+	std::vector<std::filesystem::path> MainWindow::selected_paths() const
+	{
+		return canvas_.selected_paths();
+	}
 
 	void MainWindow::show_file_menu(const app::pointi screenPoint)
 	{
@@ -46,8 +48,7 @@ namespace iw
 		// The canvas context menu always targets the canvas selection, whatever holds focus.
 		context.focus = FocusTarget::canvas;
 		std::vector<platform::PopupItem> items;
-		const auto append = [&](std::wstring label, std::function<void()> invoke,
-		                         std::function<bool()> enabled = {})
+		const auto append = [&](std::wstring label, std::function<void()> invoke, std::function<bool()> enabled = {})
 		{
 			auto action = std::make_shared<platform::Command>();
 			action->invoke = std::move(invoke);
@@ -62,10 +63,8 @@ namespace iw
 		items.push_back(platform::PopupItem::separator_item());
 		append(L"Copy", [this] { copy_selected(false); }, [context] { return context.selectionCount > 0; });
 		append(L"Cut", [this] { copy_selected(true); }, [context] { return context.selectionCount > 0; });
-		append(L"Paste", [this] { paste_files(); }, [context]
-		{
-			return context.hasFolder && (context.clipboardHasFiles || context.clipboardHasImage);
-		});
+		append(L"Paste", [this] { paste_files(); },
+		       [context] { return context.hasFolder && (context.clipboardHasFiles || context.clipboardHasImage); });
 		items.push_back(platform::PopupItem::separator_item());
 		append(L"Rename", [this] { rename_selected(); }, [context] { return context.selectionCount == 1; });
 		append(L"Delete", [this] { delete_selected(); }, [context] { return context.selectionCount > 0; });
@@ -83,7 +82,10 @@ namespace iw
 				canvas_.set_file_properties_visible(!canvas_.file_properties_visible());
 				update_fullscreen_menu_checks();
 			};
-			properties->checked = [this] { return canvas_.file_properties_visible(); };
+			properties->checked = [this]
+			{
+				return canvas_.file_properties_visible();
+			};
 			items.push_back(platform::PopupItem::action(std::move(properties), L"File properties"));
 			auto thumbnails = std::make_shared<platform::Command>();
 			thumbnails->invoke = [this]
@@ -91,13 +93,17 @@ namespace iw
 				canvas_.set_thumbnail_selector_visible(!canvas_.thumbnail_selector_visible());
 				update_fullscreen_menu_checks();
 			};
-			thumbnails->checked = [this] { return canvas_.thumbnail_selector_visible(); };
+			thumbnails->checked = [this]
+			{
+				return canvas_.thumbnail_selector_visible();
+			};
 			items.push_back(platform::PopupItem::action(std::move(thumbnails), L"Thumbnail selector"));
 		}
 		platform::show_popup_menu(frame_, screenPoint, items);
 	}
 
-	void MainWindow::rename_selected() try
+	void MainWindow::rename_selected()
+	try
 	{
 		const auto paths = selected_paths();
 		if (paths.size() != 1) return;
@@ -115,8 +121,8 @@ namespace iw
 			const auto* value = found == values.end() ? nullptr : std::get_if<std::wstring>(&found->second);
 			const std::filesystem::path path(value ? *value : L"");
 			return value && !path.empty() && !path.has_parent_path()
-				       ? std::nullopt
-				       : std::optional<std::wstring>(L"Enter a file name without a folder path.");
+			           ? std::nullopt
+			           : std::optional<std::wstring>(L"Enter a file name without a folder path.");
 		};
 		const auto values = platform::show_modal_dialog(frame_, std::move(definition));
 		if (!values) return;
@@ -144,7 +150,7 @@ namespace iw
 		if (!processed || plan.count(tasks::RowState::success) != 1)
 		{
 			platform::show_error(processed ? tasks::summarize_results(plan) : L"The rename could not start.",
-				L"Rename failed", frame_);
+			                     L"Rename failed", frame_);
 			return;
 		}
 		if (!plan.completionError.empty()) platform::show_error(plan.completionError, L"Rename recovery", frame_);
@@ -243,7 +249,9 @@ namespace iw
 		struct TransferPathLess
 		{
 			bool operator()(const std::filesystem::path& left, const std::filesystem::path& right) const
-			{ return paths::icompare(left.native(), right.native()) < 0; }
+			{
+				return paths::icompare(left.native(), right.native()) < 0;
+			}
 		};
 
 		using TransferParents = std::map<std::filesystem::path, TransferStamp, TransferPathLess>;
@@ -260,14 +268,14 @@ namespace iw
 
 		bool has_transfer_report(const platform::WindowFramePtr& owner)
 		{
-			return std::ranges::any_of(transferReports, [&owner](const TransferReport& report)
-				{ return report.owner.lock() == owner; });
+			return std::ranges::any_of(transferReports,
+			                           [&owner](const TransferReport& report) { return report.owner.lock() == owner; });
 		}
 
 		void show_transfer_report(const platform::WindowFramePtr& owner)
 		{
 			const auto report = std::ranges::find_if(transferReports, [&owner](const TransferReport& value)
-				{ return value.owner.lock() == owner; });
+			{ return value.owner.lock() == owner; });
 			if (report == transferReports.end()) return;
 			platform::DialogField resultList;
 			resultList.id = 1;
@@ -297,7 +305,7 @@ namespace iw
 			if (error) return {};
 			const auto attributes = platform::read_file_attributes(path);
 			if (!attributes.known || attributes.reparse ||
-				(!std::filesystem::is_directory(status) && !std::filesystem::is_regular_file(status)))
+			    (!std::filesystem::is_directory(status) && !std::filesystem::is_regular_file(status)))
 			{
 				error = std::make_error_code(std::errc::operation_not_supported);
 				return {};
@@ -383,19 +391,23 @@ namespace iw
 			if (!path.is_absolute() || path.native().find(L'\0') != std::wstring::npos) return false;
 			for (const auto& component : path.relative_path())
 				if (!component.empty() && component != L"." && component != L".." &&
-					paths::validate_file_name(component.wstring()) != paths::NameProblem::none) return false;
+				    paths::validate_file_name(component.wstring()) != paths::NameProblem::none)
+					return false;
 			return true;
 		}
 
 		std::filesystem::path transfer_companion_target(const std::filesystem::path& source,
-			const std::filesystem::path& sidecar, const std::filesystem::path& destination)
+		                                                const std::filesystem::path& sidecar,
+		                                                const std::filesystem::path& destination)
 		{
 			const auto name = sidecar.filename().wstring();
 			const auto primaryName = source.filename().wstring();
 			const bool fullName = name.size() > primaryName.size() &&
-				paths::iequals(name.substr(0, primaryName.size()), primaryName) && name[primaryName.size()] == L'.';
-			return destination.parent_path() / ((fullName ? destination.filename().wstring() :
-				destination.stem().wstring()) + sidecar.extension().wstring());
+			                      paths::iequals(name.substr(0, primaryName.size()), primaryName) &&
+			                      name[primaryName.size()] == L'.';
+			return destination.parent_path() /
+			       ((fullName ? destination.filename().wstring() : destination.stem().wstring()) +
+			        sidecar.extension().wstring());
 		}
 
 		std::error_code collect_transfer_parts(TransferRow& row, const bool move)
@@ -424,9 +436,7 @@ namespace iw
 				if (error) return error;
 			}
 			std::ranges::stable_sort(row.parts, [](const TransferPart& left, const TransferPart& right)
-			{
-				return left.sourceStamp.directory && !right.sourceStamp.directory;
-			});
+			{ return left.sourceStamp.directory && !right.sourceStamp.directory; });
 			return {};
 		}
 
@@ -448,22 +458,29 @@ namespace iw
 		}
 
 		std::vector<std::filesystem::path> open_with_selection(std::vector<std::filesystem::path> selected,
-			const std::filesystem::path& focused, std::wstring& failure, const bool requireSameType = false)
+		                                                       const std::filesystem::path& focused,
+		                                                       std::wstring& failure,
+		                                                       const bool requireSameType = false)
 		{
-			if (selected.empty()) { failure = L"Select a file first."; return {}; }
+			if (selected.empty())
+			{
+				failure = L"Select a file first.";
+				return {};
+			}
 			const auto extension = paths::lowercase_extension(selected.front());
 			for (const auto& path : selected)
 			{
 				std::error_code error;
 				if (!path.is_absolute() || !std::filesystem::is_regular_file(files::native_path(path), error) ||
-					error || (requireSameType && !paths::iequals(paths::lowercase_extension(path), extension)))
+				    error || (requireSameType && !paths::iequals(paths::lowercase_extension(path), extension)))
 				{
 					failure = requireSameType ? L"Select local files of one type for a registered application."
-						: L"Select local files to open with an application or configured tool.";
+					                          : L"Select local files to open with an application or configured tool.";
 					return {};
 				}
 			}
-			const auto focus = std::ranges::find_if(selected, [&focused](const auto& path) { return paths::equal(path, focused); });
+			const auto focus = std::ranges::find_if(selected, [&focused](const auto& path)
+			{ return paths::equal(path, focused); });
 			if (focus != selected.end()) std::rotate(selected.begin(), focus, focus + 1);
 			return selected;
 		}
@@ -482,31 +499,34 @@ namespace iw
 		void record_open_with_use(const std::wstring& key)
 		{
 			const auto count = (std::max)(0, platform::read_integer_setting(L"OpenWith", key, 0));
-			const std::array uses{platform::IntegerSetting{key, count == (std::numeric_limits<int>::max)() ? count : count + 1}};
+			const std::array uses{
+				platform::IntegerSetting{key, count == (std::numeric_limits<int>::max)() ? count : count + 1}};
 			platform::write_integer_settings(L"OpenWith", uses);
 		}
 
-		bool launch_configured_tool(const tools::InstalledTool& tool, const std::vector<std::filesystem::path>& selected,
-			const platform::WindowFramePtr& owner)
+		bool launch_configured_tool(const tools::InstalledTool& tool,
+		                            const std::vector<std::filesystem::path>& selected,
+		                            const platform::WindowFramePtr& owner)
 		{
 			if (selected.empty()) return false;
 			std::error_code error;
 			const auto attributes = platform::read_file_attributes(tool.executable);
 			const auto items = tools::accepts_multiple_items(tool)
-				? std::span<const std::filesystem::path>(selected)
-				: std::span<const std::filesystem::path>(selected.data(), 1);
+			                       ? std::span<const std::filesystem::path>(selected)
+			                       : std::span<const std::filesystem::path>(selected.data(), 1);
 			const auto arguments = tools::build_arguments(tool, items);
 			return tool.executable.is_absolute() && attributes.known && !attributes.reparse &&
-				std::filesystem::is_regular_file(files::native_path(tool.executable), error) && !error &&
-				std::ranges::all_of(items, [&error](const auto& item)
-				{ return std::filesystem::is_regular_file(files::native_path(item), error) && !error; }) &&
-				tools::declaration_is_usable({tool.executable.filename().wstring(), tool.invoke}) &&
-				arguments.size() + tool.executable.native().size() + 4 < 32767 &&
-				platform::launch_process(tool.executable, arguments, owner);
+			       std::filesystem::is_regular_file(files::native_path(tool.executable), error) && !error &&
+			       std::ranges::all_of(items, [&error](const auto& item)
+			{ return std::filesystem::is_regular_file(files::native_path(item), error) && !error; }) &&
+			       tools::declaration_is_usable({tool.executable.filename().wstring(), tool.invoke}) &&
+			       arguments.size() + tool.executable.native().size() + 4 < 32767 &&
+			       platform::launch_process(tool.executable, arguments, owner);
 		}
 	}
 
-	void MainWindow::copy_or_move_to_folder(const bool move) try
+	void MainWindow::copy_or_move_to_folder(const bool move)
+	try
 	{
 		const std::wstring title = move ? L"Move to folder" : L"Copy to folder";
 		if (task_active())
@@ -540,7 +560,8 @@ namespace iw
 			const auto stamp = transfer_stamp(path, error);
 			if (!path.is_absolute() || error || !stamp.exists || transfer_parent_check(path.parent_path()))
 			{
-				platform::show_error(path.filename().wstring() + L" cannot be transferred. Nothing was changed.", title, frame_);
+				platform::show_error(path.filename().wstring() + L" cannot be transferred. Nothing was changed.", title,
+				                     frame_);
 				return;
 			}
 			if (!remember_transfer_parents(path.parent_path(), sourceParents))
@@ -551,7 +572,8 @@ namespace iw
 			for (const auto& other : selected)
 				if (stamp.directory && paths::contains(path, other))
 				{
-					platform::show_error(L"Select a folder or its contents, not both. Nothing was changed.", title, frame_);
+					platform::show_error(L"Select a folder or its contents, not both. Nothing was changed.", title,
+					                     frame_);
 					return;
 				}
 			if (stamp.directory) continue;
@@ -559,7 +581,8 @@ namespace iw
 			{
 				if (path_in(companions, companion))
 				{
-					platform::show_error(L"Two selected files share a sidecar. Transfer them separately.", title, frame_);
+					platform::show_error(L"Two selected files share a sidecar. Transfer them separately.", title,
+					                     frame_);
 					return;
 				}
 				companions.push_back(companion);
@@ -580,14 +603,15 @@ namespace iw
 			if (const auto error = collect_transfer_parts(row, move))
 			{
 				platform::show_error(path.filename().wstring() + L": " + widen_message(error.message()) +
-					L". Nothing was changed.", title, frame_);
+				                         L". Nothing was changed.",
+				                     title, frame_);
 				return;
 			}
 			for (const auto& part : row.parts)
 			{
 				if (!part.sourceStamp.directory)
 					totalSize += (std::min)(static_cast<std::uintmax_t>(part.sourceStamp.size),
-						(std::numeric_limits<std::uintmax_t>::max)() - totalSize);
+					                        (std::numeric_limits<std::uintmax_t>::max)() - totalSize);
 				else sourceParents.try_emplace(part.source, part.sourceStamp);
 			}
 			rows.push_back(std::move(row));
@@ -618,9 +642,8 @@ namespace iw
 		platform::DialogDefinition definition;
 		definition.title = title;
 		definition.message = std::format(L"{} and {} of data.",
-		                                 selected.size() == 1
-			                                 ? selected.front().filename().wstring()
-			                                 : std::format(L"{} items", selected.size()),
+		                                 selected.size() == 1 ? selected.front().filename().wstring()
+		                                                      : std::format(L"{} items", selected.size()),
 		                                 format::size(totalSize));
 		for (size_t index = 0; index < (std::min)(selected.size(), size_t{5}); ++index)
 		{
@@ -631,8 +654,8 @@ namespace iw
 			else
 			{
 				const auto attributes = platform::read_file_attributes(path);
-				definition.previews.push_back(platform::load_bitmap_resource(attributes.directory
-					? platform::BitmapAsset::fileFolder : platform::BitmapAsset::fileOther));
+				definition.previews.push_back(platform::load_bitmap_resource(
+					attributes.directory ? platform::BitmapAsset::fileFolder : platform::BitmapAsset::fileOther));
 			}
 		}
 		definition.fields.push_back(std::move(destinationField));
@@ -645,8 +668,8 @@ namespace iw
 			const auto* value = found == values.end() ? nullptr : std::get_if<std::wstring>(&found->second);
 			const std::filesystem::path path(value ? *value : L"");
 			return qualified_transfer_folder(path)
-				       ? std::nullopt
-				       : std::optional<std::wstring>(L"Enter a full destination folder path.");
+			           ? std::nullopt
+			           : std::optional<std::wstring>(L"Enter a full destination folder path.");
 		};
 		const auto values = platform::show_modal_dialog(frame_, std::move(definition));
 		if (!values) return;
@@ -663,20 +686,31 @@ namespace iw
 		}
 		if (const auto error = transfer_parent_check(destination))
 		{
-			platform::show_error(L"The destination is not a usable folder: " + widen_message(error.message()), title, frame_);
+			platform::show_error(L"The destination is not a usable folder: " + widen_message(error.message()), title,
+			                     frame_);
 			return;
 		}
 		for (const auto& row : rows)
 		{
 			std::error_code error;
 			const auto sourceIdentity = std::filesystem::weakly_canonical(files::native_path(row.source), error);
-			if (error) { platform::show_error(widen_message(error.message()), title, frame_); return; }
-			const auto destinationIdentity = std::filesystem::weakly_canonical(files::native_path(destination), error);
-			if (error) { platform::show_error(widen_message(error.message()), title, frame_); return; }
-			if (std::filesystem::is_directory(files::native_path(row.source), error) &&
-				(paths::equal(sourceIdentity, destinationIdentity) || paths::contains(sourceIdentity, destinationIdentity)))
+			if (error)
 			{
-				platform::show_error(L"A folder cannot be transferred into itself or one of its children.", title, frame_);
+				platform::show_error(widen_message(error.message()), title, frame_);
+				return;
+			}
+			const auto destinationIdentity = std::filesystem::weakly_canonical(files::native_path(destination), error);
+			if (error)
+			{
+				platform::show_error(widen_message(error.message()), title, frame_);
+				return;
+			}
+			if (std::filesystem::is_directory(files::native_path(row.source), error) &&
+			    (paths::equal(sourceIdentity, destinationIdentity) ||
+			     paths::contains(sourceIdentity, destinationIdentity)))
+			{
+				platform::show_error(L"A folder cannot be transferred into itself or one of its children.", title,
+				                     frame_);
 				return;
 			}
 		}
@@ -698,12 +732,14 @@ namespace iw
 			for (auto& part : row.parts)
 			{
 				std::error_code error;
-				if (std::ranges::any_of(nonDirectoryTargets, [&part](const auto& path)
-					{ return paths::contains(path, part.destination); })) part.destinationStamp = {};
+				if (std::ranges::any_of(nonDirectoryTargets,
+				                        [&part](const auto& path) { return paths::contains(path, part.destination); }))
+					part.destinationStamp = {};
 				else part.destinationStamp = transfer_stamp(part.destination, error);
 				if (error)
 				{
-					platform::show_error(part.destination.wstring() + L": " + widen_message(error.message()), title, frame_);
+					platform::show_error(part.destination.wstring() + L": " + widen_message(error.message()), title,
+					                     frame_);
 					return;
 				}
 				if (part.sourceStamp.directory && part.destinationStamp.exists && !part.destinationStamp.directory)
@@ -721,11 +757,11 @@ namespace iw
 			platform::ChoiceDefinition choice;
 			choice.title = title;
 			choice.heading = collisions.size() == 1
-				                 ? std::format(L"{} is occupied or claimed by another selected item.",
-				                               collisions.front().filename().wstring())
-				                 : std::format(L"{} selected items have destination collisions.", collisions.size());
+			                     ? std::format(L"{} is occupied or claimed by another selected item.",
+			                                   collisions.front().filename().wstring())
+			                     : std::format(L"{} selected items have destination collisions.", collisions.size());
 			choice.message = L"Auto-rename keeps both. Replace requires recovery copies before overwriting. "
-				L"Completed changes can be undone during this session if their files have not changed.";
+							 L"Completed changes can be undone during this session if their files have not changed.";
 			choice.buttons = {{1, L"Auto-rename"}, {2, L"Replace"}};
 			choice.defaultButton = 1;
 			choice.warning = true;
@@ -742,35 +778,50 @@ namespace iw
 		{
 			if (!replace)
 			{
-				const auto target = files::unique_destination(row.destination, [&](const std::filesystem::path& candidate)
+				const auto target = files::unique_destination(row.destination,
+				                                              [&](const std::filesystem::path& candidate)
 				{
 					if (claimed.contains(candidate)) return true;
 					for (const auto& sidecar : row.sidecars)
 					{
 						const auto companion = transfer_companion_target(row.source, sidecar, candidate);
 						std::error_code error;
-						if (transfer_stamp(companion, error).exists || error || claimed.contains(companion)) return true;
+						if (transfer_stamp(companion, error).exists || error || claimed.contains(companion))
+							return true;
 					}
 					return false;
 				});
 				if (target.empty())
 				{
-					platform::show_error(L"No free name is available for " + row.source.filename().wstring(), title, frame_);
+					platform::show_error(L"No free name is available for " + row.source.filename().wstring(), title,
+					                     frame_);
 					return;
 				}
 				set_transfer_destinations(row, target);
 				for (auto& part : row.parts) part.destinationStamp = {};
 			}
 			std::error_code identityError;
-			const auto targetIdentity = std::filesystem::weakly_canonical(files::native_path(row.destination), identityError);
-			if (identityError) { platform::show_error(widen_message(identityError.message()), title, frame_); return; }
+			const auto targetIdentity = std::filesystem::weakly_canonical(files::native_path(row.destination),
+			                                                              identityError);
+			if (identityError)
+			{
+				platform::show_error(widen_message(identityError.message()), title, frame_);
+				return;
+			}
 			for (const auto& source : rows)
 			{
-				const auto sourceIdentity = std::filesystem::weakly_canonical(files::native_path(source.source), identityError);
-				if (identityError) { platform::show_error(widen_message(identityError.message()), title, frame_); return; }
+				const auto sourceIdentity = std::filesystem::weakly_canonical(files::native_path(source.source),
+				                                                              identityError);
+				if (identityError)
+				{
+					platform::show_error(widen_message(identityError.message()), title, frame_);
+					return;
+				}
 				if (paths::equal(targetIdentity, sourceIdentity) || paths::contains(targetIdentity, sourceIdentity))
 				{
-					platform::show_error(L"A destination contains a selected source. Choose Auto-rename or another folder.", title, frame_);
+					platform::show_error(
+						L"A destination contains a selected source. Choose Auto-rename or another folder.", title,
+						frame_);
 					return;
 				}
 			}
@@ -778,19 +829,24 @@ namespace iw
 			{
 				if (claimed.contains(part.destination))
 				{
-					platform::show_error(L"Two selected items have the same destination. Choose Auto-rename.", title, frame_);
+					platform::show_error(L"Two selected items have the same destination. Choose Auto-rename.", title,
+					                     frame_);
 					return;
 				}
 				if (part.destinationStamp.exists && part.destinationStamp.directory != part.sourceStamp.directory)
 				{
-					platform::show_error(L"A file and folder have the same destination name. Choose Auto-rename.", title, frame_);
+					platform::show_error(L"A file and folder have the same destination name. Choose Auto-rename.",
+					                     title, frame_);
 					return;
 				}
 				std::error_code sameError;
-				if (sources.contains(part.destination) || (part.destinationStamp.exists &&
-					std::filesystem::equivalent(files::native_path(part.source), files::native_path(part.destination), sameError)))
+				if (sources.contains(part.destination) ||
+				    (part.destinationStamp.exists &&
+				     std::filesystem::equivalent(files::native_path(part.source), files::native_path(part.destination),
+				                                 sameError)))
 				{
-					platform::show_error(L"A destination is one of the selected source items. Choose Auto-rename.", title, frame_);
+					platform::show_error(L"A destination is one of the selected source items. Choose Auto-rename.",
+					                     title, frame_);
 					return;
 				}
 				claimed.insert(part.destination);
@@ -804,242 +860,276 @@ namespace iw
 		std::wstring preparationFailure;
 		const bool processed = platform::run_with_status(frame_, title, L"Processing files...", [&]
 		{
-		// Recheck every reviewed object before the first write. Replace never grants permission
-		// to overwrite a file which appeared or changed after the collision decision.
-		if (!transfer_parents_unchanged(sourceParents, true) || !transfer_parents_unchanged(destinationParents, true))
-		{
-			preparationFailure = L"A source or destination folder changed. Review the transfer again.";
-			return false;
-		}
-		for (const auto& row : rows)
-		{
-			std::error_code typeError;
-			if (!std::filesystem::is_directory(files::native_path(row.source), typeError))
+			// Recheck every reviewed object before the first write. Replace never grants permission
+			// to overwrite a file which appeared or changed after the collision decision.
+			if (!transfer_parents_unchanged(sourceParents, true) ||
+			    !transfer_parents_unchanged(destinationParents, true))
 			{
-				const auto companionsNow = files::sidecar_paths(row.source);
-				if (companionsNow.size() != row.sidecars.size() || !std::ranges::all_of(row.sidecars,
-					[&companionsNow](const auto& path) { return path_in(companionsNow, path); }))
-				{
-					preparationFailure = L"The sidecar set changed. Review the transfer again: " + row.source.wstring();
-					return false;
-				}
+				preparationFailure = L"A source or destination folder changed. Review the transfer again.";
+				return false;
 			}
-			for (const auto& part : row.parts)
+			for (const auto& row : rows)
 			{
-				std::error_code error;
-				const auto source = transfer_stamp(part.source, error);
-				if (error || source != part.sourceStamp)
+				std::error_code typeError;
+				if (!std::filesystem::is_directory(files::native_path(row.source), typeError))
 				{
-					preparationFailure = L"A source changed. Review the transfer again: " + part.source.wstring();
-					return false;
+					const auto companionsNow = files::sidecar_paths(row.source);
+					if (companionsNow.size() != row.sidecars.size() ||
+					    !std::ranges::all_of(row.sidecars, [&companionsNow](const auto& path)
+					{ return path_in(companionsNow, path); }))
+					{
+						preparationFailure = L"The sidecar set changed. Review the transfer again: " +
+						                     row.source.wstring();
+						return false;
+					}
 				}
-				const auto target = transfer_stamp(part.destination, error);
-				if (error || target != part.destinationStamp || transfer_parent_check(part.destination.parent_path()))
-				{
-					preparationFailure = L"A destination changed. Review the transfer again: " + part.destination.wstring();
-					return false;
-				}
-			}
-		}
-		auto journal = undo::history().begin(title);
-		std::error_code error;
-		for (auto& [path, stamp] : destinationParents)
-			if (!stamp.exists)
-			{
-				if (!journal->protect_directory(path, preparationFailure)) return false;
-				if (!std::filesystem::create_directory(files::native_path(path), error))
-				{
-					preparationFailure = error ? widen_message(error.message()) :
-						L"A destination folder appeared after review. Review the transfer again.";
-					return false;
-				}
-				stamp = transfer_stamp(path, error);
-				if (error || !stamp.exists || !stamp.directory)
-				{
-					preparationFailure = L"The destination folder changed while it was created.";
-					return false;
-				}
-				if (!journal->completed({path}, preparationFailure)) return false;
-			}
-
-		for (auto& row : rows)
-		{
-			std::wstring failure;
-			std::vector<std::filesystem::path> completedFiles;
-			try
-			{
-				std::vector<std::filesystem::path> protectedFiles;
 				for (const auto& part : row.parts)
 				{
-					if (part.sourceStamp.directory)
+					std::error_code error;
+					const auto source = transfer_stamp(part.source, error);
+					if (error || source != part.sourceStamp)
 					{
-						if (move && !journal->protect_directory(part.source, failure)) break;
-						if (!part.destinationStamp.exists && !journal->protect_directory(part.destination, failure)) break;
+						preparationFailure = L"A source changed. Review the transfer again: " + part.source.wstring();
+						return false;
 					}
-					else
+					const auto target = transfer_stamp(part.destination, error);
+					if (error || target != part.destinationStamp ||
+					    transfer_parent_check(part.destination.parent_path()))
 					{
-						protectedFiles.push_back(part.destination);
-						if (move) protectedFiles.push_back(part.source);
+						preparationFailure = L"A destination changed. Review the transfer again: " +
+						                     part.destination.wstring();
+						return false;
 					}
 				}
-				const bool protectedRow = failure.empty() && journal->protect(protectedFiles, failure);
-				if (!protectedRow && failure.empty()) failure = L"Recovery copies could not be secured before transfer.";
-				for (auto& part : row.parts)
+			}
+			auto journal = undo::history().begin(title);
+			std::error_code error;
+			for (auto& [path, stamp] : destinationParents)
+				if (!stamp.exists)
 				{
-					if (!protectedRow || !failure.empty()) break;
-					if (!transfer_parent_chain_unchanged(part.source.parent_path(), sourceParents) ||
-						!transfer_parent_chain_unchanged(part.destination.parent_path(), destinationParents))
+					if (!journal->protect_directory(path, preparationFailure)) return false;
+					if (!std::filesystem::create_directory(files::native_path(path), error))
 					{
-						failure = L"A source or destination folder was replaced after review.";
-						break;
+						preparationFailure =
+							error ? widen_message(error.message())
+								  : L"A destination folder appeared after review. Review the transfer again.";
+						return false;
 					}
-					error = transfer_parent_check(part.destination.parent_path());
-					if (error) { failure = widen_message(error.message()); break; }
-					const auto now = transfer_stamp(part.destination, error);
-					if (error || now != part.destinationStamp)
+					stamp = transfer_stamp(path, error);
+					if (error || !stamp.exists || !stamp.directory)
 					{
-						failure = L"A destination changed after review: " + part.destination.filename().wstring();
-						break;
+						preparationFailure = L"The destination folder changed while it was created.";
+						return false;
 					}
-					if (part.sourceStamp.directory)
-					{
-						const auto sourceNow = transfer_stamp(part.source, error);
-						if (error || sourceNow != part.sourceStamp)
-						{
-							failure = L"A source folder changed: " + part.source.filename().wstring();
-							break;
-						}
-						if (!now.exists && !std::filesystem::create_directory(files::native_path(part.destination), error))
-						{
-							if (!error) error = std::make_error_code(std::errc::file_exists);
-						}
-						if (!error)
-						{
-							const auto created = transfer_stamp(part.destination, error);
-							if (!error && created.exists && created.directory && (!now.exists || created == now))
-							{
-								destinationParents.insert_or_assign(part.destination, created);
-								if (!now.exists && !journal->completed({part.destination}, failure))
-									error = std::make_error_code(std::errc::io_error);
-							}
-							else if (!error) error = std::make_error_code(std::errc::state_not_recoverable);
-						}
-					}
-					else
-					{
-						error = transfer_parent_check(part.source.parent_path());
-						if (error) { failure = L"A source folder changed: " + widen_message(error.message()); break; }
-						const auto sourceNow = transfer_stamp(part.source, error);
-						if (error || sourceNow != part.sourceStamp)
-						{
-							failure = L"A source changed: " + part.source.filename().wstring();
-							break;
-						}
-						const auto beforeCommit = [&]
-						{
-							std::error_code observedError;
-							const auto source = transfer_stamp(part.source, observedError);
-							if (observedError || source != part.sourceStamp ||
-								!transfer_parent_chain_unchanged(part.source.parent_path(), sourceParents))
-							{
-								failure = L"A source changed before the output could be committed.";
-								return false;
-							}
-							const auto target = transfer_stamp(part.destination, observedError);
-							if (observedError || target != part.destinationStamp ||
-								!transfer_parent_chain_unchanged(part.destination.parent_path(), destinationParents))
-							{
-								failure = L"A destination changed before the output could be committed.";
-								return false;
-							}
-							return true;
-						};
-						const auto outcome = undo::transfer_file(*journal, part.source, part.destination, move, now.exists, beforeCommit);
-						error = outcome.error;
-						if (!outcome.detail.empty()) failure = outcome.detail;
-						if (outcome.destinationCompleted)
-						{
-							completedFiles.push_back(part.destination);
-							if (paths::equal(part.destination.parent_path(), destination) && !path_in(transferred, part.destination))
-								transferred.push_back(part.destination);
-						}
-						if (outcome.sourceRemoved) completedFiles.push_back(part.source);
-					}
-					if (error)
-					{
-						if (failure.empty()) failure = part.source.filename().wstring() + L": " + widen_message(error.message());
-						break;
-					}
-					if (paths::equal(part.destination.parent_path(), destination) && !path_in(transferred, part.destination))
-						transferred.push_back(part.destination);
+					if (!journal->completed({path}, preparationFailure)) return false;
 				}
-				if (move && failure.empty())
-					for (auto part = row.parts.rbegin(); part != row.parts.rend(); ++part)
-					{
-						if (!part->sourceStamp.directory) continue;
-						if (!transfer_parent_chain_unchanged(part->source, sourceParents))
-						{
-							failure = L"A source folder changed before it could be removed.";
-							break;
-						}
-						if (!journal->remove_directory(part->source, failure)) break;
-					}
-			}
-			catch (const std::exception& exception) { failure = widen_message(exception.what()); }
-			catch (...) { failure = L"The transfer failed unexpectedly."; }
-			if (!completedFiles.empty())
+
+			for (auto& row : rows)
 			{
-				std::wstring recordError;
-				if (!journal->completed(completedFiles, {}, recordError))
+				std::wstring failure;
+				std::vector<std::filesystem::path> completedFiles;
+				try
 				{
-					if (!failure.empty()) failure += L" ";
-					failure += recordError;
+					std::vector<std::filesystem::path> protectedFiles;
+					for (const auto& part : row.parts)
+					{
+						if (part.sourceStamp.directory)
+						{
+							if (move && !journal->protect_directory(part.source, failure)) break;
+							if (!part.destinationStamp.exists && !journal->protect_directory(part.destination, failure))
+								break;
+						}
+						else
+						{
+							protectedFiles.push_back(part.destination);
+							if (move) protectedFiles.push_back(part.source);
+						}
+					}
+					const bool protectedRow = failure.empty() && journal->protect(protectedFiles, failure);
+					if (!protectedRow && failure.empty())
+						failure = L"Recovery copies could not be secured before transfer.";
+					for (auto& part : row.parts)
+					{
+						if (!protectedRow || !failure.empty()) break;
+						if (!transfer_parent_chain_unchanged(part.source.parent_path(), sourceParents) ||
+						    !transfer_parent_chain_unchanged(part.destination.parent_path(), destinationParents))
+						{
+							failure = L"A source or destination folder was replaced after review.";
+							break;
+						}
+						error = transfer_parent_check(part.destination.parent_path());
+						if (error)
+						{
+							failure = widen_message(error.message());
+							break;
+						}
+						const auto now = transfer_stamp(part.destination, error);
+						if (error || now != part.destinationStamp)
+						{
+							failure = L"A destination changed after review: " + part.destination.filename().wstring();
+							break;
+						}
+						if (part.sourceStamp.directory)
+						{
+							const auto sourceNow = transfer_stamp(part.source, error);
+							if (error || sourceNow != part.sourceStamp)
+							{
+								failure = L"A source folder changed: " + part.source.filename().wstring();
+								break;
+							}
+							if (!now.exists &&
+							    !std::filesystem::create_directory(files::native_path(part.destination), error))
+							{
+								if (!error) error = std::make_error_code(std::errc::file_exists);
+							}
+							if (!error)
+							{
+								const auto created = transfer_stamp(part.destination, error);
+								if (!error && created.exists && created.directory && (!now.exists || created == now))
+								{
+									destinationParents.insert_or_assign(part.destination, created);
+									if (!now.exists && !journal->completed({part.destination}, failure))
+										error = std::make_error_code(std::errc::io_error);
+								}
+								else if (!error) error = std::make_error_code(std::errc::state_not_recoverable);
+							}
+						}
+						else
+						{
+							error = transfer_parent_check(part.source.parent_path());
+							if (error)
+							{
+								failure = L"A source folder changed: " + widen_message(error.message());
+								break;
+							}
+							const auto sourceNow = transfer_stamp(part.source, error);
+							if (error || sourceNow != part.sourceStamp)
+							{
+								failure = L"A source changed: " + part.source.filename().wstring();
+								break;
+							}
+							const auto beforeCommit = [&]
+							{
+								std::error_code observedError;
+								const auto source = transfer_stamp(part.source, observedError);
+								if (observedError || source != part.sourceStamp ||
+								    !transfer_parent_chain_unchanged(part.source.parent_path(), sourceParents))
+								{
+									failure = L"A source changed before the output could be committed.";
+									return false;
+								}
+								const auto target = transfer_stamp(part.destination, observedError);
+								if (observedError || target != part.destinationStamp ||
+								    !transfer_parent_chain_unchanged(part.destination.parent_path(),
+								                                     destinationParents))
+								{
+									failure = L"A destination changed before the output could be committed.";
+									return false;
+								}
+								return true;
+							};
+							const auto outcome = undo::transfer_file(*journal, part.source, part.destination, move,
+							                                         now.exists, beforeCommit);
+							error = outcome.error;
+							if (!outcome.detail.empty()) failure = outcome.detail;
+							if (outcome.destinationCompleted)
+							{
+								completedFiles.push_back(part.destination);
+								if (paths::equal(part.destination.parent_path(), destination) &&
+								    !path_in(transferred, part.destination))
+									transferred.push_back(part.destination);
+							}
+							if (outcome.sourceRemoved) completedFiles.push_back(part.source);
+						}
+						if (error)
+						{
+							if (failure.empty())
+								failure = part.source.filename().wstring() + L": " + widen_message(error.message());
+							break;
+						}
+						if (paths::equal(part.destination.parent_path(), destination) &&
+						    !path_in(transferred, part.destination))
+							transferred.push_back(part.destination);
+					}
+					if (move && failure.empty())
+						for (auto part = row.parts.rbegin(); part != row.parts.rend(); ++part)
+						{
+							if (!part->sourceStamp.directory) continue;
+							if (!transfer_parent_chain_unchanged(part->source, sourceParents))
+							{
+								failure = L"A source folder changed before it could be removed.";
+								break;
+							}
+							if (!journal->remove_directory(part->source, failure)) break;
+						}
+				}
+				catch (const std::exception& exception)
+				{
+					failure = widen_message(exception.what());
+				}
+				catch (...)
+				{
+					failure = L"The transfer failed unexpectedly.";
+				}
+				if (!completedFiles.empty())
+				{
+					std::wstring recordError;
+					if (!journal->completed(completedFiles, {}, recordError))
+					{
+						if (!failure.empty()) failure += L" ";
+						failure += recordError;
+					}
+				}
+				if (failure.empty())
+				{
+					succeeded += row.selected.size();
+				}
+				else if (firstFailure.empty()) firstFailure = row.source.filename().wstring() + L": " + failure;
+				for (const auto& path : row.selected)
+				{
+					const auto target = paths::equal(path, row.source)
+					                        ? row.destination
+					                        : transfer_companion_target(row.source, path, row.destination);
+					results.push_back(path.filename().wstring() +
+					                  (failure.empty() ? L": Success — " + target.wstring()
+					                                   : L": Failed (may be partially transferred) — " + failure));
 				}
 			}
-			if (failure.empty())
+			std::wstring journalError;
+			if (!journal->finish(journalError))
 			{
-				succeeded += row.selected.size();
+				if (firstFailure.empty()) firstFailure = journalError;
+				results.push_back(L"Undo recovery: " + journalError);
 			}
-			else if (firstFailure.empty()) firstFailure = row.source.filename().wstring() + L": " + failure;
-			for (const auto& path : row.selected)
-			{
-				const auto target = paths::equal(path, row.source) ? row.destination :
-					transfer_companion_target(row.source, path, row.destination);
-				results.push_back(path.filename().wstring() + (failure.empty() ? L": Success — " + target.wstring() :
-					L": Failed (may be partially transferred) — " + failure));
-			}
-		}
-		std::wstring journalError;
-		if (!journal->finish(journalError))
-		{
-			if (firstFailure.empty()) firstFailure = journalError;
-			results.push_back(L"Undo recovery: " + journalError);
-		}
-		return true;
+			return true;
 		});
 		if (!processed)
 		{
 			platform::show_error(preparationFailure.empty()
-				? L"The transfer could not start. No selected item was transferred."
-				: preparationFailure, title, frame_);
+			                         ? L"The transfer could not start. No selected item was transferred."
+			                         : preparationFailure,
+			                     title, frame_);
 			return;
 		}
 
 		lastTransferFolder_ = destination.wstring();
 		save_settings();
 		statusText_ = firstFailure.empty()
-			              ? std::format(L"{} of {} item{} {}", succeeded, selected.size(),
-			                            selected.size() == 1 ? L"" : L"s", move ? L"moved" : L"copied")
-			              : std::format(L"{} of {} transferred - {}", succeeded, selected.size(), firstFailure);
+		                  ? std::format(L"{} of {} item{} {}", succeeded, selected.size(),
+		                                selected.size() == 1 ? L"" : L"s", move ? L"moved" : L"copied")
+		                  : std::format(L"{} of {} transferred - {}", succeeded, selected.size(), firstFailure);
 		update_status_surface();
 		std::erase_if(transferReports, [this](const TransferReport& report)
-			{ return report.owner.expired() || report.owner.lock() == frame_; });
+		{ return report.owner.expired() || report.owner.lock() == frame_; });
 		transferReports.push_back({frame_, title, statusText_, std::move(results)});
 		show_transfer_report(frame_);
 
 		const bool openDestination = openDestinationAfterTransfer_;
 		const bool destinationIsSource = paths::equal(destination, sourceFolder);
-		if (openDestination) { if (!open_folder(destination)) return; }
+		if (openDestination)
+		{
+			if (!open_folder(destination)) return;
+		}
 		else if (!open_folder(sourceFolder, false)) return;
 		const auto scanGeneration = folderScanGeneration_.load();
 		const auto expectedFolder = folder_;
@@ -1047,35 +1137,36 @@ namespace iw
 		auto desiredSelection = openDestination || (move && destinationIsSource) ? std::move(transferred) : selected;
 		// The folder queue is serial: its scan posts the collection before this selection callback.
 		platform::queue_work(platform::WorkQueue::folder,
-			[weak, scanGeneration, expectedFolder, previousFocus, openDestination, move, destinationIsSource,
-				desiredSelection = std::move(desiredSelection)]
+		                     [weak, scanGeneration, expectedFolder, previousFocus, openDestination, move,
+		                      destinationIsSource, desiredSelection = std::move(desiredSelection)]
+		{
+			platform::queue_ui([weak, scanGeneration, expectedFolder, previousFocus, openDestination, move,
+			                    destinationIsSource, desiredSelection]
 			{
-				platform::queue_ui([weak, scanGeneration, expectedFolder, previousFocus, openDestination, move,
-					destinationIsSource, desiredSelection]
+				const auto self = weak.lock();
+				if (!self || self->folderScanGeneration_ != scanGeneration ||
+				    !paths::equal(self->folder_, expectedFolder))
+					return;
+				if (openDestination || !move || destinationIsSource)
 				{
-					const auto self = weak.lock();
-					if (!self || self->folderScanGeneration_ != scanGeneration || !paths::equal(self->folder_, expectedFolder))
-						return;
-					if (openDestination || !move || destinationIsSource)
-					{
-						self->canvas_.clear_selection();
-						bool first = true;
-						for (size_t index = 0; index < self->files_.size(); ++index)
-							if (path_in(desiredSelection, self->files_[index]))
-							{
-								self->canvas_.select_index(static_cast<int>(index), false, !first);
-								first = false;
-							}
-					}
-					else if (!self->files_.empty())
-					{
-						// The moved photo is gone; show the item that takes its place, as navigation would.
-						const int index = std::clamp(previousFocus, 0, static_cast<int>(self->files_.size()) - 1);
-						self->canvas_.select_index(index, false, false);
-						self->canvas_.load(self->files_[index]);
-					}
-				});
+					self->canvas_.clear_selection();
+					bool first = true;
+					for (size_t index = 0; index < self->files_.size(); ++index)
+						if (path_in(desiredSelection, self->files_[index]))
+						{
+							self->canvas_.select_index(static_cast<int>(index), false, !first);
+							first = false;
+						}
+				}
+				else if (!self->files_.empty())
+				{
+					// The moved photo is gone; show the item that takes its place, as navigation would.
+					const int index = std::clamp(previousFocus, 0, static_cast<int>(self->files_.size()) - 1);
+					self->canvas_.select_index(index, false, false);
+					self->canvas_.load(self->files_[index]);
+				}
 			});
+		});
 	}
 	catch (const std::exception& exception)
 	{
@@ -1083,7 +1174,8 @@ namespace iw
 	}
 	catch (...)
 	{
-		platform::show_error(L"The transfer could not be completed.", move ? L"Move to folder" : L"Copy to folder", frame_);
+		platform::show_error(L"The transfer could not be completed.", move ? L"Move to folder" : L"Copy to folder",
+		                     frame_);
 	}
 
 	void MainWindow::show_open_with_menu(const app::pointi screenPoint)
@@ -1096,7 +1188,10 @@ namespace iw
 		std::wstring failure;
 		const auto focus = canvas_.focused_index();
 		const auto selected = open_with_selection(selected_paths(),
-			focus >= 0 && static_cast<size_t>(focus) < files_.size() ? files_[focus] : std::filesystem::path{}, failure);
+		                                          focus >= 0 && static_cast<size_t>(focus) < files_.size()
+		                                              ? files_[focus]
+		                                              : std::filesystem::path{},
+		                                          failure);
 		if (selected.empty())
 		{
 			platform::show_error(failure, L"Open with", frame_);
@@ -1115,13 +1210,14 @@ namespace iw
 		};
 
 		if (std::ranges::all_of(selected, [&extension](const auto& path)
-			{ return paths::iequals(paths::lowercase_extension(path), extension); }))
+		{ return paths::iequals(paths::lowercase_extension(path), extension); }))
 		{
 			for (const auto& handler : platform::registered_apps_for_extension(extension))
 				append(std::format(L"Open with {}", handler->name()), [this, handler, selected]
 				{
 					std::wstring error;
-					if (open_with_selection(selected, selected.front(), error, true).empty() || !handler->invoke(selected))
+					if (open_with_selection(selected, selected.front(), error, true).empty() ||
+					    !handler->invoke(selected))
 						platform::show_error(L"Failed to open selected items", L"Open with", frame_);
 					else record_open_with_use(open_with_key(L"app:" + handler->name()));
 				});
@@ -1132,15 +1228,17 @@ namespace iw
 		for (const auto* tool : configured)
 		{
 			const auto label = selected.size() > 1 && !tools::accepts_multiple_items(*tool)
-				                   ? std::format(L"Open with {} (first item only)", tool->name)
-				                   : std::format(L"Open with {}", tool->name);
+			                       ? std::format(L"Open with {} (first item only)", tool->name)
+			                       : std::format(L"Open with {}", tool->name);
 			append(label, [this, tool = *tool, selected]
 			{
 				std::wstring error;
 				if (open_with_selection(selected, selected.front(), error).empty() ||
-					!launch_configured_tool(tool, selected, frame_))
+				    !launch_configured_tool(tool, selected, frame_))
 					platform::show_error(L"Failed to open selected items", L"Open with", frame_);
-				else record_open_with_use(open_with_key(L"configured:" + tool.executable.wstring() + L"|" + tool.invoke));
+				else
+					record_open_with_use(
+						open_with_key(L"configured:" + tool.executable.wstring() + L"|" + tool.invoke));
 			});
 		}
 
@@ -1159,7 +1257,10 @@ namespace iw
 		std::wstring failure;
 		const auto focus = canvas_.focused_index();
 		const auto selected = open_with_selection(selected_paths(),
-			focus >= 0 && static_cast<size_t>(focus) < files_.size() ? files_[focus] : std::filesystem::path{}, failure);
+		                                          focus >= 0 && static_cast<size_t>(focus) < files_.size()
+		                                              ? files_[focus]
+		                                              : std::filesystem::path{},
+		                                          failure);
 		if (selected.empty())
 		{
 			platform::show_error(failure, L"Open with", frame_);
@@ -1176,46 +1277,45 @@ namespace iw
 		};
 		std::vector<Entry> entries;
 		if (std::ranges::all_of(selected, [&extension](const auto& path)
-			{ return paths::iequals(paths::lowercase_extension(path), extension); }))
+		{ return paths::iequals(paths::lowercase_extension(path), extension); }))
 		{
 			for (const auto& handler : platform::registered_apps_for_extension(extension))
-				entries.push_back({
-					std::format(L"{} (app)", handler->name()),
-					open_with_key(L"app:" + handler->name()),
-					[this, handler, selected]
-					{
-						std::wstring error;
-						return !open_with_selection(selected, selected.front(), error, true).empty() && handler->invoke(selected);
-					},
-					platform::read_integer_setting(L"OpenWith", open_with_key(L"app:" + handler->name()), 0)
-				});
-		}
-		for (const auto* tool : tools::tools_for(tools_.installed(), selected))
-			entries.push_back({
-				std::format(L"{} (tool){}", tool->name,
-					selected.size() > 1 && !tools::accepts_multiple_items(*tool) ? L" — first item only" : L""),
-				open_with_key(L"configured:" + tool->executable.wstring() + L"|" + tool->invoke),
-				[this, tool = *tool, selected]
+				entries.push_back({std::format(L"{} (app)", handler->name()), open_with_key(L"app:" + handler->name()),
+				                   [this, handler, selected]
 				{
 					std::wstring error;
-					return !open_with_selection(selected, selected.front(), error).empty() &&
-						launch_configured_tool(tool, selected, frame_);
-				},
-				platform::read_integer_setting(L"OpenWith",
-					open_with_key(L"configured:" + tool->executable.wstring() + L"|" + tool->invoke), 0)
-			});
+					return !open_with_selection(selected, selected.front(), error, true).empty() &&
+					       handler->invoke(selected);
+				}, platform::read_integer_setting(L"OpenWith", open_with_key(L"app:" + handler->name()), 0)});
+		}
+		for (const auto* tool : tools::tools_for(tools_.installed(), selected))
+			entries.push_back(
+				{std::format(L"{} (tool){}", tool->name,
+			                 selected.size() > 1 && !tools::accepts_multiple_items(*tool) ? L" — first item only"
+			                                                                              : L""),
+			     open_with_key(L"configured:" + tool->executable.wstring() + L"|" + tool->invoke),
+			     [this, tool = *tool, selected]
+			{
+				std::wstring error;
+				return !open_with_selection(selected, selected.front(), error).empty() &&
+				       launch_configured_tool(tool, selected, frame_);
+			},
+			     platform::read_integer_setting(L"OpenWith",
+			                                    open_with_key(L"configured:" + tool->executable.wstring() + L"|" +
+			                                                  tool->invoke),
+			                                    0)});
 		const auto appendCommand = [&](const wchar_t* label, const wchar_t* identity, std::function<void()> command)
 		{
 			const auto key = open_with_key(identity);
 			entries.push_back({label, key, [this, selected, command = std::move(command)]
-				{
-					const auto current = selected_paths();
-					if (current.size() != selected.size() || !std::ranges::all_of(selected,
-						[&current](const auto& path) { return path_in(current, path); })) return false;
-					command();
-					return true;
-				},
-				platform::read_integer_setting(L"OpenWith", key, 0)});
+			{
+				const auto current = selected_paths();
+				if (current.size() != selected.size() ||
+				    !std::ranges::all_of(selected, [&current](const auto& path) { return path_in(current, path); }))
+					return false;
+				command();
+				return true;
+			}, platform::read_integer_setting(L"OpenWith", key, 0)});
 		};
 		appendCommand(L"Copy to folder (tool)", L"internal:copy", [this] { copy_or_move_to_folder(false); });
 		const bool writable = std::ranges::all_of(selected, [](const auto& path)
@@ -1233,10 +1333,7 @@ namespace iw
 		if (writable && selected.size() == 1 && files::is_editable_image(selected.front()))
 			appendCommand(L"Photo Edit (tool)", L"internal:edit", [this] { open_edit_task(); });
 		// Frequently used entries gain ranking weight.
-		std::ranges::stable_sort(entries, [](const Entry& left, const Entry& right)
-		{
-			return left.uses > right.uses;
-		});
+		std::ranges::stable_sort(entries, [](const Entry& left, const Entry& right) { return left.uses > right.uses; });
 
 		platform::DialogField list;
 		list.id = openWithChoice;
@@ -1248,12 +1345,13 @@ namespace iw
 
 		platform::DialogDefinition definition;
 		definition.title = L"Open with app or tool";
-		definition.message = selected.size() == 1 ?
-			std::format(L"Choose what opens {}.", selected.front().filename().wstring()) :
-			std::format(L"Choose what opens {} selected files. The first item is {}.",
-				selected.size(), selected.front().filename().wstring());
+		definition.message = selected.size() == 1
+		                         ? std::format(L"Choose what opens {}.", selected.front().filename().wstring())
+		                         : std::format(L"Choose what opens {} selected files. The first item is {}.",
+		                                       selected.size(), selected.front().filename().wstring());
 		definition.fields.push_back(std::move(list));
-		definition.validate = [count = entries.size()](const platform::DialogValues& values) -> std::optional<std::wstring>
+		definition.validate =
+			[count = entries.size()](const platform::DialogValues& values) -> std::optional<std::wstring>
 		{
 			const auto found = values.find(openWithChoice);
 			const auto* choice = found == values.end() ? nullptr : std::get_if<std::int64_t>(&found->second);

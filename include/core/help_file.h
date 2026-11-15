@@ -56,10 +56,10 @@ namespace iw::help
 		{
 			if (GetFileAttributesW((path + L":Zone.Identifier").c_str()) != INVALID_FILE_ATTRIBUTES) return false;
 			File file(CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-				nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
+			                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
 			LARGE_INTEGER length{};
 			if (!file.valid() || !GetFileSizeEx(file.get(), &length) ||
-				static_cast<unsigned long long>(length.QuadPart) != size)
+			    static_cast<unsigned long long>(length.QuadPart) != size)
 				return false;
 			std::string buffer(chunk, '\0');
 			for (size_t offset = 0; offset < size;)
@@ -67,7 +67,7 @@ namespace iw::help
 				const DWORD wanted = static_cast<DWORD>(size - offset < chunk ? size - offset : chunk);
 				DWORD read = 0;
 				if (!ReadFile(file.get(), buffer.data(), wanted, &read, nullptr) || read != wanted ||
-					std::memcmp(buffer.data(), bytes + offset, wanted) != 0)
+				    std::memcmp(buffer.data(), bytes + offset, wanted) != 0)
 					return false;
 				offset += read;
 			}
@@ -102,14 +102,14 @@ namespace iw::help
 		}
 		wchar_t name[40]{};
 		swprintf_s(name, L"ImageWalker-%016llx.chm", static_cast<unsigned long long>(hash));
-		const std::wstring path = folder + name;
+		std::wstring path = folder + name;
 		if (detail::holds(path, bytes, size)) return path;
 
 		wchar_t suffix[48]{};
 		swprintf_s(suffix, L".%lx-%lx-%lx.tmp", GetCurrentProcessId(), GetCurrentThreadId(), GetTickCount());
 		const std::wstring temporary = path + suffix;
-		detail::File file(CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
-			FILE_ATTRIBUTE_NORMAL, nullptr));
+		detail::File file(
+			CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr));
 		if (!file.valid()) return {};
 		const bool written = detail::write_all(file.get(), bytes, size);
 		if (!file.close() || !written)

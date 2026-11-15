@@ -163,16 +163,58 @@ function Assert-DDDependencies([string]$Root) {
     $null = Read-DDDependencyManifest $Root
 }
 
+function Get-DDRecipeArchivePins([string]$Root, [string]$BuildDirectory) {
+    $sources = @($Root)
+    foreach ($entry in Select-String -LiteralPath (Join-Path $BuildDirectory 'CMakeCache.txt') -Pattern '^[^#:=]+_SOURCE_DIR:(STATIC|PATH)=(.+)$') {
+        $sources += $entry.Matches[0].Groups[2].Value
+    }
+    $pins = @{}
+    foreach ($source in ($sources | Select-Object -Unique)) {
+        if (-not (Test-Path -LiteralPath (Join-Path $source 'cmake/dd-dependencies.json') -PathType Leaf)) { continue }
+        $manifest = Read-DDDependencyManifest $source
+        foreach ($name in $manifest.dependencies.Keys) {
+            $dependency = $manifest.dependencies[$name]
+            if ($dependency.sha256) {
+                $contentName = $name.Replace('-', '_')
+                $pins[$contentName] = @($pins[$contentName]) + $dependency.sha256
+            }
+        }
+    }
+    return $pins
+}
+
+function Assert-DDRecipeArchive([string]$Root, [IO.DirectoryInfo]$Source, $Pins) {
+    $name = $Source.Name.Substring(0, $Source.Name.Length - 4)
+    $hashes = if ($Pins.ContainsKey($name)) { @($Pins[$name]) } else { @($Pins.Values | ForEach-Object { $_ } | Where-Object { $_ } | Select-Object -Unique) }
+    if (-not $hashes.Count) { Stop-DD 'Unrecognized dependency cache; inspect it before cleanup.' 5 }
+    $downloads = Join-Path $Source.Parent.FullName "$name-subbuild/$name-populate-prefix/src"
+    $archive = if (Test-Path -LiteralPath $downloads -PathType Container) {
+        Get-ChildItem -LiteralPath $downloads -File | Where-Object { (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash -in $hashes } | Select-Object -First 1
+    }
+    if (-not $archive) { Stop-DD "Unverified FetchContent archive; preserving source: $($Source.FullName)" 5 }
+    $temporary = Join-Path ([IO.Path]::GetTempPath()) ('dd-archive-check-' + [guid]::NewGuid().ToString('N'))
+    $null = [IO.Directory]::CreateDirectory($temporary)
+    try {
+        $null = Invoke-DDProcess cmake @("-DDD_ARCHIVE_SOURCE=$($Source.FullName)", "-DDD_ARCHIVE_REFERENCE=$($archive.FullName)", "-DDD_ARCHIVE_WORK=$temporary", '-P', (Join-Path $script:DDHome 'dependencies.cmake')) $Root
+    }
+    finally { Remove-Item -LiteralPath $temporary -Recurse -Force }
+}
+
 function Assert-DDCachedSources([string]$Root, [string]$BuildDirectory) {
     $cache = Join-Path $BuildDirectory '_deps'
     if (-not (Test-Path -LiteralPath $cache)) { return }
+    $recipePins = $null
     foreach ($source in Get-ChildItem -LiteralPath $cache -Directory -Filter '*-src') {
         $null = Get-DDPath $Root ([IO.Path]::GetRelativePath($Root, $source.FullName))
         if ($source.Name -match '-[0-9a-f]{64}-src$') {
             $null = Invoke-DDProcess cmake @("-DDD_ARCHIVE_SOURCE=$($source.FullName)", '-P', (Join-Path $script:DDHome 'dependencies.cmake')) $Root
             continue
         }
-        if ($source.Name -notmatch '-([0-9a-f]{40})-src$') { Stop-DD 'Unrecognized dependency cache; inspect it before cleanup.' 5 }
+        if ($source.Name -notmatch '-([0-9a-f]{40})-src$') {
+            if ($null -eq $recipePins) { $recipePins = Get-DDRecipeArchivePins $Root $BuildDirectory }
+            Assert-DDRecipeArchive $Root $source $recipePins
+            continue
+        }
         $commit = $Matches[1]
         if (-not (Test-Path -LiteralPath (Join-Path $source.FullName '.git'))) { Stop-DD 'Incomplete dependency cache; inspect it before cleanup.' 5 }
         $status = Invoke-DDGit $source.FullName @('status', '--porcelain', '--untracked-files=all')

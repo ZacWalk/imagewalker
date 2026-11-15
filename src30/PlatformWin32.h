@@ -36,8 +36,8 @@
 
 namespace iw::platform
 {
-class WindowFrame;
-using WindowFramePtr = std::shared_ptr<WindowFrame>;
+	class WindowFrame;
+	using WindowFramePtr = std::shared_ptr<WindowFrame>;
 
 	namespace win32
 	{

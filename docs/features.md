@@ -1,32 +1,28 @@
 # Features
 
-Release-by-release highlights. The historical entries describe the additions
-made by each release over its predecessor. See [versions.md](versions.md) for
-release dates and [known-issues.md](known-issues.md) for limitations and
-workarounds.
+What each release offers. The 1.0 and 2.x entries describe each release as
+first published, and each 2.x entry lists what that release added to its
+predecessor; [known-issues.md](known-issues.md) lists what their x64 builds
+lack.
 
 ## ImageWalker 1.0
 
-The original 1998 application:
-
 - Thumbnail and detail browsing beside an image preview.
 - Fit-to-window and fixed zoom, panning and multi-image collages.
-- Clipboard copy and individually toggled address, tool and status bars.
+- Clipboard copy, and address, tool and status bars shown or hidden
+  individually.
 - BMP, GIF, JPEG, PCX, PNG and TIFF viewing.
 
-ImageWalker 1.0 is read-only, without editing, batch tools, printing or search.
+ImageWalker 1.0 is read-only, and has no folder tree, editing, batch tools,
+printing or search.
 
 ## ImageWalker 2.0
-
-The 2001 release added:
 
 - Image descriptions.
 - Print preview.
 - Slide shows.
 
 ## ImageWalker 2.2
-
-The 2003 release expanded image comparison, printing and batch work:
 
 - Compare mode.
 - A dedicated Print mode.
@@ -35,16 +31,13 @@ The 2003 release expanded image comparison, printing and batch work:
 
 ## ImageWalker 2.3
 
-The final 2.x release, in 2006, added:
-
 - Image tagging.
 - Automatic rotation using EXIF orientation.
 - The Resize Images wizard.
 
 ## ImageWalker 3.0
 
-The 2026 release focuses on media browsing, photo editing and reviewed file
-operations:
+Media browsing, photo editing and reviewed file operations:
 
 - Video and audio playback with play/pause, stop, seek and volume controls.
 - Video poster thumbnails, media properties and sorting by duration.
@@ -57,9 +50,9 @@ operations:
 - Copy and Move with sidecar companions and collision previews.
 - Photo Edit with perspective correction, interactive crop handles, automatic
   document detection and draft Undo/Redo.
-- Upright photo viewing and editing using the camera's orientation, with
-  metadata-preserving saves in the photo's own format.
+- Upright photo viewing and editing using the camera's orientation, with saves
+  that keep the photo's metadata in every format but BMP and WebP.
 - Session Undo for file tasks, with conflict checks and recovery copies.
 
-See [workflows-3.0.md](workflows-3.0.md) for usage, supported output formats,
-cancellation, metadata handling and recovery.
+[workflows-3.0.md](workflows-3.0.md) describes the file workflows: output
+formats, cancellation, metadata handling and recovery.

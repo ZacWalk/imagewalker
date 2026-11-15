@@ -22,8 +22,7 @@ namespace iw::imaging
 	{
 		inline bool cancelled(const DecodeOptions& options)
 		{
-			return options.stop.stop_requested() ||
-				(options.cancelled && options.cancelled());
+			return options.stop.stop_requested() || (options.cancelled && options.cancelled());
 		}
 
 		inline std::string narrow_extension(const std::wstring_view extension)
@@ -34,14 +33,12 @@ namespace iw::imaging
 			{
 				if (value == L'.' && result.empty()) continue;
 				if (value > 0x7f) return {};
-				result.push_back(static_cast<char>(
-					std::tolower(static_cast<unsigned char>(value))));
+				result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(value))));
 			}
 			return result;
 		}
 
-		inline std::optional<libfiles::image_format> native_format_from_extension(
-			const std::wstring_view extension)
+		inline std::optional<libfiles::image_format> native_format_from_extension(const std::wstring_view extension)
 		{
 			const auto narrow = narrow_extension(extension);
 			if (narrow.empty()) return {};
@@ -63,19 +60,18 @@ namespace iw::imaging
 				if (document_detail::cancelled(options_)) return false;
 				if (frame.width == 0 || frame.height == 0) return false;
 				const auto width_limit = options_.maximumWidth > 0
-					? static_cast<double>(options_.maximumWidth) / frame.width : 1.0;
+				                             ? static_cast<double>(options_.maximumWidth) / frame.width
+				                             : 1.0;
 				const auto height_limit = options_.maximumHeight > 0
-					? static_cast<double>(options_.maximumHeight) / frame.height : 1.0;
+				                              ? static_cast<double>(options_.maximumHeight) / frame.height
+				                              : 1.0;
 				const auto scale = (std::min)({1.0, width_limit, height_limit});
-				const auto width = static_cast<std::uint32_t>((std::max)(
-					1.0, std::round(frame.width * scale)));
-				const auto height = static_cast<std::uint32_t>((std::max)(
-					1.0, std::round(frame.height * scale)));
+				const auto width = static_cast<std::uint32_t>((std::max)(1.0, std::round(frame.width * scale)));
+				const auto height = static_cast<std::uint32_t>((std::max)(1.0, std::round(frame.height * scale)));
 				const auto bytes = static_cast<std::uint64_t>(width) * height * sizeof(std::uint32_t);
 				const auto palette = static_cast<std::uint64_t>(frame.palette.size()) * sizeof(std::uint32_t);
-				if (bytes > options_.maximumBytes ||
-					palette > options_.maximumBytes - bytes ||
-					retained_ > options_.maximumBytes - bytes - palette)
+				if (bytes > options_.maximumBytes || palette > options_.maximumBytes - bytes ||
+				    retained_ > options_.maximumBytes - bytes - palette)
 				{
 					limited = true;
 					return false;
@@ -103,29 +99,25 @@ namespace iw::imaging
 			void row(const std::uint32_t y, const std::span<const std::uint8_t> bytes) override
 			{
 				if (document.frames.empty() || y >= source_.height) return;
-				libfiles::pixel_rows source{
-					source_.width, 1, source_.storage, bytes.size(), false, bytes,
-					source_.palette, source_.transparent};
+				libfiles::pixel_rows source{source_.width, 1,     source_.storage, bytes.size(),
+				                            false,         bytes, source_.palette, source_.transparent};
 				libfiles::copy_bgra(source, row_pixels_, source_.width, false);
 				auto& output = document.frames.back();
-				const auto output_y = (std::min)(
-					output.height - 1,
-					static_cast<std::uint32_t>(static_cast<double>(y) * scale_));
+				const auto output_y = (std::min)(output.height - 1,
+				                                 static_cast<std::uint32_t>(static_cast<double>(y) * scale_));
 				auto* destination = reinterpret_cast<std::uint32_t*>(
 					output.pixels.data() + static_cast<std::size_t>(output_y) * output.stride);
 				for (std::uint32_t x = 0; x < output.width; ++x)
 				{
 					const auto source_x = (std::min)(source_.width - 1,
-						static_cast<std::uint32_t>(static_cast<double>(x) / scale_));
+					                                 static_cast<std::uint32_t>(static_cast<double>(x) / scale_));
 					destination[x] = row_pixels_[source_x];
 				}
 			}
 
-			void metadata(const libfiles::document_metadata kind,
-			              const std::span<const std::uint8_t> bytes) override
+			void metadata(const libfiles::document_metadata kind, const std::span<const std::uint8_t> bytes) override
 			{
-				if (bytes.size() > options_.maximumBytes ||
-					retained_ > options_.maximumBytes - bytes.size())
+				if (bytes.size() > options_.maximumBytes || retained_ > options_.maximumBytes - bytes.size())
 				{
 					limited = true;
 					return;
@@ -134,16 +126,13 @@ namespace iw::imaging
 				retained_ += bytes.size();
 			}
 
-			bool cancelled() override
-			{
-				return document_detail::cancelled(options_);
-			}
+			bool cancelled() override { return document_detail::cancelled(options_); }
 
 			void progress(const std::uint32_t current, const std::uint32_t total) override
 			{
-				if (options_.progress) options_.progress(
-					static_cast<int>((std::min)(current, static_cast<std::uint32_t>(INT_MAX))),
-					static_cast<int>((std::min)(total, static_cast<std::uint32_t>(INT_MAX))));
+				if (options_.progress)
+					options_.progress(static_cast<int>((std::min)(current, static_cast<std::uint32_t>(INT_MAX))),
+					                  static_cast<int>((std::min)(total, static_cast<std::uint32_t>(INT_MAX))));
 			}
 
 		private:
@@ -161,11 +150,9 @@ namespace iw::imaging
 			return {};
 		}
 
-		inline void append_document_warnings(DocumentResult& result,
-		                              const std::vector<std::string>& warnings)
+		inline void append_document_warnings(DocumentResult& result, const std::vector<std::string>& warnings)
 		{
-			for (const auto& warning : warnings)
-				result.warnings.emplace_back(warning.begin(), warning.end());
+			for (const auto& warning : warnings) result.warnings.emplace_back(warning.begin(), warning.end());
 		}
 
 		inline bool decode_result_to_document(const DecodeResult& decoded, DocumentResult& result)
@@ -183,7 +170,8 @@ namespace iw::imaging
 			frame.storage = libfiles::document_storage::bgra32;
 			frame.stride = static_cast<std::size_t>(frame.width) * sizeof(std::uint32_t);
 			frame.pixels.assign(reinterpret_cast<const std::uint8_t*>(decoded.image.pixels.data()),
-				reinterpret_cast<const std::uint8_t*>(decoded.image.pixels.data()) + frame.stride * frame.height);
+			                    reinterpret_cast<const std::uint8_t*>(decoded.image.pixels.data()) +
+			                        frame.stride * frame.height);
 			result.document.info.width = frame.width;
 			result.document.info.height = frame.height;
 			result.document.info.storage = frame.storage;
@@ -196,7 +184,7 @@ namespace iw::imaging
 		}
 
 		inline bool decode_libfiles_document(libfiles::reader& input, const std::wstring_view extension,
-		                              const DecodeOptions& options, DocumentResult& result)
+		                                     const DecodeOptions& options, DocumentResult& result)
 		{
 			if (cancelled(options))
 			{
@@ -205,7 +193,7 @@ namespace iw::imaging
 				return false;
 			}
 			if (options.maximumBytes == 0 || options.maximumWidth < 0 || options.maximumHeight < 0 ||
-				(options.thumbnail && (options.maximumWidth == 0 || options.maximumHeight == 0)))
+			    (options.thumbnail && (options.maximumWidth == 0 || options.maximumHeight == 0)))
 			{
 				result.error = ImageError::invalid_input;
 				result.message = L"Invalid image decode options.";
@@ -222,12 +210,15 @@ namespace iw::imaging
 				return false;
 			}
 
-			const auto cancelled_callback = [&options] { return cancelled(options); };
+			const auto cancelled_callback = [&options]
+			{
+				return cancelled(options);
+			};
 			const auto progress_callback = [&options](const std::uint32_t current, const std::uint32_t total)
 			{
 				if (!options.progress) return;
 				options.progress(static_cast<int>((std::min)(current, static_cast<std::uint32_t>(INT_MAX))),
-					static_cast<int>((std::min)(total, static_cast<std::uint32_t>(INT_MAX))));
+				                 static_cast<int>((std::min)(total, static_cast<std::uint32_t>(INT_MAX))));
 			};
 			std::unique_ptr<ThumbnailDocumentSink> thumbnail_sink;
 			std::unique_ptr<libfiles::document_keeper> keeper;
@@ -239,18 +230,18 @@ namespace iw::imaging
 			}
 			else
 			{
-				keeper = std::make_unique<libfiles::document_keeper>(
-					options.maximumBytes, cancelled_callback, progress_callback, false);
+				keeper = std::make_unique<libfiles::document_keeper>(options.maximumBytes, cancelled_callback,
+				                                                     progress_callback, false);
 				sink = keeper.get();
 			}
 			libfiles::document_options document_options;
 			document_options.thumbnail_width = options.thumbnail ? static_cast<std::uint32_t>(options.maximumWidth) : 0;
-			document_options.thumbnail_height = options.thumbnail ? static_cast<std::uint32_t>(options.maximumHeight) : 0;
+			document_options.thumbnail_height = options.thumbnail ? static_cast<std::uint32_t>(options.maximumHeight)
+			                                                      : 0;
 			document_options.maximum_working_bytes = options.maximumBytes;
 			document_options.maximum_retained_bytes = options.maximumBytes;
 			document_options.count_palette_in_retained_bytes = false;
-			document_options.legacy_tiff_storage =
-				options.legacyTiffStorage && format == libfiles::image_format::tiff;
+			document_options.legacy_tiff_storage = options.legacyTiffStorage && format == libfiles::image_format::tiff;
 			document_options.cancelled = cancelled_callback;
 			document_options.progress = [progress_callback](const std::uint32_t current, const std::uint32_t total)
 			{
@@ -258,8 +249,7 @@ namespace iw::imaging
 			};
 			const auto decoded = libfiles::decode_document(input, format, *sink, document_options);
 			const bool thumbnail_limited = thumbnail_sink && thumbnail_sink->limited;
-			result.document = thumbnail_sink ? std::move(thumbnail_sink->document) :
-				std::move(keeper->document);
+			result.document = thumbnail_sink ? std::move(thumbnail_sink->document) : std::move(keeper->document);
 			result.document.info = decoded.info;
 			result.orientation = scanned.orientation.value_or(1);
 			result.originalWidth = static_cast<int>(scanned.width);
@@ -284,7 +274,7 @@ namespace iw::imaging
 			if (!decoded.success)
 			{
 				const bool keep_complete = format == libfiles::image_format::gif ||
-					format == libfiles::image_format::tiff;
+				                           format == libfiles::image_format::tiff;
 				if (!decoded.truncated || !keep_complete) result.document = {};
 				result.error = ImageError::read_failed;
 				result.message = std::wstring(decoded.error.begin(), decoded.error.end());
@@ -306,7 +296,7 @@ namespace iw::imaging
 	{
 		using namespace document_detail;
 		if (rows.width == 0 || rows.height == 0 ||
-			static_cast<std::uint64_t>(rows.width) * rows.height > (std::uint64_t{1} << 30) / 4)
+		    static_cast<std::uint64_t>(rows.width) * rows.height > (std::uint64_t{1} << 30) / 4)
 			throw std::invalid_argument("Invalid image frame dimensions.");
 		PixelImage result;
 		result.width = result.originalWidth = static_cast<int>(rows.width);
@@ -332,8 +322,8 @@ namespace iw::imaging
 		return native_format_from_extension(extension).has_value();
 	}
 
-	inline DocumentResult decode_document(const std::span<const std::uint8_t> bytes,
-	                               const std::wstring_view extension, const DecodeOptions& options)
+	inline DocumentResult decode_document(const std::span<const std::uint8_t> bytes, const std::wstring_view extension,
+	                                      const DecodeOptions& options)
 	{
 		using namespace document_detail;
 		DocumentResult result;
@@ -354,8 +344,7 @@ namespace iw::imaging
 			decode_result_to_document(decoded, result);
 			return result;
 		}
-		const bool signature_webp = extension.empty() &&
-			bytes.size() >= 12 && has_webp_signature(bytes.first(12));
+		const bool signature_webp = extension.empty() && bytes.size() >= 12 && has_webp_signature(bytes.first(12));
 		if (!supports_extension(extension) && !signature_webp)
 		{
 			result.error = ImageError::unsupported;

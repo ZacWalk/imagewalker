@@ -60,7 +60,8 @@ namespace iw::ui
 		{
 			std::vector<int> hits;
 			hits.reserve(items.size());
-			for (const auto& item : items) if (item.bounds.intersects(area)) hits.push_back(item.id);
+			for (const auto& item : items)
+				if (item.bounds.intersects(area)) hits.push_back(item.id);
 			marquee(hits);
 		}
 
@@ -91,8 +92,7 @@ namespace iw::ui
 			if (count_) focus_ = anchor_ = 0;
 		}
 
-		void restore(const int count, const std::vector<int>& selected, const int focus,
-		             const int fallbackFocus = -1)
+		void restore(const int count, const std::vector<int>& selected, const int focus, const int fallbackFocus = -1)
 		{
 			reset(count);
 			for (const int index : selected) set_selected(index, true);
@@ -130,10 +130,7 @@ namespace iw::ui
 			return -1;
 		}
 
-		bool contains(const int index) const
-		{
-			return valid(index) && selected_[static_cast<size_t>(index)];
-		}
+		bool contains(const int index) const { return valid(index) && selected_[static_cast<size_t>(index)]; }
 
 		std::vector<int> selected() const
 		{

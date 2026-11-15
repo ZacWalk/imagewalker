@@ -38,6 +38,9 @@ void CheckFullScreenLayoutForTests()
 			while (PeekMessage(&message, nullptr, WM_QUIT, WM_QUIT, PM_REMOVE)) {}
 		}
 	} windowLifetime{frame};
+	const bool hidden = IW::Test::OffscreenWindows::PreserveGeometry(frame);
+	IW_CHECK(hidden);
+	if (!hidden) return;
 	IW_CHECK(!frame._bCreateFailed);
 	if (frame._bCreateFailed) return;
 
@@ -65,6 +68,7 @@ void CheckFullScreenLayoutForTests()
 				IW::Min(800, work.Width() - 60), IW::Min(600, work.Height() - 60),
 				SWP_NOZORDER | SWP_NOACTIVATE);
 			if (maximized) frame.ShowWindow(SW_MAXIMIZE);
+			IW_CHECK(!frame.IsWindowVisible());
 
 			WINDOWPLACEMENT placement = {sizeof(placement)};
 			IW_CHECK(frame.GetWindowPlacement(&placement));
@@ -76,6 +80,7 @@ void CheckFullScreenLayoutForTests()
 			for (int pass = 0; pass != 2; ++pass)
 			{
 				frame.ViewFullScreen(true);
+				IW_CHECK(!frame.IsWindowVisible());
 				IW_CHECK(frame.IsFullScreen());
 				CRect window, client, content;
 				frame.GetWindowRect(window);
@@ -91,6 +96,7 @@ void CheckFullScreenLayoutForTests()
 				IW_CHECK(!IW::HasVisibleStyle(frame.m_hWndStatusBar));
 
 				frame.ViewFullScreen(false);
+				IW_CHECK(!frame.IsWindowVisible());
 				IW_CHECK(!frame.IsFullScreen());
 				IW_CHECK((frame.IsZoomed() != FALSE) == maximized);
 				IW_CHECK(frame.GetStyle() == style);

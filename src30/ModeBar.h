@@ -21,7 +21,18 @@ namespace iw
 	class ModeBar final : public platform::FrameReactor, public std::enable_shared_from_this<ModeBar>
 	{
 	public:
-		enum class Glyph { browse, folders, convert, rename, edit, sync, fullscreen, folder, pin };
+		enum class Glyph
+		{
+			browse,
+			folders,
+			convert,
+			rename,
+			edit,
+			sync,
+			fullscreen,
+			folder,
+			pin
+		};
 
 		struct Button
 		{
@@ -44,15 +55,9 @@ namespace iw
 		void set_dpi(unsigned int dpi);
 		int width() const { return metric(buttonEdge) + metric(4); }
 
-		void set_command_handler(std::function<void(const Button&)> handler)
-		{
-			commandHandler_ = std::move(handler);
-		}
+		void set_command_handler(std::function<void(const Button&)> handler) { commandHandler_ = std::move(handler); }
 
-		void set_remove_handler(std::function<void(const Button&)> handler)
-		{
-			removeHandler_ = std::move(handler);
-		}
+		void set_remove_handler(std::function<void(const Button&)> handler) { removeHandler_ = std::move(handler); }
 
 	private:
 		static constexpr int buttonEdge = 64;
@@ -60,13 +65,11 @@ namespace iw
 		platform::MessageResult mouse(const platform::WindowFramePtr& frame, platform::MouseMessage message,
 		                              const platform::MouseInput& input) override;
 		void paint(const platform::WindowFramePtr& frame, platform::DrawContext& draw) override;
-		void size(const platform::WindowFramePtr& frame, app::sizei extent,
-		          platform::MeasureContext& measure) override;
+		void size(const platform::WindowFramePtr& frame, app::sizei extent, platform::MeasureContext& measure) override;
 
 		int metric(const int value) const { return ui::scale_metric(value, dpi_); }
 		void layout();
-		void draw_button(const ui::CanvasRenderer& renderer, const Button& button, app::recti bounds,
-		                 bool hot) const;
+		void draw_button(const ui::CanvasRenderer& renderer, const Button& button, app::recti bounds, bool hot) const;
 		void draw_glyph(const ui::CanvasRenderer& renderer, Glyph glyph, app::recti bounds, color value) const;
 		const Button* button_at(app::pointi point) const;
 		void invalidate();

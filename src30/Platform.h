@@ -37,7 +37,14 @@ namespace iw::platform
 		bool hasAlpha{};
 	};
 
-	enum class CursorShape { arrow, zoom, sizeAll, sizeHorizontal, wait };
+	enum class CursorShape
+	{
+		arrow,
+		zoom,
+		sizeAll,
+		sizeHorizontal,
+		wait
+	};
 
 	enum class SystemColor
 	{
@@ -76,7 +83,11 @@ namespace iw::platform
 		contextMenu
 	};
 
-	enum class KeyMessage { down, character };
+	enum class KeyMessage
+	{
+		down,
+		character
+	};
 
 	enum class KeyCode
 	{
@@ -100,7 +111,11 @@ namespace iw::platform
 		subtract
 	};
 
-	enum class GestureKind { zoom, pan };
+	enum class GestureKind
+	{
+		zoom,
+		pan
+	};
 
 	struct MouseInput
 	{
@@ -151,8 +166,7 @@ namespace iw::platform
 	// The text pathEllipsis draws for a path wider than `width`: "C:\Users\zac...\photo.jpg".
 	// When even "...\photo.jpg" is too wide the name stands alone, shortened at its end if it must
 	// be. `measure` gives the drawn width of a string.
-	std::wstring path_ellipsis(std::wstring_view path, int width,
-	                           const std::function<int(std::wstring_view)>& measure);
+	std::wstring path_ellipsis(std::wstring_view path, int width, const std::function<int(std::wstring_view)>& measure);
 
 	class Font
 	{
@@ -184,12 +198,11 @@ namespace iw::platform
 		virtual app::recti clip_rect() const = 0;
 		virtual void fill(app::recti rect, color value) = 0;
 		virtual void blend_fill(app::recti rect, color value) = 0;
-		virtual void text(std::wstring_view value, app::recti rect, color textColor,
-		                  std::uint32_t format, const FontPtr& font = {}) = 0;
-		virtual app::sizei measure_text(std::wstring_view value, std::uint32_t format,
-		                           const FontPtr& font = {}) = 0;
-		virtual void image(std::span<const std::uint32_t> pixels, app::sizei source,
-		                   app::recti destination, bool alpha) = 0;
+		virtual void text(std::wstring_view value, app::recti rect, color textColor, std::uint32_t format,
+		                  const FontPtr& font = {}) = 0;
+		virtual app::sizei measure_text(std::wstring_view value, std::uint32_t format, const FontPtr& font = {}) = 0;
+		virtual void image(std::span<const std::uint32_t> pixels, app::sizei source, app::recti destination,
+		                   bool alpha) = 0;
 		virtual void focus(app::recti rect) = 0;
 		virtual void outline(app::recti rect, color value, int width = 1) = 0;
 		virtual void clip(app::recti rect) = 0;
@@ -201,14 +214,18 @@ namespace iw::platform
 	public:
 		virtual ~MeasureContext() = default;
 		virtual app::sizei measure_text(std::wstring_view value, std::uint32_t format,
-		                           const FontPtr& font = {}) const = 0;
+		                                const FontPtr& font = {}) const = 0;
 	};
 
 	class WindowFrame;
 	class FrameReactor;
 	using WindowFramePtr = std::shared_ptr<WindowFrame>;
 	using FrameReactorPtr = std::shared_ptr<FrameReactor>;
-	enum class WindowIcon { none, application };
+	enum class WindowIcon
+	{
+		none,
+		application
+	};
 
 	struct WindowOptions
 	{
@@ -318,13 +335,9 @@ namespace iw::platform
 		virtual MessageResult gesture(const WindowFramePtr&, const GestureInput&) { return 0; }
 		virtual MessageResult files_dropped(const WindowFramePtr&, const FileDrop&) { return 0; }
 
-		virtual void paint(const WindowFramePtr&, DrawContext&)
-		{
-		}
+		virtual void paint(const WindowFramePtr&, DrawContext&) {}
 
-		virtual void size(const WindowFramePtr&, app::sizei, MeasureContext&)
-		{
-		}
+		virtual void size(const WindowFramePtr&, app::sizei, MeasureContext&) {}
 	};
 
 	WindowFramePtr create_top_level_frame(FrameReactorPtr reactor, const WindowOptions& options);
@@ -333,13 +346,40 @@ namespace iw::platform
 	void bind_main_frame(const ::ui::frame_ptr& frame, const std::shared_ptr<::ui::frame_host>& host);
 	std::shared_ptr<::ui::frame_host> create_frame_host(FrameReactorPtr reactor);
 	::ui::frame_ptr native_ui_frame(const WindowFramePtr& frame);
+
+	// A libdesktop element drawn over what a frame's reactor paints, at the bounds its owner sets: a drawn
+	// control, which the frame gives the pointer and the keyboard as it does libdesktop's own, or a
+	// picture. The frame lets go of it when this is destroyed.
+	class FrameElement
+	{
+	public:
+		virtual ~FrameElement() = default;
+		virtual void set_bounds(app::recti bounds) = 0;
+		virtual void show(bool visible) = 0;
+		// The frame it is drawn in, which presents a picture updated in place again (frame::redraw).
+		virtual ::ui::frame_ptr frame() const = 0;
+	};
+
+	using FrameElementPtr = std::unique_ptr<FrameElement>;
+	// Null for a frame libdesktop does not draw, such as a test's recording frame.
+	FrameElementPtr add_frame_element(const WindowFramePtr& frame, ::ui::element_ptr element);
+	// The Direct3D device was lost: the elements frames draw let go of their textures, which the next
+	// paint makes again on the software renderer.
+	void release_graphics();
+
 	bool dispatch_menu_accelerator(char32_t key, ::platform::key_state keys);
 	void shutdown_runtime();
 	FontPtr create_message_font(unsigned int dpi);
 	enum class BitmapAsset
 	{
-		fileFolder, filePhoto, fileDocument, fileVideo, fileAudio, fileOther,
-		toolbarSymbols, statusSymbols
+		fileFolder,
+		filePhoto,
+		fileDocument,
+		fileVideo,
+		fileAudio,
+		fileOther,
+		toolbarSymbols,
+		statusSymbols
 	};
 	BitmapResource load_bitmap_resource(BitmapAsset asset);
 	color system_color(SystemColor value);
@@ -381,7 +421,15 @@ namespace iw::platform
 	};
 	using CommandPtr = std::shared_ptr<Command>;
 
-	enum class MenuItemKind { command, submenu, separator };
+	// What a toolbar shows for a command: its toolbar text, or its menu name without the mnemonic marker.
+	std::wstring toolbar_label(const Command& command);
+
+	enum class MenuItemKind
+	{
+		command,
+		submenu,
+		separator
+	};
 
 	struct MenuItem
 	{
@@ -412,9 +460,14 @@ namespace iw::platform
 	};
 
 	void show_popup_menu(const WindowFramePtr& owner, app::pointi screenPoint, std::span<const PopupItem> items);
-	void set_frame_menu(const WindowFramePtr& owner, std::vector<Menu> menus);
+	void set_frame_menu(const WindowFramePtr& owner, const std::vector<Menu>& menus);
 
-	enum class ToolbarItemKind { command, menu, separator };
+	enum class ToolbarItemKind
+	{
+		command,
+		menu,
+		separator
+	};
 
 	struct ToolbarItem
 	{
@@ -488,7 +541,14 @@ namespace iw::platform
 	using DialogValue = std::variant<std::monostate, std::wstring, bool, std::int64_t>;
 	using DialogValues = std::map<DialogFieldId, DialogValue>;
 
-	enum class DialogFieldKind { text, checkBox, choice, action, searchList };
+	enum class DialogFieldKind
+	{
+		text,
+		checkBox,
+		choice,
+		action,
+		searchList
+	};
 
 	struct DialogChoice
 	{
@@ -553,6 +613,8 @@ namespace iw::platform
 	{
 		std::wstring text;
 		std::wstring cueBanner;
+		// The face the text is drawn in; libdesktop's dialog face when empty.
+		FontPtr font;
 		bool folderCompletion{};
 		std::function<void(const std::wstring&)> changed;
 		std::function<void()> accepted;
@@ -560,7 +622,8 @@ namespace iw::platform
 		std::function<void(bool backwards)> tabbed;
 	};
 
-	// A hosted native edit control. Drawing a caret and a selection is not worth writing.
+	// libdesktop's drawn edit, in its owner frame's element tree. Return, Escape and Tab go to the options
+	// rather than the frame, and text set by the owner is its own, so it is not reported to changed.
 	class TextInput
 	{
 	public:
@@ -571,7 +634,8 @@ namespace iw::platform
 		virtual bool has_focus() const = 0;
 		virtual std::wstring text() const = 0;
 		virtual void set_text(std::wstring_view value) = 0;
-		virtual void set_font(const FontPtr& font) = 0;
+		// The edit itself, which its frame gives the keyboard and a test drives directly.
+		virtual ::ui::control_ptr control() const = 0;
 	};
 
 	using TextInputPtr = std::shared_ptr<TextInput>;
@@ -598,7 +662,15 @@ namespace iw::platform
 	// Background queues. Each one runs its items one at a time, in submission order, on a
 	// dedicated thread, so items sharing a queue never run concurrently with each other.
 	// `task` is reserved for multi-minute batch work, which must not sit in front of folder scanning.
-	enum class WorkQueue { image, thumbnail, metadata, folder, shell, task };
+	enum class WorkQueue
+	{
+		image,
+		thumbnail,
+		metadata,
+		folder,
+		shell,
+		task
+	};
 
 	// Runs work on the UI thread. Callable from any thread; false means the UI loop has ended.
 	bool queue_ui(std::function<void()> work);
@@ -648,12 +720,19 @@ namespace iw::platform
 		std::wstring value;
 	};
 
-	std::wstring read_text_setting(std::wstring_view section, std::wstring_view key,
-	                               std::wstring_view fallback = {});
+	std::wstring read_text_setting(std::wstring_view section, std::wstring_view key, std::wstring_view fallback = {});
 	void write_text_settings(std::wstring_view section, std::span<const TextSetting> values);
 	void clear_settings_section(std::wstring_view section);
 
-	enum class KnownFolder { pictures, documents, desktop, downloads, music, videos };
+	enum class KnownFolder
+	{
+		pictures,
+		documents,
+		desktop,
+		downloads,
+		music,
+		videos
+	};
 
 	// An empty path means the folder is not present on this machine.
 	std::filesystem::path known_folder(KnownFolder folder);
@@ -661,7 +740,12 @@ namespace iw::platform
 	// Settings and configuration live beside the executable, never in the registry.
 	std::filesystem::path module_folder();
 
-	enum class FileOperation { copy, move, recycle };
+	enum class FileOperation
+	{
+		copy,
+		move,
+		recycle
+	};
 
 	struct ClipboardStatus
 	{
@@ -687,7 +771,11 @@ namespace iw::platform
 	// from FileOperation::recycle so a caller cannot reach it by passing the wrong enumerator.
 	bool delete_permanently(std::span<const std::filesystem::path> paths, std::error_code& error);
 
-	enum class RuntimeMode { multithreaded, userInterface };
+	enum class RuntimeMode
+	{
+		multithreaded,
+		userInterface
+	};
 
 	class Runtime
 	{

@@ -21,8 +21,7 @@ namespace iw::imaging
 	inline ::core::file_path desktop_file_path(const std::filesystem::path& path)
 	{
 		const auto utf8 = path.u8string();
-		return ::core::file_path(std::string(
-			reinterpret_cast<const char*>(utf8.data()), utf8.size()));
+		return ::core::file_path(std::string(reinterpret_cast<const char*>(utf8.data()), utf8.size()));
 	}
 
 	class PlatformFileStream final : public libfiles::stream
@@ -43,8 +42,7 @@ namespace iw::imaging
 		std::size_t read(const std::uint64_t offset, void* data, const std::size_t size) override
 		{
 			if (!file_ || offset > size_) return 0;
-			return static_cast<std::size_t>(file_->read_at(offset,
-				static_cast<std::uint8_t*>(data), size));
+			return static_cast<std::size_t>(file_->read_at(offset, static_cast<std::uint8_t*>(data), size));
 		}
 
 	private:

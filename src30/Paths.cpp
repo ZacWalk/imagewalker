@@ -14,11 +14,9 @@ namespace iw::paths
 	{
 		bool is_reserved_stem(std::wstring_view stem)
 		{
-			constexpr std::array reserved{
-				L"CON", L"PRN", L"AUX", L"NUL",
-				L"COM1", L"COM2", L"COM3", L"COM4", L"COM5", L"COM6", L"COM7", L"COM8", L"COM9",
-				L"LPT1", L"LPT2", L"LPT3", L"LPT4", L"LPT5", L"LPT6", L"LPT7", L"LPT8", L"LPT9"
-			};
+			constexpr std::array reserved{L"CON",  L"PRN",  L"AUX",  L"NUL",  L"COM1", L"COM2", L"COM3", L"COM4",
+			                              L"COM5", L"COM6", L"COM7", L"COM8", L"COM9", L"LPT1", L"LPT2", L"LPT3",
+			                              L"LPT4", L"LPT5", L"LPT6", L"LPT7", L"LPT8", L"LPT9"};
 			return std::ranges::any_of(reserved, [stem](const wchar_t* name) { return iequals(stem, name); });
 		}
 	}
@@ -93,8 +91,8 @@ namespace iw::paths
 		switch (problem)
 		{
 		case NameProblem::empty: return L"Enter a name for the file.";
-		case NameProblem::illegalCharacter: return
-				L"A file name cannot contain any of these characters:\n< > : \" | ? *";
+		case NameProblem::illegalCharacter:
+			return L"A file name cannot contain any of these characters:\n< > : \" | ? *";
 		case NameProblem::reservedName: return L"That name is reserved by Windows. Choose a different name.";
 		case NameProblem::trailingDotOrSpace: return L"A file name cannot end with a space or a period.";
 		case NameProblem::separator: return L"Enter a file name without a folder path.";

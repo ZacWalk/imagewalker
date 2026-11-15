@@ -18,8 +18,7 @@ namespace iw::ui
 		constexpr int indentStep = 18;
 
 		// The renderer draws one line at a time, so wrapping is the panel's own job.
-		std::vector<std::wstring> wrap(const CanvasRenderer& renderer, const std::wstring_view text,
-		                               const int width)
+		std::vector<std::wstring> wrap(const CanvasRenderer& renderer, const std::wstring_view text, const int width)
 		{
 			std::vector<std::wstring> lines;
 			if (text.empty() || width <= 0) return lines;
@@ -27,19 +26,17 @@ namespace iw::ui
 			for (size_t start = 0; start <= text.size();)
 			{
 				const size_t newline = text.find(L'\n', start);
-				const auto paragraph = text.substr(start, newline == std::wstring_view::npos
-					                                          ? std::wstring_view::npos
-					                                          : newline - start);
+				const auto paragraph = text.substr(start, newline == std::wstring_view::npos ? std::wstring_view::npos
+				                                                                             : newline - start);
 				std::wstring line;
 				for (size_t index = 0; index <= paragraph.size();)
 				{
 					const size_t space = paragraph.find(L' ', index);
-					const auto word = paragraph.substr(index, space == std::wstring_view::npos
-						                                          ? std::wstring_view::npos
-						                                          : space - index);
+					const auto word = paragraph.substr(index, space == std::wstring_view::npos ? std::wstring_view::npos
+					                                                                           : space - index);
 					std::wstring candidate = line.empty() ? std::wstring(word) : line + L" " + std::wstring(word);
 					if (!line.empty() &&
-						renderer.measure_text(candidate, platform::TextFormat::singleLine).width > width)
+					    renderer.measure_text(candidate, platform::TextFormat::singleLine).width > width)
 					{
 						lines.push_back(std::move(line));
 						line.assign(word);
@@ -85,36 +82,22 @@ namespace iw::ui
 			int height = lineHeight;
 			switch (control.kind)
 			{
-			case ControlKind::heading:
-				height = lineHeight + metric(4);
-				break;
+			case ControlKind::heading: height = lineHeight + metric(4); break;
 			case ControlKind::label:
-				{
-					control.wrapped = wrap(renderer, control.label, width);
-					height = lineHeight * static_cast<int>((std::max<size_t>)(1, control.wrapped.size()));
-					break;
-				}
+			{
+				control.wrapped = wrap(renderer, control.label, width);
+				height = lineHeight * static_cast<int>((std::max<size_t>)(1, control.wrapped.size()));
+				break;
+			}
 			case ControlKind::checkBox:
-			case ControlKind::radio:
-				height = (std::max)(lineHeight, metric(checkSize));
-				break;
-			case ControlKind::slider:
-				height = lineHeight + metric(sliderHeight);
-				break;
+			case ControlKind::radio: height = (std::max)(lineHeight, metric(checkSize)); break;
+			case ControlKind::slider: height = lineHeight + metric(sliderHeight); break;
 			case ControlKind::choice:
 			case ControlKind::folder:
-			case ControlKind::text:
-				height = lineHeight + metric(fieldHeight);
-				break;
-			case ControlKind::button:
-				height = metric(buttonHeight);
-				break;
-			case ControlKind::link:
-				height = lineHeight;
-				break;
-			case ControlKind::separator:
-				height = metric(rowSpacing) * 2;
-				break;
+			case ControlKind::text: height = lineHeight + metric(fieldHeight); break;
+			case ControlKind::button: height = metric(buttonHeight); break;
+			case ControlKind::link: height = lineHeight; break;
+			case ControlKind::separator: height = metric(rowSpacing) * 2; break;
 			}
 			control.bounds = {left, y, width, height};
 			switch (control.kind)
@@ -122,29 +105,17 @@ namespace iw::ui
 			case ControlKind::checkBox:
 			case ControlKind::radio:
 			case ControlKind::link:
-			case ControlKind::button:
-				control.hit = control.bounds;
-				break;
-			case ControlKind::slider:
-				control.hit = {left, y + lineHeight, width, metric(sliderHeight)};
-				break;
-			case ControlKind::choice:
-				control.hit = {left, y + lineHeight, width, metric(fieldHeight)};
-				break;
+			case ControlKind::button: control.hit = control.bounds; break;
+			case ControlKind::slider: control.hit = {left, y + lineHeight, width, metric(sliderHeight)}; break;
+			case ControlKind::choice: control.hit = {left, y + lineHeight, width, metric(fieldHeight)}; break;
 			case ControlKind::folder:
-				{
-					const int browse = (std::min)(width, metric(72));
-					control.hit = {
-						left + width - browse, y + lineHeight, browse, metric(fieldHeight)
-					};
-					break;
-				}
-			case ControlKind::text:
-				control.hit = {left, y + lineHeight, width, metric(fieldHeight)};
+			{
+				const int browse = (std::min)(width, metric(72));
+				control.hit = {left + width - browse, y + lineHeight, browse, metric(fieldHeight)};
 				break;
-			default:
-				control.hit = {};
-				break;
+			}
+			case ControlKind::text: control.hit = {left, y + lineHeight, width, metric(fieldHeight)}; break;
+			default: control.hit = {}; break;
 			}
 			y += height + metric(rowSpacing);
 		}
@@ -157,8 +128,8 @@ namespace iw::ui
 		if (!control) return {};
 		if (control->kind == ControlKind::text) return control->hit;
 		if (control->kind != ControlKind::folder) return {};
-		return {control->bounds.x, control->hit.y,
-			(std::max)(0, control->hit.x - control->bounds.x - metric(4)), control->hit.height};
+		return {control->bounds.x, control->hit.y, (std::max)(0, control->hit.x - control->bounds.x - metric(4)),
+		        control->hit.height};
 	}
 
 	void ControlPanel::draw(const CanvasRenderer& renderer) const
@@ -180,153 +151,132 @@ namespace iw::ui
 			case ControlKind::heading:
 				renderer.text(control.label, control.bounds, foreground,
 				              platform::TextFormat::left | platform::TextFormat::singleLine);
-				renderer.outline({
-					                 control.bounds.x, control.bounds.bottom() - 1, control.bounds.width, 1
-				                 }, shadow);
+				renderer.outline({control.bounds.x, control.bounds.bottom() - 1, control.bounds.width, 1}, shadow);
 				break;
 
 			case ControlKind::label:
 				for (size_t line = 0; line < control.wrapped.size(); ++line)
-					renderer.text(control.wrapped[line], {
-						              control.bounds.x, control.bounds.y + static_cast<int>(line) * lineHeight,
-						              control.bounds.width, lineHeight
-					              }, foreground,
-					              platform::TextFormat::left | platform::TextFormat::singleLine);
+					renderer.text(control.wrapped[line],
+					              {control.bounds.x, control.bounds.y + static_cast<int>(line) * lineHeight,
+					               control.bounds.width, lineHeight},
+					              foreground, platform::TextFormat::left | platform::TextFormat::singleLine);
 				break;
 
 			case ControlKind::separator:
-				renderer.outline({
-					                 control.bounds.x, control.bounds.y + control.bounds.height / 2,
-					                 control.bounds.width, 1
-				                 }, shadow);
+				renderer.outline({control.bounds.x, control.bounds.y + control.bounds.height / 2, control.bounds.width,
+				                  1},
+				                 shadow);
 				break;
 
 			case ControlKind::checkBox:
 			case ControlKind::radio:
+			{
+				const int box = metric(checkSize);
+				const app::recti mark{control.bounds.x, control.bounds.y + (control.bounds.height - box) / 2, box, box};
+				renderer.fill(mark, platform::calc_hande_color(hot, false, false));
+				renderer.outline(mark, enabled ? shadow : disabled);
+				if (control.checked)
 				{
-					const int box = metric(checkSize);
-					const app::recti mark{
-						control.bounds.x, control.bounds.y + (control.bounds.height - box) / 2, box, box
-					};
-					renderer.fill(mark, platform::calc_hande_color(hot, false, false));
-					renderer.outline(mark, enabled ? shadow : disabled);
-					if (control.checked)
-					{
-						const int inset = (std::max)(2, box / 4);
-						renderer.fill({
-							              mark.x + inset, mark.y + inset, box - inset * 2, box - inset * 2
-						              }, enabled ? highlight : disabled);
-					}
-					renderer.text(control.label, {
-						              mark.right() + metric(6), control.bounds.y,
-						              control.bounds.width - box - metric(6), control.bounds.height
-					              }, foreground,
-					              platform::TextFormat::left | platform::TextFormat::verticalCenter |
-					              platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
-					break;
+					const int inset = (std::max)(2, box / 4);
+					renderer.fill({mark.x + inset, mark.y + inset, box - inset * 2, box - inset * 2},
+					              enabled ? highlight : disabled);
 				}
+				renderer.text(control.label,
+				              {mark.right() + metric(6), control.bounds.y, control.bounds.width - box - metric(6),
+				               control.bounds.height},
+				              foreground,
+				              platform::TextFormat::left | platform::TextFormat::verticalCenter |
+				                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
+				break;
+			}
 
 			case ControlKind::slider:
-				{
-					const auto readout = control.showValue
-						                     ? std::format(L"{}{}{}", control.label.empty() ? L"" : L" ",
-						                                   control.value, control.suffix)
-						                     : std::wstring{};
-					renderer.text(control.label + readout, {
-						              control.bounds.x, control.bounds.y, control.bounds.width, lineHeight
-					              }, foreground,
-					              platform::TextFormat::left | platform::TextFormat::singleLine);
-					const app::recti track{
-						control.hit.x, control.hit.y + control.hit.height / 2 - metric(2),
-						control.hit.width, metric(4)
-					};
-					renderer.fill(track, face);
-					renderer.outline(track, shadow);
-					const auto span = (std::max)(1LL, static_cast<long long>(control.maximum) - control.minimum);
-					const int travel = (std::max)(0, control.hit.width - metric(10));
-					const int offset = static_cast<int>(travel *
-						std::clamp(static_cast<long long>(control.value) - control.minimum, 0LL, span) / span);
-					const app::recti thumb{
-						control.hit.x + offset, control.hit.y + metric(2), metric(10),
-						control.hit.height - metric(4)
-					};
-					renderer.fill(thumb, platform::calc_hande_color(hot, dragging_ && control.id == pressedId_,
-					                                                false));
-					renderer.outline(thumb, enabled ? shadow : disabled);
-					break;
-				}
+			{
+				const auto readout = control.showValue ? std::format(L"{}{}{}", control.label.empty() ? L"" : L" ",
+				                                                     control.value, control.suffix)
+				                                       : std::wstring{};
+				renderer.text(control.label + readout,
+				              {control.bounds.x, control.bounds.y, control.bounds.width, lineHeight}, foreground,
+				              platform::TextFormat::left | platform::TextFormat::singleLine);
+				const app::recti track{control.hit.x, control.hit.y + control.hit.height / 2 - metric(2),
+				                       control.hit.width, metric(4)};
+				renderer.fill(track, face);
+				renderer.outline(track, shadow);
+				const auto span = (std::max)(1LL, static_cast<long long>(control.maximum) - control.minimum);
+				const int travel = (std::max)(0, control.hit.width - metric(10));
+				const int offset = static_cast<int>(
+					travel * std::clamp(static_cast<long long>(control.value) - control.minimum, 0LL, span) / span);
+				const app::recti thumb{control.hit.x + offset, control.hit.y + metric(2), metric(10),
+				                       control.hit.height - metric(4)};
+				renderer.fill(thumb, platform::calc_hande_color(hot, dragging_ && control.id == pressedId_, false));
+				renderer.outline(thumb, enabled ? shadow : disabled);
+				break;
+			}
 
 			case ControlKind::choice:
-				{
-					renderer.text(control.label, {
-						              control.bounds.x, control.bounds.y, control.bounds.width, lineHeight
-					              }, foreground,
-					              platform::TextFormat::left | platform::TextFormat::singleLine);
-					renderer.fill(control.hit, platform::calc_hande_color(hot, false, false));
-					renderer.outline(control.hit, enabled ? shadow : disabled);
-					const auto value = control.value >= 0 && static_cast<size_t>(control.value) < control.choices.
-						size()
-						                   ? control.choices[static_cast<size_t>(control.value)]
-						                   : std::wstring{};
-					renderer.text(value, {
-						              control.hit.x + metric(6), control.hit.y,
-						              control.hit.width - metric(24), control.hit.height
-					              }, foreground,
-					              platform::TextFormat::left | platform::TextFormat::verticalCenter |
-					              platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
-					renderer.text(L"\u25be", {
-						              control.hit.right() - metric(20), control.hit.y, metric(16),
-						              control.hit.height
-					              }, foreground,
-					              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-					              platform::TextFormat::singleLine);
-					break;
-				}
+			{
+				renderer.text(control.label, {control.bounds.x, control.bounds.y, control.bounds.width, lineHeight},
+				              foreground, platform::TextFormat::left | platform::TextFormat::singleLine);
+				renderer.fill(control.hit, platform::calc_hande_color(hot, false, false));
+				renderer.outline(control.hit, enabled ? shadow : disabled);
+				const auto value = control.value >= 0 && static_cast<size_t>(control.value) < control.choices.size()
+				                       ? control.choices[static_cast<size_t>(control.value)]
+				                       : std::wstring{};
+				renderer.text(value,
+				              {control.hit.x + metric(6), control.hit.y, control.hit.width - metric(24),
+				               control.hit.height},
+				              foreground,
+				              platform::TextFormat::left | platform::TextFormat::verticalCenter |
+				                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
+				renderer.text(L"\u25be",
+				              {control.hit.right() - metric(20), control.hit.y, metric(16), control.hit.height},
+				              foreground,
+				              platform::TextFormat::center | platform::TextFormat::verticalCenter |
+				                  platform::TextFormat::singleLine);
+				break;
+			}
 
 			case ControlKind::folder:
 			case ControlKind::text:
-				{
-					renderer.text(control.label, {
-						              control.bounds.x, control.bounds.y, control.bounds.width, lineHeight
-					              }, foreground,
-					              platform::TextFormat::left | platform::TextFormat::singleLine);
-					// Browse... is the only way to change a folder, so its field is drawn read-only, and a
-					// long path keeps the chosen folder's own name in view.
-					const bool folder = control.kind == ControlKind::folder;
-					const auto field = text_bounds(control.id);
-					renderer.fill(field, folder ? face : platform::system_color(platform::SystemColor::window));
-					renderer.outline(field, enabled ? shadow : disabled);
-					renderer.text(control.text, {field.x + metric(4), field.y,
-						(std::max)(0, field.width - metric(8)), field.height}, foreground,
-						platform::TextFormat::left | platform::TextFormat::verticalCenter |
-						platform::TextFormat::singleLine |
-						(folder ? platform::TextFormat::pathEllipsis : platform::TextFormat::endEllipsis));
-					if (!folder) break;
-					renderer.fill(control.hit, platform::calc_hande_color(hot, false, false));
-					renderer.outline(control.hit, enabled ? shadow : disabled);
-					renderer.text(L"Browse...", control.hit, foreground,
-					              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-					              platform::TextFormat::singleLine);
-					break;
-				}
+			{
+				renderer.text(control.label, {control.bounds.x, control.bounds.y, control.bounds.width, lineHeight},
+				              foreground, platform::TextFormat::left | platform::TextFormat::singleLine);
+				// Browse... is the only way to change a folder, so its field is drawn read-only, and a
+				// long path keeps the chosen folder's own name in view.
+				const bool folder = control.kind == ControlKind::folder;
+				const auto field = text_bounds(control.id);
+				renderer.fill(field, folder ? face : platform::system_color(platform::SystemColor::window));
+				renderer.outline(field, enabled ? shadow : disabled);
+				renderer.text(control.text,
+				              {field.x + metric(4), field.y, (std::max)(0, field.width - metric(8)), field.height},
+				              foreground,
+				              platform::TextFormat::left | platform::TextFormat::verticalCenter |
+				                  platform::TextFormat::singleLine |
+				                  (folder ? platform::TextFormat::pathEllipsis : platform::TextFormat::endEllipsis));
+				if (!folder) break;
+				renderer.fill(control.hit, platform::calc_hande_color(hot, false, false));
+				renderer.outline(control.hit, enabled ? shadow : disabled);
+				renderer.text(L"Browse...", control.hit, foreground,
+				              platform::TextFormat::center | platform::TextFormat::verticalCenter |
+				                  platform::TextFormat::singleLine);
+				break;
+			}
 
 			case ControlKind::button:
 				renderer.fill(control.hit, platform::calc_hande_color(hot, control.id == pressedId_, false));
 				renderer.outline(control.hit, enabled ? shadow : disabled);
 				renderer.text(control.label, control.hit, foreground,
 				              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-				              platform::TextFormat::singleLine);
+				                  platform::TextFormat::singleLine);
 				break;
 
 			case ControlKind::link:
-				renderer.text(control.label, control.bounds,
-				              enabled ? highlight : disabled,
+				renderer.text(control.label, control.bounds, enabled ? highlight : disabled,
 				              platform::TextFormat::left | platform::TextFormat::verticalCenter |
-				              platform::TextFormat::singleLine);
+				                  platform::TextFormat::singleLine);
 				break;
 			}
-			if (enabled && control.id == focusedId_)
-				renderer.outline(control.hit, highlight);
+			if (enabled && control.id == focusedId_) renderer.outline(control.hit, highlight);
 		}
 	}
 
@@ -360,7 +310,7 @@ namespace iw::ui
 	bool ControlPanel::focusable(const Control& control)
 	{
 		return control.enabled && control.id != 0 && control.kind != ControlKind::heading &&
-			control.kind != ControlKind::label && control.kind != ControlKind::separator;
+		       control.kind != ControlKind::label && control.kind != ControlKind::separator;
 	}
 
 	void ControlPanel::notify_changed(const Control& control) const
@@ -385,11 +335,10 @@ namespace iw::ui
 	{
 		if (!interactive_) return false;
 		const auto current = std::ranges::find(controls_, focusedId_, &Control::id);
-		auto index = current == controls_.end()
-			? (reverse ? static_cast<std::ptrdiff_t>(controls_.size()) : -1)
-			: std::distance(controls_.begin(), current);
+		auto index = current == controls_.end() ? (reverse ? static_cast<std::ptrdiff_t>(controls_.size()) : -1)
+		                                        : std::distance(controls_.begin(), current);
 		for (index += reverse ? -1 : 1; index >= 0 && index < static_cast<std::ptrdiff_t>(controls_.size());
-			index += reverse ? -1 : 1)
+		     index += reverse ? -1 : 1)
 		{
 			if (focusable(controls_[static_cast<size_t>(index)]))
 				return focus(controls_[static_cast<size_t>(index)].id);
@@ -404,8 +353,8 @@ namespace iw::ui
 		auto* control = find(focusedId_);
 		if (!control || !focusable(*control)) return false;
 		if (control->kind == ControlKind::radio &&
-			(input.key == platform::KeyCode::left || input.key == platform::KeyCode::right ||
-				input.key == platform::KeyCode::up || input.key == platform::KeyCode::down))
+		    (input.key == platform::KeyCode::left || input.key == platform::KeyCode::right ||
+		     input.key == platform::KeyCode::up || input.key == platform::KeyCode::down))
 		{
 			if (!control->group) return true;
 			const bool reverse = input.key == platform::KeyCode::left || input.key == platform::KeyCode::up;
@@ -413,7 +362,7 @@ namespace iw::ui
 			for (size_t step = 1; step < controls_.size(); ++step)
 			{
 				const auto index = reverse ? (origin + controls_.size() - step) % controls_.size()
-					: (origin + step) % controls_.size();
+				                           : (origin + step) % controls_.size();
 				auto& next = controls_[index];
 				if (!next.enabled || next.kind != ControlKind::radio || next.group != control->group) continue;
 				focusedId_ = next.id;
@@ -428,8 +377,8 @@ namespace iw::ui
 		{
 			const int minimum = control->kind == ControlKind::choice ? 0 : control->minimum;
 			const int maximum = control->kind == ControlKind::choice
-				? (std::max)(0, static_cast<int>(control->choices.size()) - 1)
-				: (std::max)(minimum, control->maximum);
+			                        ? (std::max)(0, static_cast<int>(control->choices.size()) - 1)
+			                        : (std::max)(minimum, control->maximum);
 			const auto step = (std::max)(1LL, (static_cast<long long>(maximum) - minimum) / 10);
 			long long value = control->value;
 			switch (input.key)
@@ -444,8 +393,8 @@ namespace iw::ui
 			case platform::KeyCode::pageUp: value += control->kind == ControlKind::choice ? -step : step; break;
 			default: break;
 			}
-			const int next = static_cast<int>(std::clamp(value, static_cast<long long>(minimum),
-				static_cast<long long>(maximum)));
+			const int next = static_cast<int>(
+				std::clamp(value, static_cast<long long>(minimum), static_cast<long long>(maximum)));
 			if (next != control->value)
 			{
 				control->value = next;
@@ -453,9 +402,9 @@ namespace iw::ui
 				return true;
 			}
 			if (input.key == platform::KeyCode::left || input.key == platform::KeyCode::right ||
-				input.key == platform::KeyCode::up || input.key == platform::KeyCode::down ||
-				input.key == platform::KeyCode::home || input.key == platform::KeyCode::end ||
-				input.key == platform::KeyCode::pageUp || input.key == platform::KeyCode::pageDown)
+			    input.key == platform::KeyCode::up || input.key == platform::KeyCode::down ||
+			    input.key == platform::KeyCode::home || input.key == platform::KeyCode::end ||
+			    input.key == platform::KeyCode::pageUp || input.key == platform::KeyCode::pageDown)
 				return true;
 		}
 		if (input.key != platform::KeyCode::space && input.key != platform::KeyCode::enter) return false;
@@ -535,16 +484,16 @@ namespace iw::ui
 			return true;
 
 		case ControlKind::slider:
+		{
+			dragging_ = true;
+			const int value = slider_value_at(*control, point.x);
+			if (value != control->value)
 			{
-				dragging_ = true;
-				const int value = slider_value_at(*control, point.x);
-				if (value != control->value)
-				{
-					control->value = value;
-					notify_changed(*control);
-				}
-				return true;
+				control->value = value;
+				notify_changed(*control);
 			}
+			return true;
+		}
 
 		case ControlKind::choice:
 		case ControlKind::folder:
@@ -559,8 +508,7 @@ namespace iw::ui
 			return true;
 		}
 
-		default:
-			return false;
+		default: return false;
 		}
 	}
 

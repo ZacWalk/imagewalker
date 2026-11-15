@@ -8,7 +8,7 @@ function Get-DDRuntimeModules {
 }
 
 function Get-DDRuntimeFiles {
-    return @('core.ps1') + (Get-DDRuntimeModules) + @('dependencies.cmake', 'catalog.json', 'mcp/server.ps1', 'mcp/tools.ps1', 'mcp/invoke.ps1')
+    return @('core.ps1') + (Get-DDRuntimeModules) + @('dependencies.cmake', 'catalog.json', 'mcp/server.ps1', 'mcp/tools.ps1', 'mcp/invoke.ps1', 'LICENSE')
 }
 
 function Get-DDReleaseFiles {
@@ -541,13 +541,10 @@ function New-DDProject($Options, [string]$Root) {
 
 ## Dependency licence
 
-The executable statically links [libdesktop](https://github.com/ZacWalk/libdesktop)
-under LGPL-2.1-or-later. A binary distribution must include the library's notices
-and licence, its corresponding source (including modifications), and the application
-object files or source and build instructions needed to relink with a modified
-libdesktop. Permit modification for the recipient's own use and reverse engineering
-to debug those modifications (LGPL-2.1 section 6). A repository link alone is not a
-relinking package; verify a replacement-library build before distributing binaries.
+The executable includes [libdesktop](https://github.com/ZacWalk/libdesktop), which is
+licensed under the Mozilla Public License 2.0. Changes to libdesktop's own files stay
+under the MPL-2.0, and a binary distribution must tell its recipients where to get
+libdesktop's source code, including any changes made to it.
 
 '@)
     }

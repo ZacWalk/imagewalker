@@ -29,8 +29,7 @@ namespace iw::app
 		constexpr sizei operator*(int value) const { return {width * value, height * value}; }
 		sizei operator*(double value) const
 		{
-			return {static_cast<int>(std::lround(width * value)),
-			        static_cast<int>(std::lround(height * value))};
+			return {static_cast<int>(std::lround(width * value)), static_cast<int>(std::lround(height * value))};
 		}
 		constexpr sizei inflate(int value) const { return {width + value, height + value}; }
 		constexpr sizei flip() const { return {height, width}; }
@@ -61,13 +60,15 @@ namespace iw::app
 		int height{};
 
 		constexpr recti() = default;
-		constexpr recti(int xValue, int yValue, int w, int h)
-			: x(xValue), y(yValue), width(w), height(h) {}
+		constexpr recti(int xValue, int yValue, int w, int h) : x(xValue), y(yValue), width(w), height(h) {}
 		constexpr recti(sizei value) : width(value.width), height(value.height) {}
-		constexpr recti(pointi location, sizei extent)
-			: x(location.x), y(location.y), width(extent.width), height(extent.height) {}
-		constexpr recti(::core::recti value)
-			: x(value.left), y(value.top), width(value.width()), height(value.height()) {}
+		constexpr recti(pointi location, sizei extent) :
+			x(location.x), y(location.y), width(extent.width), height(extent.height)
+		{
+		}
+		constexpr recti(::core::recti value) : x(value.left), y(value.top), width(value.width()), height(value.height())
+		{
+		}
 		constexpr operator ::core::recti() const { return {x, y, x + width, y + height}; }
 
 		constexpr int right() const { return x + width; }
@@ -116,10 +117,7 @@ namespace iw::app
 		{
 			return {x + horizontal, y + vertical, width, height};
 		}
-		constexpr recti crop(recti value) const
-		{
-			return intersection(value);
-		}
+		constexpr recti crop(recti value) const { return intersection(value); }
 		constexpr recti& operator=(const recti&) = default;
 		constexpr bool operator==(const recti&) const = default;
 	};

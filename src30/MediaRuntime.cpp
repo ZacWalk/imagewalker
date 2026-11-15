@@ -21,14 +21,13 @@ namespace iw::media::native
 			if (!module)
 			{
 				const DWORD error = GetLastError();
-				platform::write_diagnostic(std::format(L"Optional media component {} is unavailable (Win32 {}).\n",
-					name, error));
+				platform::write_diagnostic(
+					std::format(L"Optional media component {} is unavailable (Win32 {}).\n", name, error));
 			}
 			return module;
 		}
 
-		template<class Function>
-		Function resolve(const HMODULE module, const char* name)
+		template <class Function> Function resolve(const HMODULE module, const char* name)
 		{
 			const auto address = GetProcAddress(module, name);
 			if (!address)
@@ -60,8 +59,6 @@ namespace iw::media::native
 		if (!platform_) return;
 		reader_.reset(load_system_module(directory, L"mfreadwrite.dll"));
 		if (!reader_) return;
-		play_.reset(load_system_module(directory, L"mfplay.dll"));
-		if (!play_) return;
 		startup = resolve<decltype(startup)>(platform_.get(), "MFStartup");
 		shutdown = resolve<decltype(shutdown)>(platform_.get(), "MFShutdown");
 		createAttributes = resolve<decltype(createAttributes)>(platform_.get(), "MFCreateAttributes");
@@ -69,7 +66,6 @@ namespace iw::media::native
 		createMediaType = resolve<decltype(createMediaType)>(platform_.get(), "MFCreateMediaType");
 		getStride = resolve<decltype(getStride)>(platform_.get(), "MFGetStrideForBitmapInfoHeader");
 		createSourceReader = resolve<decltype(createSourceReader)>(reader_.get(), "MFCreateSourceReaderFromByteStream");
-		createPlayer = resolve<decltype(createPlayer)>(play_.get(), "MFPCreateMediaPlayer");
 	}
 
 	Api::~Api() = default;
@@ -81,8 +77,8 @@ namespace iw::media::native
 
 	bool Api::available() const
 	{
-		return startup && shutdown && createAttributes && createFile && createMediaType &&
-			getStride && createSourceReader && createPlayer;
+		return startup && shutdown && createAttributes && createFile && createMediaType && getStride &&
+		       createSourceReader;
 	}
 
 	std::shared_ptr<const Api> acquire()
@@ -99,8 +95,15 @@ namespace iw::media::native
 	std::wstring_view unavailable_message()
 	{
 		return L"Audio/video support is unavailable because Windows media components could not be loaded. "
-			L"On Windows N, enable the Media Feature Pack in Windows Optional Features, then restart ImageWalker. "
-			L"Image browsing still works. No codec or feature is downloaded by ImageWalker.";
+			   L"On Windows N, enable the Media Feature Pack in Windows Optional Features, then restart ImageWalker. "
+			   L"Image browsing still works. No codec or feature is downloaded by ImageWalker.";
+	}
+
+	std::wstring playback_failure(const HRESULT result)
+	{
+		return std::format(L"Playback failed (0x{:08X}). Windows needs a supported, undamaged file and an "
+		                   L"installed codec. No codec is downloaded.",
+		                   static_cast<unsigned long>(result));
 	}
 
 	testing::ScopedUnavailableBackend::ScopedUnavailableBackend() : previous_(unavailableForThread)

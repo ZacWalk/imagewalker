@@ -12,8 +12,8 @@ namespace iw::platform
 		const auto path = iw::help::prepare_embedded();
 		if (path.empty())
 		{
-			show_error(L"The ImageWalker 3.0 help could not be written to the temporary folder.",
-				L"ImageWalker help", owner);
+			show_error(L"The ImageWalker 3.0 help could not be written to the temporary folder.", L"ImageWalker help",
+			           owner);
 			return false;
 		}
 		const auto topic = path + L"::/iw30.html";

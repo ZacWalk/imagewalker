@@ -18,8 +18,14 @@
 
 namespace iw
 {
-	namespace tests { class MainWindowAccess; }
-	namespace undo { class History; }
+	namespace tests
+	{
+		class MainWindowAccess;
+	}
+	namespace undo
+	{
+		class History;
+	}
 
 	class MainWindow final : public platform::FrameReactor, public std::enable_shared_from_this<MainWindow>
 	{
@@ -33,8 +39,18 @@ namespace iw
 	private:
 		friend class tests::MainWindowAccess;
 
-		enum class ViewMode { details, thumbnails, matrix };
-		enum class FocusTarget { none, canvas, tree };
+		enum class ViewMode
+		{
+			details,
+			thumbnails,
+			matrix
+		};
+		enum class FocusTarget
+		{
+			none,
+			canvas,
+			tree
+		};
 
 		// Mode-bar button ids. Browse is the way back out of every task.
 		enum ModeId
@@ -65,8 +81,7 @@ namespace iw
 		platform::MessageResult mouse(const platform::WindowFramePtr& frame, platform::MouseMessage message,
 		                              const platform::MouseInput& input) override;
 		void paint(const platform::WindowFramePtr& frame, platform::DrawContext& draw) override;
-		void size(const platform::WindowFramePtr& frame, app::sizei extent,
-		          platform::MeasureContext& measure) override;
+		void size(const platform::WindowFramePtr& frame, app::sizei extent, platform::MeasureContext& measure) override;
 		bool on_create();
 		void on_size();
 		void update_dpi(unsigned int dpi);

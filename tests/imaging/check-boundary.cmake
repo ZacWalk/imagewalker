@@ -87,6 +87,16 @@ foreach(path IN ITEMS
     endif()
 endforeach()
 
+# IW30 draws its folder tree, text fields and video through libdesktop; a native
+# control window or MFPlay's video window must not come back.
+file(GLOB iw30_sources "${source}/src30/*.cpp" "${source}/src30/*.h")
+foreach(path IN LISTS iw30_sources)
+    file(READ "${path}" text)
+    if(text MATCHES "CreateWindowEx|WC_TREEVIEW|L\"EDIT\"|mfplay\\.h|MFPCreateMediaPlayer")
+        message(FATAL_ERROR "IW30 embeds a native control: ${path}")
+    endif()
+endforeach()
+
 foreach(codec_source IN ITEMS
     "${source}/include/iw/legacy/detail/FileBmp.h"
     "${source}/include/iw/legacy/detail/FileGif.h"

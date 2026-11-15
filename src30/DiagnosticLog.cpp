@@ -15,15 +15,19 @@ namespace iw::diagnostics
 		::platform::file_ptr file;
 	};
 
-	LogFile::LogFile() : impl_(std::make_unique<Impl>()) {}
-	LogFile::~LogFile() { close(); }
+	LogFile::LogFile() : impl_(std::make_unique<Impl>())
+	{
+	}
+	LogFile::~LogFile()
+	{
+		close();
+	}
 
 	std::error_code LogFile::open(const std::filesystem::path& path)
 	{
 		std::lock_guard lock(impl_->mutex);
 		if (impl_->file) return std::make_error_code(std::errc::device_or_resource_busy);
-		impl_->file = ::platform::open_file(desktop::file_path(path),
-		                                    ::platform::file_open_mode::create_exclusive);
+		impl_->file = ::platform::open_file(desktop::file_path(path), ::platform::file_open_mode::create_exclusive);
 		if (!impl_->file) return std::make_error_code(std::errc::io_error);
 		return {};
 	}
@@ -37,17 +41,16 @@ namespace iw::diagnostics
 		const auto days = std::chrono::floor<std::chrono::days>(seconds);
 		const std::chrono::year_month_day date{days};
 		const std::chrono::hh_mm_ss time{seconds - days};
-		const auto millisecond = static_cast<int>(
-			milliseconds.time_since_epoch().count() % std::chrono::milliseconds::period::den);
-		bytes.insert(0, std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z ",
-			static_cast<int>(date.year()), static_cast<unsigned>(date.month()),
-			static_cast<unsigned>(date.day()), time.hours().count(), time.minutes().count(),
-			time.seconds().count(), millisecond));
+		const auto millisecond = static_cast<int>(milliseconds.time_since_epoch().count() %
+		                                          std::chrono::milliseconds::period::den);
+		bytes.insert(0, std::format("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z ", static_cast<int>(date.year()),
+		                            static_cast<unsigned>(date.month()), static_cast<unsigned>(date.day()),
+		                            time.hours().count(), time.minutes().count(), time.seconds().count(), millisecond));
 		if (bytes.empty() || bytes.back() != '\n') bytes.push_back('\n');
 		std::lock_guard lock(impl_->mutex);
 		if (!impl_->file) return std::make_error_code(std::errc::bad_file_descriptor);
 		if (impl_->file->write(reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size()) != bytes.size() ||
-			!impl_->file->flush())
+		    !impl_->file->flush())
 			return std::make_error_code(std::errc::io_error);
 		return {};
 	}

@@ -26,7 +26,10 @@ namespace iw::undo
 		std::once_flag liveHistoryInitialization;
 		std::unique_ptr<History> liveHistory;
 
-		[[noreturn]] void fail(const char* message) { throw std::runtime_error(message); }
+		[[noreturn]] void fail(const char* message)
+		{
+			throw std::runtime_error(message);
+		}
 
 		std::wstring explain(const std::exception& error)
 		{
@@ -45,7 +48,9 @@ namespace iw::undo
 		struct Less
 		{
 			bool operator()(const std::filesystem::path& a, const std::filesystem::path& b) const
-			{ return paths::icompare(a.native(), b.native()) < 0; }
+			{
+				return paths::icompare(a.native(), b.native()) < 0;
+			}
 		};
 
 		struct Member
@@ -67,7 +72,7 @@ namespace iw::undo
 			if (text.size() >= 8 && paths::iequals(std::wstring_view(text).substr(0, 8), LR"(\\?\UNC\)"))
 				text = LR"(\\)" + text.substr(8);
 			else if (text.starts_with(LR"(\\?\)") && text.size() >= 7 && text[5] == L':' && text[6] == L'\\' &&
-				((text[4] >= L'A' && text[4] <= L'Z') || (text[4] >= L'a' && text[4] <= L'z')))
+			         ((text[4] >= L'A' && text[4] <= L'Z') || (text[4] >= L'a' && text[4] <= L'z')))
 				text.erase(0, 4);
 			else if (text.starts_with(LR"(\\?\)") || text.starts_with(LR"(\\.\)"))
 				fail("Undo requires a drive or UNC file path, not a device namespace.");
@@ -100,8 +105,7 @@ namespace iw::undo
 
 		std::array<unsigned char, 32> digest_file(const std::filesystem::path& path)
 		{
-			const auto lock = ::platform::open_file_lock(desktop::file_path(path),
-				::platform::file_lock_mode::read);
+			const auto lock = ::platform::open_file_lock(desktop::file_path(path), ::platform::file_lock_mode::read);
 			const auto digest = ::platform::file_sha256(lock);
 			if (!digest) fail("Cannot verify file content.");
 			return *digest;
@@ -116,8 +120,7 @@ namespace iw::undo
 			Fingerprint result{{{}, *root, {}}};
 			if (!root->exists) return result;
 			result.front().actualName = logicalRoot.filename().wstring();
-			if (const auto parent = logicalRoot.parent_path();
-			    !parent.empty())
+			if (const auto parent = logicalRoot.parent_path(); !parent.empty())
 			{
 				const auto entries = ::platform::iterate_file_items(desktop::folder_path(parent), true);
 				const auto expectedName = logicalRoot.filename().wstring();
@@ -151,13 +154,13 @@ namespace iw::undo
 					if (!state || !state->exists) fail("A protected folder changed while it was inspected.");
 					const auto relative = child.lexically_relative(logicalRoot);
 					if (!paths::contains(logicalRoot, child) || relative.empty() || relative.is_absolute() ||
-						*relative.begin() == L"..")
+					    *relative.begin() == L"..")
 						fail("A protected folder member is outside its recorded root.");
-					result.push_back({relative, *state, state->directory ?
-						std::array<unsigned char, 32>{} : digest_file(child)});
+					result.push_back(
+						{relative, *state, state->directory ? std::array<unsigned char, 32>{} : digest_file(child)});
 				}
-				std::sort(result.begin() + 1, result.end(), [](const Member& a, const Member& b)
-				{ return Less{}(a.relative, b.relative); });
+				std::sort(result.begin() + 1, result.end(),
+				          [](const Member& a, const Member& b) { return Less{}(a.relative, b.relative); });
 			}
 			if (!files::matches_snapshot(logicalRoot, *root)) fail("A protected path changed while it was inspected.");
 			return result;
@@ -168,9 +171,9 @@ namespace iw::undo
 			if (a.size() != b.size()) return false;
 			for (size_t i = 0; i < a.size(); ++i)
 				if (a[i].relative != b[i].relative || a[i].snapshot.exists != b[i].snapshot.exists ||
-					a[i].snapshot.directory != b[i].snapshot.directory ||
-					a[i].snapshot.reparse != b[i].snapshot.reparse ||
-					a[i].snapshot.size != b[i].snapshot.size || a[i].digest != b[i].digest)
+				    a[i].snapshot.directory != b[i].snapshot.directory ||
+				    a[i].snapshot.reparse != b[i].snapshot.reparse || a[i].snapshot.size != b[i].snapshot.size ||
+				    a[i].digest != b[i].digest)
 					return false;
 			return true;
 		}
@@ -178,20 +181,18 @@ namespace iw::undo
 		void flush_file(const std::filesystem::path& path)
 		{
 			const auto file = ::platform::open_file(desktop::file_path(path), ::platform::file_open_mode::write);
-			if (!file || !file->flush())
-				fail("Cannot flush a recovery copy to disk; the operation was refused.");
+			if (!file || !file->flush()) fail("Cannot flush a recovery copy to disk; the operation was refused.");
 		}
 
 		void copy_tree(const std::filesystem::path& source, const std::filesystem::path& destination,
-			const Fingerprint& expected)
+		               const Fingerprint& expected)
 		{
 			const auto copy = [&](const std::filesystem::path& from, const std::filesystem::path& to)
 			{
 				if (const auto error = files::copy_file_to(from, to, false))
 					throw std::system_error(error, "Cannot secure an undo copy");
 				// A read-only source may produce a read-only copy. Only our newly created copy changes.
-				if (const auto writable = ::platform::make_file_writable(desktop::file_path(to));
-				    writable.failed())
+				if (const auto writable = ::platform::make_file_writable(desktop::file_path(to)); writable.failed())
 					fail("Cannot prepare the recovery copy for durable flushing.");
 				flush_file(to);
 			};
@@ -205,9 +206,9 @@ namespace iw::undo
 					const auto target = destination / expected[i].relative;
 					if (expected[i].snapshot.directory)
 					{
-							if (const auto created = ::platform::create_folder(desktop::folder_path(target));
-							    created.failed())
-								fail("A folder appeared in the destination during recovery.");
+						if (const auto created = ::platform::create_folder(desktop::folder_path(target));
+						    created.failed())
+							fail("A folder appeared in the destination during recovery.");
 					}
 					else copy(source / expected[i].relative, target);
 				}
@@ -221,8 +222,9 @@ namespace iw::undo
 			for (auto member = original.rbegin(); member != original.rend(); ++member)
 			{
 				const auto target = member->relative.empty() ? path : path / member->relative;
-				if (const auto result = ::platform::set_file_attributes(
-					    desktop::file_path(target), member->snapshot.modified, member->snapshot.readOnly);
+				if (const auto result = ::platform::set_file_attributes(desktop::file_path(target),
+				                                                        member->snapshot.modified,
+				                                                        member->snapshot.readOnly);
 				    result.failed())
 					fail("Content was restored, but the original attributes could not be restored.");
 			}
@@ -233,13 +235,14 @@ namespace iw::undo
 			const auto path = folder / (L"record-" + unique_id() + L".txt");
 			const auto file = ::platform::open_file(desktop::file_path(path), ::platform::file_open_mode::create_new);
 			if (!file) fail("Cannot create a durable undo recovery record.");
-			const std::wstring content = L"\ufeffImageWalker 3.0 recovery record (UTF-16)\r\n"
+			const std::wstring content =
+				L"\ufeffImageWalker 3.0 recovery record (UTF-16)\r\n"
 				L"Automatic Undo is available only in the creating session. Never replay this record automatically.\r\n"
-				L"Recovery copies are retained without automatic deletion. Check current files before manual recovery.\r\n" + text;
+				L"Recovery copies are retained without automatic deletion. Check current files before manual recovery.\r\n" +
+				text;
 			const auto bytes = content.size() * sizeof(wchar_t);
 			if (bytes > (std::numeric_limits<std::uint64_t>::max)()) fail("The recovery record is too large.");
-			if (file->write(reinterpret_cast<const std::uint8_t*>(content.data()), bytes) != bytes ||
-				!file->flush())
+			if (file->write(reinterpret_cast<const std::uint8_t*>(content.data()), bytes) != bytes || !file->flush())
 				fail("Cannot flush the undo recovery record; no new mutation is permitted.");
 		}
 
@@ -263,8 +266,7 @@ namespace iw::undo
 		};
 
 		// The caller has already established containment using Windows path comparison.
-		std::filesystem::path relative_below(const std::filesystem::path& parent,
-			const std::filesystem::path& child)
+		std::filesystem::path relative_below(const std::filesystem::path& parent, const std::filesystem::path& child)
 		{
 			auto component = child.begin();
 			for (auto prefix = parent.begin(); prefix != parent.end(); ++prefix) ++component;
@@ -287,7 +289,8 @@ namespace iw::undo
 				for (const auto& member : tree)
 				{
 					if (paths::equal(root->relative, member.relative) ||
-						!paths::contains(root->relative, member.relative)) continue;
+					    !paths::contains(root->relative, member.relative))
+						continue;
 					auto child = member;
 					child.relative = relative_below(root->relative, member.relative);
 					result.push_back(std::move(child));
@@ -311,8 +314,9 @@ namespace iw::undo
 		{
 			if (earlier.restored) return;
 			const bool exact = paths::equal(earlier.path, restoredSlot.path);
-			if (!exact && (!restoredSlot.before.front().snapshot.directory ||
-				!paths::contains(restoredSlot.path, earlier.path))) return;
+			if (!exact &&
+			    (!restoredSlot.before.front().snapshot.directory || !paths::contains(restoredSlot.path, earlier.path)))
+				return;
 			const auto relative = exact ? std::filesystem::path{} : relative_below(restoredSlot.path, earlier.path);
 			const auto originalChild = subtree(restoredSlot.before, relative);
 			auto restoredChild = subtree(restored, relative);
@@ -330,22 +334,23 @@ namespace iw::undo
 					node->snapshot.size = 0;
 				}
 				if (expectedNode != originalNode ||
-					!verified_restoration(Fingerprint{originalNode}, Fingerprint{restoredNode})) return;
+				    !verified_restoration(Fingerprint{originalNode}, Fingerprint{restoredNode}))
+					return;
 				restoredChild.resize(1);
 			}
 			else if (earlier.after != originalChild || !verified_restoration(originalChild, restoredChild)) return;
 
-			if (paths::equal(earlier.parent, restoredSlot.path) ||
-				paths::contains(restoredSlot.path, earlier.parent))
+			if (paths::equal(earlier.parent, restoredSlot.path) || paths::contains(restoredSlot.path, earlier.parent))
 			{
 				const auto parentRelative = relative_below(restoredSlot.path, earlier.parent);
 				const auto oldParent = subtree(restoredSlot.before, parentRelative);
 				const auto newParent = subtree(restored, parentRelative);
 				const auto& originalParent = oldParent.front().snapshot;
 				if (!originalParent.exists || !originalParent.directory ||
-					earlier.parentState.volume != originalParent.volume ||
-					earlier.parentState.identity != originalParent.identity ||
-					!verified_restoration(oldParent, newParent)) return;
+				    earlier.parentState.volume != originalParent.volume ||
+				    earlier.parentState.identity != originalParent.identity ||
+				    !verified_restoration(oldParent, newParent))
+					return;
 				earlier.parentState = newParent.front().snapshot;
 			}
 			earlier.after = std::move(restoredChild);
@@ -354,9 +359,9 @@ namespace iw::undo
 		std::wstring slot_text(const Slot& slot)
 		{
 			return L"Path: " + slot.path.wstring() + L"\r\nOriginal: " +
-				(slot.backup.empty() ? L"(absent)" : slot.backup.wstring()) +
-				(slot.directoryOnly ? L"\r\nScope: directory node only; children are recorded independently.\r\n" :
-					L"\r\nScope: complete item.\r\n");
+			       (slot.backup.empty() ? L"(absent)" : slot.backup.wstring()) +
+			       (slot.directoryOnly ? L"\r\nScope: directory node only; children are recorded independently.\r\n"
+			                           : L"\r\nScope: complete item.\r\n");
 		}
 
 		std::wstring state_text(const Fingerprint& state)
@@ -366,9 +371,9 @@ namespace iw::undo
 			for (const auto& member : state)
 			{
 				text += std::format(L"  {} exists={} directory={} volume={} identity={} size={} modified={} SHA256=",
-					member.relative.empty() ? L"(root)" : member.relative.wstring(),
-					member.snapshot.exists, member.snapshot.directory, member.snapshot.volume,
-					member.snapshot.identity, member.snapshot.size, member.snapshot.modified);
+				                    member.relative.empty() ? L"(root)" : member.relative.wstring(),
+				                    member.snapshot.exists, member.snapshot.directory, member.snapshot.volume,
+				                    member.snapshot.identity, member.snapshot.size, member.snapshot.modified);
 				for (const auto byte : member.digest)
 				{
 					text += hex[byte >> 4];
@@ -384,8 +389,8 @@ namespace iw::undo
 		{
 			if (!handle) fail("Cannot move the verified completed file to recovery storage.");
 			const auto result = ::platform::move_file(handle, desktop::file_path(destination), true);
-			if (result.failed()) throw std::runtime_error(
-				"Cannot move the verified completed file to recovery storage");
+			if (result.failed())
+				throw std::runtime_error("Cannot move the verified completed file to recovery storage");
 		}
 
 		void remove_empty_directory(const std::filesystem::path& path, const files::FileSnapshot& expected)
@@ -400,7 +405,7 @@ namespace iw::undo
 			no_links(path);
 			const auto current = files::snapshot_file(path);
 			if (!current || !current->exists || !current->directory || current->volume != expected.volume ||
-				current->identity != expected.identity || current->readOnly != expected.readOnly)
+			    current->identity != expected.identity || current->readOnly != expected.readOnly)
 				fail("The directory changed before removal; it was retained.");
 			if (const auto removed = ::platform::delete_file(directory); removed.failed())
 			{
@@ -408,7 +413,7 @@ namespace iw::undo
 				if (!removed.error_message.empty()) detail += ": " + removed.error_message;
 				if (removed.error)
 					detail += std::format(" [{}:{}]", removed.error.category().name(), removed.error.value());
-				throw std::runtime_error(std::move(detail));
+				throw std::runtime_error(detail);
 			}
 		}
 	}
@@ -431,18 +436,22 @@ namespace iw::undo
 		bool started{};
 	};
 
-	History::History(std::filesystem::path root)
-		: state_(std::make_shared<State>(absolute_path(root))) {}
+	History::History(const std::filesystem::path& root) : state_(std::make_shared<State>(absolute_path(root)))
+	{
+	}
 	History::~History() = default;
-	const std::filesystem::path& History::root() const { return state_->root; }
+	const std::filesystem::path& History::root() const
+	{
+		return state_->root;
+	}
 
 	std::shared_ptr<Batch> History::begin(std::wstring description)
 	{
 		return std::shared_ptr<Batch>(new Batch(state_, std::move(description)));
 	}
 
-	Batch::Batch(std::shared_ptr<History::State> historyState, std::wstring description)
-		: state_(std::make_unique<State>())
+	Batch::Batch(std::shared_ptr<History::State> historyState, std::wstring description) :
+		state_(std::make_unique<State>())
 	{
 		state_->history = std::move(historyState);
 		state_->entry->description = std::move(description);
@@ -457,7 +466,10 @@ namespace iw::undo
 		}
 	}
 
-	std::filesystem::path Batch::recovery_folder() const { return state_->entry->folder; }
+	std::filesystem::path Batch::recovery_folder() const
+	{
+		return state_->entry->folder;
+	}
 
 	bool Batch::protect(const std::vector<std::filesystem::path>& targets, std::wstring& error)
 	{
@@ -487,8 +499,8 @@ namespace iw::undo
 		}
 	}
 
-	bool Batch::protect_impl(const std::vector<std::filesystem::path>& targets,
-		const bool directoryOnly, std::wstring& error)
+	bool Batch::protect_impl(const std::vector<std::filesystem::path>& targets, const bool directoryOnly,
+	                         std::wstring& error)
 	{
 		try
 		{
@@ -516,7 +528,7 @@ namespace iw::undo
 					continue;
 				}
 				if (paths::equal(path, state_->history->root) || paths::contains(path, state_->history->root) ||
-					paths::contains(state_->history->root, path))
+				    paths::contains(state_->history->root, path))
 					fail("An operation cannot change the application undo storage.");
 				Slot slot;
 				slot.path = path;
@@ -527,13 +539,13 @@ namespace iw::undo
 				slot.after = slot.before;
 				if (slot.before.front().snapshot.exists)
 				{
-					slot.backup = state_->entry->folder /
-						(std::to_wstring(state_->entry->slots.size()) + L"-original");
+					slot.backup = state_->entry->folder / (std::to_wstring(state_->entry->slots.size()) + L"-original");
 					copy_tree(path, slot.backup, slot.before);
-					if (fingerprint(path, !directoryOnly) != slot.before) fail("An original changed while its recovery copy was secured.");
+					if (fingerprint(path, !directoryOnly) != slot.before)
+						fail("An original changed while its recovery copy was secured.");
 				}
-				write_record(state_->entry->folder, L"Prepared before mutation\r\n" + slot_text(slot) +
-					state_text(slot.before));
+				write_record(state_->entry->folder,
+				             L"Prepared before mutation\r\n" + slot_text(slot) + state_text(slot.before));
 				state_->entry->slots.push_back(std::move(slot));
 				state_->lookup.emplace(path, state_->entry->slots.size() - 1);
 			}
@@ -546,8 +558,8 @@ namespace iw::undo
 		}
 	}
 
-	bool Batch::validate(const std::vector<std::filesystem::path>& pathsToCheck,
-		const bool completedState, std::wstring& error) const
+	bool Batch::validate(const std::vector<std::filesystem::path>& pathsToCheck, const bool completedState,
+	                     std::wstring& error) const
 	{
 		try
 		{
@@ -561,14 +573,18 @@ namespace iw::undo
 				if (completedState)
 				{
 					const auto parent = files::snapshot_file(slot.parent);
-					if (!parent || !parent->exists || !parent->directory ||
-						parent->volume != slot.parentState.volume || parent->identity != slot.parentState.identity)
+					if (!parent || !parent->exists || !parent->directory || parent->volume != slot.parentState.volume ||
+					    parent->identity != slot.parentState.identity)
 						fail("A completed file's parent changed; the operation was refused.");
 				}
 			}
 			return true;
 		}
-		catch (const std::exception& failure) { error = explain(failure); return false; }
+		catch (const std::exception& failure)
+		{
+			error = explain(failure);
+			return false;
+		}
 	}
 
 	bool Batch::validate_before(const std::vector<std::filesystem::path>& pathsToCheck, std::wstring& error) const
@@ -587,7 +603,7 @@ namespace iw::undo
 	}
 
 	bool Batch::completed(const std::vector<std::filesystem::path>& targets,
-		const std::vector<std::filesystem::path>& mutatedPaths, std::wstring& error)
+	                      const std::vector<std::filesystem::path>& mutatedPaths, std::wstring& error)
 	{
 		try
 		{
@@ -607,8 +623,8 @@ namespace iw::undo
 				const auto index = index_for(target);
 				if (std::ranges::find(mutated, index) == mutated.end()) mutated.push_back(index);
 			}
-			if (group.size() > 1 && std::ranges::any_of(group,
-				[&](const size_t index) { return state_->entry->slots[index].directoryOnly; }))
+			if (group.size() > 1 && std::ranges::any_of(group, [&](const size_t index)
+			{ return state_->entry->slots[index].directoryOnly; }))
 				fail("Directory nodes must be completed separately from file bundles.");
 			// A staged source is a connectivity path, not necessarily a pathname changed by this
 			// row. Refreshing it would bless an external edit to a previous row's output.
@@ -625,14 +641,15 @@ namespace iw::undo
 					slot.parent = slot.parent.parent_path();
 					parent = files::snapshot_file(slot.parent);
 				}
-				if (!parent || !parent->exists || !parent->directory) fail("Cannot verify a completed file's parent folder.");
+				if (!parent || !parent->exists || !parent->directory)
+					fail("Cannot verify a completed file's parent folder.");
 				slot.parentState = *parent;
 			}
 			std::wstring record = L"Bundle completed; current-session Undo candidate.\r\n";
 			for (const auto index : group)
-				record += (std::ranges::find(mutated, index) == mutated.end() ?
-					L"Preserved prior expected state\r\n" : L"Recorded mutation\r\n") +
-					slot_text(state_->entry->slots[index]) + state_text(state_->entry->slots[index].after);
+				record += (std::ranges::find(mutated, index) == mutated.end() ? L"Preserved prior expected state\r\n"
+				                                                              : L"Recorded mutation\r\n") +
+				          slot_text(state_->entry->slots[index]) + state_text(state_->entry->slots[index].after);
 			if (!group.empty()) state_->entry->groups.push_back(std::move(group));
 			write_record(state_->entry->folder, record);
 			return true;
@@ -640,7 +657,7 @@ namespace iw::undo
 		catch (const std::exception& failure)
 		{
 			error = L"The operation completed, but Undo recording failed: " + explain(failure) +
-				L" Recovery copies remain in " + state_->entry->folder.wstring();
+			        L" Recovery copies remain in " + state_->entry->folder.wstring();
 			return false;
 		}
 	}
@@ -661,7 +678,11 @@ namespace iw::undo
 				{
 					const bool shared = std::ranges::any_of(entry.groups[j], [&](const size_t index)
 					{ return std::ranges::find(entry.groups[i], index) != entry.groups[i].end(); });
-					if (!shared) { ++j; continue; }
+					if (!shared)
+					{
+						++j;
+						continue;
+					}
 					for (const auto index : entry.groups[j])
 						if (std::ranges::find(entry.groups[i], index) == entry.groups[i].end())
 							entry.groups[i].push_back(index);
@@ -694,22 +715,23 @@ namespace iw::undo
 		}
 		catch (const std::exception& failure)
 		{
-			error = L"Finishing undo history failed: " + explain(failure) +
-				L" Recovery copies remain in " + entry.folder.wstring();
+			error = L"Finishing undo history failed: " + explain(failure) + L" Recovery copies remain in " +
+			        entry.folder.wstring();
 			return false;
 		}
 	}
 
 	TransferResult transfer_file(Batch& batch, const std::filesystem::path& source,
-		const std::filesystem::path& destination, const bool move, const bool overwrite,
-		const std::function<bool()>& beforeCommit, const std::function<bool()>& beforeSourceDelete)
+	                             const std::filesystem::path& destination, const bool move, const bool overwrite,
+	                             const std::function<bool()>& beforeCommit,
+	                             const std::function<bool()>& beforeSourceDelete)
 	{
 		TransferResult result;
 		try
 		{
-			const std::vector<std::filesystem::path> protectedPaths = move ?
-				std::vector<std::filesystem::path>{source, destination} :
-				std::vector<std::filesystem::path>{destination};
+			const std::vector<std::filesystem::path> protectedPaths =
+				move ? std::vector<std::filesystem::path>{source, destination}
+					 : std::vector<std::filesystem::path>{destination};
 			if (!batch.protect(protectedPaths, result.detail))
 			{
 				result.error = std::make_error_code(std::errc::operation_not_permitted);
@@ -719,7 +741,7 @@ namespace iw::undo
 			const auto sourceParent = files::snapshot_file(source.parent_path());
 			const auto destinationParent = files::snapshot_file(destination.parent_path());
 			if (!original || !original->exists || original->directory || !sourceParent || !destinationParent ||
-				!sourceParent->exists || !destinationParent->exists)
+			    !sourceParent->exists || !destinationParent->exists)
 				fail("A transfer file or parent cannot be inspected.");
 			const bool copyThenDelete = move && (beforeSourceDelete || original->volume != destinationParent->volume);
 			const auto validate = [&]
@@ -727,22 +749,21 @@ namespace iw::undo
 				const auto fromParent = files::snapshot_file(source.parent_path());
 				const auto toParent = files::snapshot_file(destination.parent_path());
 				if (!fromParent || !toParent || fromParent->volume != sourceParent->volume ||
-					fromParent->identity != sourceParent->identity || toParent->volume != destinationParent->volume ||
-					toParent->identity != destinationParent->identity || !files::matches_snapshot(source, *original))
+				    fromParent->identity != sourceParent->identity || toParent->volume != destinationParent->volume ||
+				    toParent->identity != destinationParent->identity || !files::matches_snapshot(source, *original))
 				{
 					result.detail = L"A transfer source or parent changed before commit.";
 					return false;
 				}
 				return (!beforeCommit || beforeCommit()) && batch.validate_before(protectedPaths, result.detail);
 			};
-			result.error = move && !copyThenDelete ?
-				files::move_file_to(source, destination, overwrite, validate) :
-				files::copy_file_to(source, destination, overwrite, validate);
+			result.error = move && !copyThenDelete ? files::move_file_to(source, destination, overwrite, validate)
+			                                       : files::copy_file_to(source, destination, overwrite, validate);
 			if (result.error) return result;
 			result.destinationCompleted = true;
 			result.sourceRemoved = move && !copyThenDelete;
-			const auto completed = result.sourceRemoved ? protectedPaths :
-				std::vector<std::filesystem::path>{destination};
+			const auto completed = result.sourceRemoved ? protectedPaths
+			                                            : std::vector<std::filesystem::path>{destination};
 			if (!batch.completed(completed, result.detail))
 			{
 				result.error = std::make_error_code(std::errc::io_error);
@@ -760,9 +781,10 @@ namespace iw::undo
 					const auto file = ::platform::open_file_lock(desktop::file_path(source));
 					const auto parent = files::snapshot_file(source.parent_path());
 					if (!file || !parent || parent->volume != sourceParent->volume ||
-						parent->identity != sourceParent->identity || !batch.validate_before({source}, result.detail) ||
-						!batch.validate_completed({destination}, result.detail))
-						fail("The destination was copied, but the source or completed destination changed before source removal.");
+					    parent->identity != sourceParent->identity || !batch.validate_before({source}, result.detail) ||
+					    !batch.validate_completed({destination}, result.detail))
+						fail(
+							"The destination was copied, but the source or completed destination changed before source removal.");
 					if (const auto removed = ::platform::delete_file(file); removed.failed())
 						fail("The destination was copied, but the source could not be removed");
 				}
@@ -802,7 +824,8 @@ namespace iw::undo
 		Report report;
 		if (state_->active || state_->entries.empty())
 		{
-			report.details.push_back(state_->active ? L"A file operation is still active." : L"No current-session operation can be undone.");
+			report.details.push_back(state_->active ? L"A file operation is still active."
+			                                        : L"No current-session operation can be undone.");
 			return report;
 		}
 		auto& entry = *state_->entries.back();
@@ -822,10 +845,11 @@ namespace iw::undo
 					}
 					const auto parent = files::snapshot_file(node.parent);
 					if (current != node.after || !parent || !parent->exists || !parent->directory ||
-						parent->volume != node.parentState.volume || parent->identity != node.parentState.identity)
+					    parent->volume != node.parentState.volume || parent->identity != node.parentState.identity)
 					{
 						++report.conflicts;
-						report.details.push_back(L"Directory not restored: its identity or parent changed: " + node.path.wstring());
+						report.details.push_back(L"Directory not restored: its identity or parent changed: " +
+						                         node.path.wstring());
 						continue;
 					}
 					write_record(entry.folder, L"Undo directory-node intent\r\n" + slot_text(node));
@@ -840,8 +864,8 @@ namespace iw::undo
 						const auto rebaseParent = [&](Slot& pending)
 						{
 							if (!pending.restored && paths::equal(pending.parent, node.path) &&
-								pending.parentState.volume == node.before.front().snapshot.volume &&
-								pending.parentState.identity == node.before.front().snapshot.identity)
+							    pending.parentState.volume == node.before.front().snapshot.volume &&
+							    pending.parentState.identity == node.before.front().snapshot.identity)
 								pending.parentState = restored;
 						};
 						for (auto& pending : entry.slots) rebaseParent(pending);
@@ -875,12 +899,12 @@ namespace iw::undo
 					const auto& slot = entry.slots[index];
 					if (slot.restored) continue;
 					const auto parent = files::snapshot_file(slot.parent);
-					if (!parent || !parent->exists || !parent->directory ||
-						parent->volume != slot.parentState.volume || parent->identity != slot.parentState.identity ||
-						fingerprint(slot.path) != slot.after)
+					if (!parent || !parent->exists || !parent->directory || parent->volume != slot.parentState.volume ||
+					    parent->identity != slot.parentState.identity || fingerprint(slot.path) != slot.after)
 					{
 						conflict = true;
-						report.details.push_back(L"Not restored: the completed file or destination changed: " + slot.path.wstring());
+						report.details.push_back(L"Not restored: the completed file or destination changed: " +
+						                         slot.path.wstring());
 						break;
 					}
 					if (!slot.backup.empty() && !same_content(slot.before, fingerprint(slot.backup)))
@@ -900,16 +924,20 @@ namespace iw::undo
 						for (size_t child = 1; child < slot.after.size(); ++child)
 						{
 							if (slot.after[child].snapshot.directory) continue;
-							contentLocks.push_back(::platform::open_file_lock(
-								desktop::file_path(slot.path / slot.after[child].relative),
-								::platform::file_lock_mode::read));
-							if (!contentLocks.back())
-								fail("Cannot lock a completed folder's contents against edits.");
+							contentLocks.push_back(
+								::platform::open_file_lock(desktop::file_path(slot.path / slot.after[child].relative),
+							                               ::platform::file_lock_mode::read));
+							if (!contentLocks.back()) fail("Cannot lock a completed folder's contents against edits.");
 						}
-						if (fingerprint(slot.path) != slot.after) fail("A completed file changed while Undo acquired its lock.");
+						if (fingerprint(slot.path) != slot.after)
+							fail("A completed file changed while Undo acquired its lock.");
 					}
 				}
-				if (conflict) { ++report.conflicts; continue; }
+				if (conflict)
+				{
+					++report.conflicts;
+					continue;
+				}
 				size_t held = 0;
 				for (const auto index : group)
 				{
@@ -919,11 +947,12 @@ namespace iw::undo
 					if (slot.after.front().snapshot.exists)
 					{
 						const bool sameVolume = !outputCopies.contains(index);
-						const auto output = sameVolume ? entry.folder / (L"completed-" + unique_id()) : outputCopies.at(index);
+						const auto output = sameVolume ? entry.folder / (L"completed-" + unique_id())
+						                               : outputCopies.at(index);
 						retained = sameVolume ? output : slot.path.parent_path() / (L".iw30-undo-" + unique_id());
 						write_record(entry.folder, L"Undo intent\r\n" + slot_text(slot) +
-							L"Retained completed output: " + output.wstring() +
-							L"\r\nRetained staging path: " + retained.wstring() + L"\r\n");
+						                               L"Retained completed output: " + output.wstring() +
+						                               L"\r\nRetained staging path: " + retained.wstring() + L"\r\n");
 						if (slot.after.front().snapshot.directory)
 						{
 							// Windows refuses directory renames while descendants are open, even
@@ -958,15 +987,14 @@ namespace iw::undo
 						for (size_t previous = 0; previous + 1 < state_->entries.size(); ++previous)
 							for (auto& earlier : state_->entries[previous]->slots)
 								rebase_restored_slot(earlier, slot, restored);
-						write_record(entry.folder, L"Restored\r\n" + slot_text(slot) +
-							L"Retained completed output: " + retained.wstring() + L"\r\n");
+						write_record(entry.folder, L"Restored\r\n" + slot_text(slot) + L"Retained completed output: " +
+						                               retained.wstring() + L"\r\n");
 					}
 					catch (const std::exception&)
 					{
 						// A competing creation always wins. Do not remove it or overwrite it in rollback.
 						const auto now = files::snapshot_file(slot.path);
-						if (!retained.empty() && now && !now->exists)
-							rename_locked(locks[held - 1], slot.path);
+						if (!retained.empty() && now && !now->exists) rename_locked(locks[held - 1], slot.path);
 						throw;
 					}
 				}
@@ -975,7 +1003,8 @@ namespace iw::undo
 			{
 				++report.failed;
 				report.details.push_back(L"Undo stopped this bundle: " + explain(failure) +
-					L" Original and completed-output recovery copies are retained; see " + entry.folder.wstring());
+				                         L" Original and completed-output recovery copies are retained; see " +
+				                         entry.folder.wstring());
 			}
 		}
 		const bool done = std::ranges::all_of(entry.groups, [&](const auto& group)
@@ -986,7 +1015,8 @@ namespace iw::undo
 
 	std::wstring Report::summary() const
 	{
-		auto text = std::format(L"{} paths restored, {} conflicting bundles, {} failed bundles.", restored, conflicts, failed);
+		auto text = std::format(L"{} paths restored, {} conflicting bundles, {} failed bundles.", restored, conflicts,
+		                        failed);
 		for (const auto& detail : details) text += L"\r\n" + detail;
 		return text;
 	}
@@ -1010,8 +1040,8 @@ namespace iw::undo
 		return *value;
 	}
 
-	ScopedHistory::ScopedHistory(History& value) noexcept
-		: previous_(configuredHistory.exchange(&value)), installed_(&value)
+	ScopedHistory::ScopedHistory(History& value) noexcept :
+		previous_(configuredHistory.exchange(&value)), installed_(&value)
 	{
 	}
 

@@ -3,10 +3,11 @@
 
 #include "MainWindow.h"
 
+#include <libdesktop/ui/test_support.h>
+
 namespace iw::tests
 {
-	class RecordingFrame final : public platform::WindowFrame,
-		public std::enable_shared_from_this<RecordingFrame>
+	class RecordingFrame final : public platform::WindowFrame, public std::enable_shared_from_this<RecordingFrame>
 	{
 	public:
 		platform::FrameReactorPtr reactor;
@@ -26,7 +27,7 @@ namespace iw::tests
 		platform::NativeHandle native_handle() const override { return {}; }
 		void set_reactor(platform::FrameReactorPtr value) override { reactor = std::move(value); }
 		platform::WindowFramePtr create_child(platform::FrameReactorPtr value,
-			const platform::WindowOptions& options) override
+		                                      const platform::WindowOptions& options) override
 		{
 			if (refuseChild) return {};
 			auto child = std::make_shared<RecordingFrame>();
@@ -53,7 +54,11 @@ namespace iw::tests
 		app::pointi screen_to_client(app::pointi value) const override { return value; }
 		app::pointi client_to_screen(app::pointi value) const override { return value; }
 		void set_title(std::wstring_view value) override { title = value; }
-		void set_fullscreen(bool value) override { fullscreen = value; ++fullscreenChanges; }
+		void set_fullscreen(bool value) override
+		{
+			fullscreen = value;
+			++fullscreenChanges;
+		}
 		void set_maximized(bool value) override { maximized = value; }
 		platform::WindowPlacement placement() const override { return {bounds, maximized}; }
 		void set_accelerators(std::span<const platform::CommandAccelerator>) override {}
@@ -79,7 +84,6 @@ namespace iw::tests
 		}
 	};
 
-
 	class ImageCanvasAccess
 	{
 	public:
@@ -100,13 +104,23 @@ namespace iw::tests
 		void set_menu(std::vector<platform::Menu>) override {}
 		void set_toolbar(std::vector<platform::ToolbarItem>) override {}
 		void set_task_toolbar(std::vector<platform::ToolbarItem> value) override { taskToolbar = std::move(value); }
-		void clear_task_toolbar() override { taskToolbar.clear(); ++clears; }
+		void clear_task_toolbar() override
+		{
+			taskToolbar.clear();
+			++clears;
+		}
 		void set_status_toolbar(std::vector<platform::ToolbarItem>) override {}
 		void set_breadcrumbs(std::vector<platform::Breadcrumb>,
-			std::function<void(const std::filesystem::path&)>) override {}
+		                     std::function<void(const std::filesystem::path&)>) override
+		{
+		}
 		void set_status(platform::StatusInfo value) override { status = std::move(value); }
 		void set_thumbnail_size(int, std::function<void(int)>) override {}
-		app::recti layout(app::recti client, bool fullscreen) override { fullscreenLayout = fullscreen; return client; }
+		app::recti layout(app::recti client, bool fullscreen) override
+		{
+			fullscreenLayout = fullscreen;
+			return client;
+		}
 		void set_dpi(unsigned int) override {}
 		void refresh() override { ++refreshes; }
 	};
@@ -170,7 +184,11 @@ namespace iw::tests
 		void fullscreen() { window->mode_bar_command({MainWindow::modeFullscreen}); }
 		void set_fullscreen(bool value) { window->set_fullscreen(value); }
 		void exit() { window->request_exit(); }
-		void resize(app::recti value) { root->move(value); window->on_size(); }
+		void resize(app::recti value)
+		{
+			root->move(value);
+			window->on_size();
+		}
 		void information_progress() { window->update_information_progress(1, 2); }
 		bool fullscreen_state() const { return window->fullscreen_; }
 		bool can_undo() const { return window->can_undo_last_action(); }
@@ -183,11 +201,51 @@ namespace iw::tests
 			window->scanning_ = true;
 		}
 		void finish_folder_scan(const std::uint64_t generation, const std::filesystem::path& folder,
-			std::vector<files::FolderItem> items, const std::error_code error = {})
+		                        std::vector<files::FolderItem> items, const std::error_code error = {})
 		{
 			window->finish_folder_scan(generation, folder, std::move(items), error);
 		}
 		LoadState collection_load_state() const { return window->collection_.load_state(); }
 		size_t collection_size() const { return window->collection_.items().size(); }
+	};
+
+	// Stands in for a frame's side of its drawn controls: it offers its elements to an input manager, which then
+	// gives them the keyboard and the pointer as a frame's does.
+	class TestControlHost final : public ::ui::control_host
+	{
+	public:
+		class Elements final : public ::ui::frame_host
+		{
+		public:
+			std::vector<::ui::element_ptr> elements;
+			void on_window_layout(render::measure_context&, core::sizei, bool) override {}
+			void on_window_paint(render::draw_context&) override {}
+			void visit_elements(const std::function<void(const ::ui::element_ptr&, core::pointi)>& visit) override
+			{
+				for (const auto& element : elements) visit(element, {});
+			}
+		};
+
+		std::shared_ptr<Elements> tree = std::make_shared<Elements>();
+		::ui::test::fake_measure_context measureContext;
+		bool keyboard{};
+
+		render::measure_context* measure() override { return &measureContext; }
+		void invalidate(core::recti) override {}
+		bool has_keyboard_focus() const override { return keyboard; }
+		void take_keyboard_focus() override { keyboard = true; }
+		void capture_pointer(bool) override {}
+		void set_cursor(::platform::cursor) override {}
+		core::pointi client_to_screen(const core::pointi loc) const override { return loc; }
+		void track_menu(core::recti, const std::vector<::ui::command_ptr>&) override {}
+		::ui::frame_ptr create_popup(const ::ui::frame_host_weak_ptr&, const render::color_style&) override
+		{
+			return nullptr;
+		}
+		std::shared_ptr<::ui::frame_host> listener() const override { return tree; }
+		void text_input(bool, core::recti) override {}
+		void caret_timer(bool, uint32_t) override {}
+		bool is_dialog() const override { return false; }
+		void close(bool) override {}
 	};
 }

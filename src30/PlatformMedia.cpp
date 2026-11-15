@@ -1,120 +1,584 @@
 // ImageWalker by Zac Walker
-// MFPlay owns audio/video rendering; its callbacks enqueue owned events for the HWND's UI timer.
+// Plays media with Media Foundation's source reader on a worker thread: its pictures become a texture the owner's
+// frame draws, and its PCM plays through libdesktop's audio output, whose clock paces the pictures.
 
 #include "PlatformWin32.h"
 #include "PlatformMedia.h"
 #include "MediaRuntime.h"
 
-#include <mfapi.h>
-#include <mferror.h>
-#include <mfplay.h>
-#include <wrl/client.h>
+#include <libdesktop/ui/shell.h>
+
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <deque>
-#include <format>
-#include <limits>
 #include <mutex>
 #include <optional>
+#include <thread>
+#include <utility>
 
 namespace iw::media
 {
 	namespace
 	{
-		using Microsoft::WRL::ComPtr;
+		using SteadyClock = std::chrono::steady_clock;
+		using Ticks = std::chrono::duration<std::int64_t, std::ratio<1, ticksPerSecond>>;
 
-		std::optional<std::int64_t> time_value(const PROPVARIANT& value)
+		// A ring the worker refills between its turns, short enough that a pause is heard at once.
+		constexpr double ringSeconds = 0.5;
+		// Sound decoded ahead of the ring, and the sound queued before the output starts, so it does not run dry
+		// as it starts.
+		constexpr std::int64_t soundAhead = ticksPerSecond / 4;
+		constexpr std::int64_t soundPrimed = ticksPerSecond / 5;
+		// Silence put before sound that starts after the picture, so the clock keeps to media time.
+		constexpr std::int64_t longestLeadIn = ticksPerSecond * 5;
+		constexpr size_t framesAhead = 3;
+		constexpr size_t pooledPictures = 8;
+		constexpr auto turn = std::chrono::milliseconds(10);
+		constexpr auto pausedTurn = std::chrono::milliseconds(250);
+		constexpr auto statusInterval = std::chrono::milliseconds(100);
+
+		std::optional<AudioFormat> pcm_format(const ::platform::audio_output_format& output)
 		{
-			if (value.vt == VT_I8 && value.hVal.QuadPart >= 0) return value.hVal.QuadPart;
-			if (value.vt == VT_UI8 &&
-				value.uhVal.QuadPart <= static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)()))
-				return static_cast<std::int64_t>(value.uhVal.QuadPart);
-			return {};
+			AudioFormat format;
+			format.sampleRate = output.sample_rate;
+			format.channels = output.channels;
+			format.channelMask = output.channel_mask;
+			switch (output.sample_format)
+			{
+			case ::platform::audio_sample_format::float32: format.format = SampleFormat::float32; break;
+			case ::platform::audio_sample_format::int16: format.format = SampleFormat::int16; break;
+			case ::platform::audio_sample_format::int32: format.format = SampleFormat::int32; break;
+			default: return std::nullopt;
+			}
+			if (!format.sampleRate || !format.channels) return std::nullopt;
+			return format;
 		}
 
-		struct Event
+		class ReaderPlayer;
+
+		// The player a worker reports to, until that player closes or opens another file.
+		struct Link
 		{
-			MFP_EVENT_TYPE type{};
-			HRESULT result{};
-			ComPtr<IMFPMediaItem> item;
+			ReaderPlayer* player{};
 		};
 
-		struct Events
-		{
-			explicit Events(std::shared_ptr<const native::Api> owner) : api(std::move(owner)) {}
-			std::shared_ptr<const native::Api> api;
-			std::mutex mutex;
-			std::deque<Event> pending;
-			bool active{true};
-			std::atomic_bool failed{};
-		};
-
-		class Callback final : public IMFPMediaPlayerCallback
+		// One opened file and the worker decoding it. The UI thread sends it commands and takes its pictures; the
+		// worker owns the decoder and the audio output, and reports back through queue_ui.
+		class Session
 		{
 		public:
-			explicit Callback(std::shared_ptr<Events> events) : events_(std::move(events)) {}
-			HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void** value) override
+			Session(std::filesystem::path path, std::weak_ptr<Link> link, const float volume) :
+				path_(std::move(path)), link_(std::move(link))
 			{
-				if (!value) return E_POINTER;
-				*value = nullptr;
-				if (iid != __uuidof(IUnknown) && iid != __uuidof(IMFPMediaPlayerCallback)) return E_NOINTERFACE;
-				*value = static_cast<IMFPMediaPlayerCallback*>(this);
-				AddRef();
-				return S_OK;
+				commands_.volume = volume;
+				thread_ = std::thread([this] { run(); });
 			}
-			ULONG STDMETHODCALLTYPE AddRef() override { return ++references_; }
-			ULONG STDMETHODCALLTYPE Release() override
+
+			~Session()
 			{
-				const ULONG remaining = --references_;
-				if (!remaining) delete this;
-				return remaining;
+				command([](Commands& commands) { commands.quit = true; });
+				if (thread_.joinable()) thread_.join();
 			}
-			void STDMETHODCALLTYPE OnMediaPlayerEvent(MFP_EVENT_HEADER* event) override
+
+			Session(const Session&) = delete;
+			Session& operator=(const Session&) = delete;
+
+			void play()
 			{
-				if (!event) return;
+				command([](Commands& commands) { commands.play = true; });
+			}
+			void pause()
+			{
+				command([](Commands& commands) { commands.play = false; });
+			}
+
+			void stop()
+			{
+				command([](Commands& commands)
+				{
+					commands.stop = true;
+					commands.play = false;
+					commands.seek.reset();
+				});
+			}
+
+			void seek(const std::int64_t time)
+			{
+				command([time](Commands& commands) { commands.seek = time; });
+			}
+			void volume(const float value)
+			{
+				command([value](Commands& commands) { commands.volume = value; });
+			}
+
+			// The picture the worker last presented, once for each report of one.
+			::core::const_surface_ptr take_picture()
+			{
+				picturePosted_ = false;
+				const std::scoped_lock lock(pictureMutex_);
+				return std::exchange(picture_, {});
+			}
+
+		private:
+			struct Commands
+			{
+				bool quit{};
+				bool stop{};
+				std::optional<bool> play;
+				std::optional<std::int64_t> seek;
+				std::optional<float> volume;
+			};
+
+			// The worker's own state.
+			struct Playback
+			{
+				explicit Playback(Decoder& source) : decoder(source) {}
+
+				Decoder& decoder;
+				::platform::audio_output_ptr output;
+				AudioFormat format;
+				PlaybackStatus status;
+				bool playing{};
+				// The media time the clock counts from: the first sound queued since the output was reset, or the
+				// picture's position when there is no sound.
+				std::int64_t base{};
+				SteadyClock::time_point started{};
+				bool outputRunning{};
+				bool soundQueued{};
+				std::uint64_t framesWritten{};
+				std::vector<std::uint8_t> pending;
+				size_t pendingOffset{};
+				// What decodes before a seek's target is passed over.
+				std::int64_t skipBefore{};
+				bool videoEnded{};
+				bool soundEnded{};
+				bool needPicture{};
+				std::int64_t shownUntil{};
+				std::deque<VideoFrame> frames;
+				std::optional<VideoFrame> skipped;
+				std::vector<::core::surface_ptr> pictures;
+				SteadyClock::time_point reported{};
+				bool reportNow{};
+			};
+
+			template <class Change> void command(Change change)
+			{
+				{
+					const std::scoped_lock lock(mutex_);
+					change(commands_);
+					pending_ = true;
+				}
+				wake_.notify_one();
+			}
+
+			Commands take_commands(const std::chrono::milliseconds wait)
+			{
+				std::unique_lock lock(mutex_);
+				wake_.wait_for(lock, wait, [this] { return pending_; });
+				pending_ = false;
+				auto taken = std::exchange(commands_, {});
+				commands_.quit = taken.quit;
+				return taken;
+			}
+
+			template <class Action> void post(Action action) const
+			{
+				platform::queue_ui([link = link_, action = std::move(action)]
+				{
+					if (const auto target = link.lock(); target && target->player) action(*target->player);
+				});
+			}
+
+			void report(const PlaybackStatus& status) const;
+			void report_failure(std::wstring error) const;
+			void report_picture() const;
+
+			void run()
+			{
+				const platform::Runtime apartment(platform::RuntimeMode::multithreaded);
 				try
 				{
-					std::lock_guard lock(events_->mutex);
-					if (!events_->active) return;
-					if (events_->pending.size() >= 128) { events_->failed = true; return; }
-					Event value{event->eEventType, event->hrEvent};
-					if (event->eEventType == MFP_EVENT_TYPE_MEDIAITEM_CREATED)
-						value.item = reinterpret_cast<MFP_MEDIAITEM_CREATED_EVENT*>(event)->pMediaItem;
-					events_->pending.push_back(std::move(value));
+					play_file();
 				}
-				catch (...) { events_->failed = true; }
+				catch (...)
+				{
+					report_failure(L"Media playback stopped on an unexpected error.");
+				}
 			}
-		private:
-			std::atomic<ULONG> references_{1};
-			std::shared_ptr<Events> events_;
+
+			void play_file()
+			{
+				Decoder decoder;
+				if (!decoder.open(path_))
+				{
+					report_failure(decoder.error());
+					return;
+				}
+				Playback p(decoder);
+				if (decoder.has_audio())
+				{
+					p.output = ::platform::create_audio_output({}, ringSeconds);
+					const auto format = p.output ? pcm_format(p.output->format()) : std::nullopt;
+					if (!format || !decoder.decode_audio(*format)) p.output.reset();
+					else p.format = *format;
+					if (!p.output && !decoder.has_video())
+					{
+						report_failure(L"Windows has no audio output this sound can play on. Check that speakers "
+						               L"or headphones are connected and enabled.");
+						return;
+					}
+					if (!p.output)
+						platform::write_diagnostic(
+							L"The sound of " + path_.filename().wstring() +
+							L" cannot be played on this computer's audio output; the video plays silently.\n");
+				}
+				p.status.hasVideo = decoder.has_video();
+				p.status.canSeek = decoder.can_seek();
+				if (const auto duration = decoder.duration())
+				{
+					p.status.duration = *duration;
+					p.status.hasDuration = true;
+				}
+				p.videoEnded = !p.status.hasVideo;
+				p.soundEnded = !p.output;
+				p.needPicture = p.status.hasVideo;
+				p.status.state = PlaybackState::ready;
+				report(p.status);
+				// A file plays as it opens.
+				set_playing(p, true);
+				p.status.state = PlaybackState::playing;
+				p.reportNow = true;
+				const auto exiting = platform::exit_token();
+				for (;;)
+				{
+					const auto commands = take_commands(wait_time(p));
+					if (commands.quit || exiting.stop_requested()) break;
+					apply(p, commands);
+					if (!decode(p)) break;
+					feed_output(p);
+					present(p);
+					if (finished(p)) finish(p);
+					report_progress(p);
+				}
+				if (p.output) p.output->stop();
+			}
+
+			std::chrono::milliseconds wait_time(const Playback& p) const
+			{
+				if (!p.playing) return p.needPicture ? std::chrono::milliseconds{0} : pausedTurn;
+				if (p.needPicture || p.frames.empty()) return turn;
+				const auto due = std::chrono::duration_cast<std::chrono::milliseconds>(
+					Ticks(p.frames.front().time - clock_now(p)));
+				return std::clamp(due, std::chrono::milliseconds{0}, turn);
+			}
+
+			// Where playback is, in media time: the audio output's clock while there is sound, otherwise a steady one.
+			std::int64_t clock_now(const Playback& p) const
+			{
+				if (p.output)
+					return p.base + static_cast<std::int64_t>(std::llround(p.output->time() * ticksPerSecond));
+				if (!p.playing) return p.base;
+				return p.base + std::chrono::duration_cast<Ticks>(SteadyClock::now() - p.started).count();
+			}
+
+			void set_playing(Playback& p, const bool playing) const
+			{
+				if (p.playing == playing) return;
+				if (playing) p.started = SteadyClock::now();
+				else
+				{
+					p.base = p.output ? p.base : clock_now(p);
+					if (p.output) p.output->stop();
+					p.outputRunning = false;
+				}
+				p.playing = playing;
+			}
+
+			void apply(Playback& p, const Commands& commands)
+			{
+				if (commands.volume && p.output) p.output->volume(std::clamp(*commands.volume, 0.0f, 1.0f));
+				if (commands.stop)
+				{
+					seek_to(p, 0);
+					set_playing(p, false);
+					p.status.state = PlaybackState::stopped;
+				}
+				if (commands.seek && p.status.canSeek)
+				{
+					seek_to(p, *commands.seek);
+					if (p.status.state == PlaybackState::ended) p.status.state = PlaybackState::paused;
+				}
+				if (!commands.play) return;
+				if (*commands.play)
+				{
+					if (p.status.state == PlaybackState::playing) return;
+					if (p.status.state == PlaybackState::ended)
+					{
+						if (!p.status.canSeek) return;
+						seek_to(p, 0);
+					}
+					set_playing(p, true);
+					p.status.state = PlaybackState::playing;
+				}
+				else if (p.status.state == PlaybackState::playing)
+				{
+					set_playing(p, false);
+					p.status.state = PlaybackState::paused;
+				}
+				p.reportNow = true;
+			}
+
+			void seek_to(Playback& p, std::int64_t time) const
+			{
+				time = (std::max)(std::int64_t{0}, p.status.hasDuration ? (std::min)(time, p.status.duration) : time);
+				if (p.status.canSeek && !p.decoder.seek(time)) return;
+				p.frames.clear();
+				p.skipped.reset();
+				p.pending.clear();
+				p.pendingOffset = 0;
+				if (p.output) p.output->reset();
+				p.outputRunning = false;
+				p.soundQueued = false;
+				p.framesWritten = 0;
+				p.base = time;
+				p.started = SteadyClock::now();
+				p.skipBefore = time;
+				p.videoEnded = !p.status.hasVideo;
+				p.soundEnded = !p.output;
+				p.needPicture = p.status.hasVideo;
+				p.shownUntil = time;
+				p.status.position = time;
+				p.reportNow = true;
+			}
+
+			::core::surface_ptr free_picture(Playback& p) const
+			{
+				// A pooled picture nothing else holds - not queued, presented or drawn - is written over, once the
+				// fence orders the UI thread's last reads of it before the writes.
+				for (const auto& picture : p.pictures)
+				{
+					if (picture.use_count() != 1) continue;
+					std::atomic_thread_fence(std::memory_order_acquire);
+					return picture;
+				}
+				auto picture = std::make_shared<::core::surface>();
+				if (p.pictures.size() < pooledPictures) p.pictures.push_back(picture);
+				return picture;
+			}
+
+			bool decode(Playback& p)
+			{
+				if (!p.playing && !p.needPicture) return true;
+				while (!p.videoEnded && p.frames.size() < (p.playing ? framesAhead : 1))
+				{
+					VideoFrame frame;
+					frame.picture = free_picture(p);
+					const auto read = p.decoder.read_video(frame);
+					if (read == ReadResult::failed)
+					{
+						report_failure(p.decoder.error());
+						return false;
+					}
+					if (read == ReadResult::end)
+					{
+						p.videoEnded = true;
+						// A seek past the last frame still shows it; with no frame at all, the picture stays.
+						if (p.frames.empty() && p.skipped) p.frames.push_back(std::move(*p.skipped));
+						if (p.frames.empty()) p.needPicture = false;
+						p.skipped.reset();
+						break;
+					}
+					if (frame.time + (std::max)(frame.duration, std::int64_t{1}) <= p.skipBefore)
+					{
+						p.skipped = std::move(frame);
+						continue;
+					}
+					p.skipped.reset();
+					p.frames.push_back(std::move(frame));
+				}
+				if (!p.output || !p.playing) return true;
+				while (!p.soundEnded && pending_ticks(p) < soundAhead)
+				{
+					AudioBlock block;
+					const auto read = p.decoder.read_audio(block);
+					if (read == ReadResult::failed)
+					{
+						report_failure(p.decoder.error());
+						return false;
+					}
+					if (read == ReadResult::end) p.soundEnded = true;
+					else queue_sound(p, block);
+				}
+				return true;
+			}
+
+			static std::int64_t pending_ticks(const Playback& p)
+			{
+				const auto frames = (p.pending.size() - p.pendingOffset) / p.format.frame_bytes();
+				return static_cast<std::int64_t>(frames) * ticksPerSecond / p.format.sampleRate;
+			}
+
+			void queue_sound(Playback& p, const AudioBlock& block) const
+			{
+				const auto frameBytes = p.format.frame_bytes();
+				const auto rate = static_cast<std::int64_t>(p.format.sampleRate);
+				const auto frames = static_cast<std::int64_t>(block.samples.size() / frameBytes);
+				auto time = block.time;
+				std::int64_t skip = 0;
+				// Sound from before a seek's target is cut away, to the frame.
+				if (time < p.skipBefore) skip = (std::min)(frames, (p.skipBefore - time) * rate / ticksPerSecond);
+				if (skip >= frames) return;
+				time += skip * ticksPerSecond / rate;
+				if (!p.soundQueued)
+				{
+					p.soundQueued = true;
+					const auto gap = time - p.base;
+					if (gap > 0)
+						p.pending.resize(p.pending.size() +
+						                 static_cast<size_t>((std::min)(gap, longestLeadIn) * rate / ticksPerSecond) *
+						                     frameBytes);
+					else p.base = time;
+				}
+				const auto first = block.samples.begin() + static_cast<std::ptrdiff_t>(skip * frameBytes);
+				p.pending.insert(p.pending.end(), first,
+				                 first + static_cast<std::ptrdiff_t>((frames - skip) * frameBytes));
+			}
+
+			void feed_output(Playback& p)
+			{
+				if (!p.output) return;
+				if (p.output->is_device_lost())
+				{
+					platform::write_diagnostic(L"The audio output was lost; playback carries on without sound.\n");
+					p.base = clock_now(p);
+					p.started = SteadyClock::now();
+					p.output.reset();
+					p.outputRunning = false;
+					p.pending.clear();
+					p.pendingOffset = 0;
+					p.soundEnded = true;
+					return;
+				}
+				if (!p.playing) return;
+				const auto frameBytes = p.format.frame_bytes();
+				if (p.pendingOffset < p.pending.size())
+				{
+					const auto taken = p.output->write(
+						{p.pending.data() + p.pendingOffset, p.pending.size() - p.pendingOffset});
+					p.pendingOffset += taken;
+					p.framesWritten += taken / frameBytes;
+					if (p.pendingOffset == p.pending.size())
+					{
+						p.pending.clear();
+						p.pendingOffset = 0;
+					}
+				}
+				else if (p.soundEnded && p.outputRunning)
+				{
+					// An output that runs dry plays its ring again; silence carries the clock on to the picture's end.
+					p.output->write_silence();
+				}
+				if (p.outputRunning) return;
+				const auto written = static_cast<std::int64_t>(p.framesWritten) * ticksPerSecond / p.format.sampleRate;
+				if (written >= soundPrimed || (p.soundEnded && p.pendingOffset == p.pending.size()))
+				{
+					p.output->start();
+					p.outputRunning = true;
+				}
+			}
+
+			void present(Playback& p)
+			{
+				if (p.frames.empty()) return;
+				if (!p.needPicture)
+				{
+					if (!p.playing) return;
+					const auto now = clock_now(p);
+					// A picture whose successor is already due is dropped rather than shown late.
+					while (p.frames.size() > 1 && p.frames[1].time <= now) p.frames.pop_front();
+					if (p.frames.front().time > now) return;
+				}
+				p.needPicture = false;
+				auto frame = std::move(p.frames.front());
+				p.frames.pop_front();
+				p.shownUntil = frame.time + (std::max)(frame.duration, std::int64_t{0});
+				{
+					const std::scoped_lock lock(pictureMutex_);
+					picture_ = std::move(frame.picture);
+				}
+				if (!picturePosted_.exchange(true)) report_picture();
+			}
+
+			// Done once the last picture has had its time and the output has played all the sound it was given.
+			bool finished(const Playback& p) const
+			{
+				if (!p.playing || !p.videoEnded || !p.frames.empty()) return false;
+				const auto now = clock_now(p);
+				if (now < p.shownUntil) return false;
+				return !p.output || (p.soundEnded && p.pendingOffset == p.pending.size() && p.outputRunning &&
+				                     now >= p.base + static_cast<std::int64_t>(p.framesWritten) * ticksPerSecond /
+				                                         p.format.sampleRate);
+			}
+
+			void finish(Playback& p) const
+			{
+				set_playing(p, false);
+				p.status.state = PlaybackState::ended;
+				if (p.status.hasDuration) p.status.position = p.status.duration;
+				report(p.status);
+				p.reportNow = false;
+				p.reported = SteadyClock::now();
+			}
+
+			void report_progress(Playback& p) const
+			{
+				const auto now = SteadyClock::now();
+				if (p.playing)
+				{
+					const auto position = (std::max)(std::int64_t{0}, clock_now(p));
+					p.status.position = p.status.hasDuration ? (std::min)(position, p.status.duration) : position;
+				}
+				if (!p.reportNow && (!p.playing || now - p.reported < statusInterval)) return;
+				p.reportNow = false;
+				p.reported = now;
+				report(p.status);
+			}
+
+			const std::filesystem::path path_;
+			const std::weak_ptr<Link> link_;
+			std::mutex mutex_;
+			std::condition_variable wake_;
+			Commands commands_;
+			bool pending_{};
+			std::mutex pictureMutex_;
+			::core::const_surface_ptr picture_;
+			std::atomic_bool picturePosted_{};
+			std::thread thread_;
 		};
 
-		class NativePlayer final : public Player
+		class ReaderPlayer final : public Player
 		{
 		public:
-			explicit NativePlayer(StatusHandler changed) : changed_(std::move(changed)) {}
-			~NativePlayer() override
+			ReaderPlayer(const platform::WindowFramePtr& parent, StatusHandler changed) : changed_(std::move(changed))
+			{
+				::ui::surface_element::style style;
+				style.sampler = render::texture_sampler::bilinear;
+				surface_ = std::make_shared<::ui::surface_element>(style);
+				surface_->is_visible(false);
+				element_ = platform::add_frame_element(parent, surface_);
+			}
+
+			~ReaderPlayer() override
 			{
 				changed_ = {};
 				close();
-				if (window_) DestroyWindow(window_);
 			}
 
-			bool create(const platform::WindowFramePtr& parent)
-			{
-				const HWND owner = platform::win32::owner_window(parent);
-				if (!owner) return false;
-				WNDCLASSW type{};
-				type.hInstance = GetModuleHandleW(nullptr);
-				type.lpfnWndProc = window_proc;
-				type.lpszClassName = L"ImageWalker30.Media";
-				type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-				if (!RegisterClassW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
-				window_ = CreateWindowExW(0, type.lpszClassName, L"Media playback",
-					WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS, 0, 0, 0, 0, owner, nullptr, type.hInstance, this);
-				return window_ != nullptr;
-			}
+			ReaderPlayer(const ReaderPlayer&) = delete;
+			ReaderPlayer& operator=(const ReaderPlayer&) = delete;
 
 			void open(const std::filesystem::path& path) override
 			{
@@ -127,55 +591,31 @@ namespace iw::media
 				std::error_code error;
 				if (!std::filesystem::is_regular_file(files::native_path(path), error))
 				{
-					fail(HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND));
+					fail(native::playback_failure(HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)));
 					return;
 				}
-				api_ = native::acquire();
-				if (!api_)
+				if (!native::acquire())
 				{
-					fail(HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED), std::wstring(native::unavailable_message()));
+					fail(std::wstring(native::unavailable_message()));
 					return;
 				}
-				HRESULT result = api_->startup(MF_VERSION, MFSTARTUP_FULL);
-				started_ = SUCCEEDED(result);
-				if (SUCCEEDED(result))
-				{
-					events_ = std::make_shared<Events>(api_);
-					ComPtr<IMFPMediaPlayerCallback> callback;
-					callback.Attach(new Callback(events_));
-					result = api_->createPlayer(nullptr, FALSE, MFP_OPTION_FREE_THREADED_CALLBACK,
-						callback.Get(), window_, &player_);
-				}
-				if (SUCCEEDED(result)) result = player_->SetVolume(volume_);
-				if (SUCCEEDED(result)) result = api_->createFile(MF_ACCESSMODE_READ, MF_OPENMODE_FAIL_IF_NOT_EXIST,
-					MF_FILEFLAGS_NONE, files::native_path(path).c_str(), &stream_);
-				if (SUCCEEDED(result)) result = player_->CreateMediaItemFromObject(stream_.Get(), FALSE, 0, nullptr);
-				if (SUCCEEDED(result) && !SetTimer(window_, 1, 100, nullptr))
-					result = HRESULT_FROM_WIN32(GetLastError());
-				if (FAILED(result)) fail(result);
+				link_ = std::make_shared<Link>(Link{this});
+				session_ = std::make_unique<Session>(path, link_, volume_);
 			}
 
 			void play() override
 			{
-				if (status_.state == PlaybackState::stopped && !player_) { open(path_); return; }
-				if (!player_ || commandPending_ || !can_play(status_.state)) return;
-				if (status_.state == PlaybackState::ended && status_.canSeek)
+				if (status_.state == PlaybackState::stopped && !session_)
 				{
-					playAfterSeek_ = true;
-					seek(0);
+					open(path_);
 					return;
 				}
-				commandPending_ = true;
-				check(player_->Play());
+				if (session_ && can_play(status_.state)) session_->play();
 			}
 
 			void pause() override
 			{
-				if (player_ && !commandPending_ && status_.state == PlaybackState::playing)
-				{
-					commandPending_ = true;
-					check(player_->Pause());
-				}
+				if (session_ && status_.state == PlaybackState::playing) session_->pause();
 			}
 
 			void stop() override
@@ -187,22 +627,15 @@ namespace iw::media
 					notify();
 					return;
 				}
-				playAfterSeek_ = false;
-				queuedSeek_.reset();
-				if (commandPending_) { stopAfterCommand_ = true; return; }
-				if (player_ && status_.state != PlaybackState::stopped)
-				{
-					commandPending_ = true;
-					check(player_->Stop());
-				}
+				if (session_ && status_.state != PlaybackState::stopped) session_->stop();
 			}
 
 			void seek(const std::int64_t ticks) override
 			{
-				if (!player_ || !status_.canSeek || !status_.hasDuration ||
-					status_.state == PlaybackState::opening || status_.state == PlaybackState::error) return;
-				queuedSeek_ = std::clamp(ticks, std::int64_t{0}, status_.duration);
-				if (!seeking_) dispatch_seek();
+				if (!session_ || !status_.canSeek || !status_.hasDuration || status_.state == PlaybackState::opening ||
+				    status_.state == PlaybackState::error)
+					return;
+				session_->seek(std::clamp(ticks, std::int64_t{0}, status_.duration));
 			}
 
 			void volume(const float value) override
@@ -210,7 +643,7 @@ namespace iw::media
 				if (!std::isfinite(value)) return;
 				volume_ = std::clamp(value, 0.0f, 1.0f);
 				status_.volume = volume_;
-				if (player_) check(player_->SetVolume(volume_));
+				if (session_) session_->volume(volume_);
 				notify();
 			}
 
@@ -225,319 +658,88 @@ namespace iw::media
 
 			void bounds(const app::recti bounds) override
 			{
-				if (!window_) return;
-				RECT current{};
-				GetWindowRect(window_, &current);
-				MapWindowPoints(HWND_DESKTOP, GetParent(window_), reinterpret_cast<POINT*>(&current), 2);
-				if (current.left != bounds.x || current.top != bounds.y ||
-					current.right - current.left != bounds.width || current.bottom - current.top != bounds.height)
-					MoveWindow(window_, bounds.x, bounds.y, (std::max)(0, bounds.width),
-						(std::max)(0, bounds.height), TRUE);
+				if (element_) element_->set_bounds(bounds);
 			}
 
 			const PlaybackStatus& status() const override { return status_; }
 
+			::core::const_surface_ptr picture() const override { return picture_; }
+
+			void reported(const PlaybackStatus& status)
+			{
+				const auto volume = status_.volume;
+				status_ = status;
+				status_.volume = volume;
+				notify();
+			}
+
+			void failed(std::wstring error) { fail(std::move(error)); }
+
+			void show_picture()
+			{
+				auto picture = session_ ? session_->take_picture() : nullptr;
+				if (!picture) return;
+				picture_ = std::move(picture);
+				if (!element_) return;
+				element_->show(true);
+				// A picture the size of the last updates its texture in place and presents the video's region alone.
+				surface_->present(picture_, element_->frame());
+			}
+
 		private:
 			void shutdown()
 			{
-				if (window_) KillTimer(window_, 1);
-				if (events_)
-				{
-					std::deque<Event> discarded;
-					{
-						std::lock_guard lock(events_->mutex);
-						events_->active = false;
-						discarded.swap(events_->pending);
-					}
-				}
-				if (player_) player_->Shutdown();
-				player_.Reset();
-				if (stream_) stream_->Close();
-				stream_.Reset();
-				events_.reset();
-				queuedSeek_.reset();
-				seeking_ = playAfterSeek_ = false;
-				commandPending_ = stopAfterCommand_ = false;
-				if (started_) { api_->shutdown(); started_ = false; }
-				api_.reset();
+				link_.reset();
+				session_.reset();
+				picture_.reset();
+				if (element_) element_->show(false);
 			}
 
-			void fail(const HRESULT result, std::wstring message = {})
+			void fail(std::wstring message)
 			{
 				shutdown();
 				status_.state = PlaybackState::error;
 				status_.hasVideo = false;
 				status_.canSeek = false;
-				status_.error = message.empty() ? std::format(L"Playback failed (0x{:08X}). Windows needs a supported, "
-					L"undamaged file and an installed codec/audio device. No codec is downloaded.",
-					static_cast<unsigned long>(result)) : std::move(message);
+				status_.error = std::move(message);
 				platform::write_diagnostic(status_.error + L"\n");
 				notify();
 			}
 
-			bool check(const HRESULT result)
+			void notify() const
 			{
-				if (SUCCEEDED(result)) return true;
-				fail(result);
-				return false;
+				if (const auto changed = changed_) changed(status_);
 			}
 
-			void notify()
-			{
-				if (window_) InvalidateRect(window_, nullptr, FALSE);
-				if (changed_) changed_(status_);
-			}
-
-			void dispatch_seek()
-			{
-				if (!queuedSeek_ || !player_) return;
-				PROPVARIANT value{};
-				value.vt = VT_I8;
-				value.hVal.QuadPart = *queuedSeek_;
-				queuedSeek_.reset();
-				seeking_ = true;
-				check(player_->SetPosition(MFP_POSITIONTYPE_100NS, &value));
-			}
-
-			void poll()
-			{
-				if (!events_ || !player_) return;
-				if (events_->failed) { fail(E_OUTOFMEMORY); return; }
-				std::deque<Event> pending;
-				{
-					std::lock_guard lock(events_->mutex);
-					pending.swap(events_->pending);
-				}
-				for (const auto& event : pending)
-				{
-					if (!check(event.result) || !player_) return;
-					switch (event.type)
-					{
-					case MFP_EVENT_TYPE_MEDIAITEM_CREATED:
-						if (!event.item) { fail(MF_E_INVALIDMEDIATYPE); return; }
-						{
-							BOOL hasVideo{}, selected{};
-							event.item->HasVideo(&hasVideo, &selected);
-							status_.hasVideo = hasVideo && selected;
-							MFP_MEDIAITEM_CHARACTERISTICS characteristics{};
-							if (SUCCEEDED(event.item->GetCharacteristics(&characteristics)))
-								status_.canSeek = (characteristics & MFP_MEDIAITEM_CAN_SEEK) != 0;
-							PROPVARIANT value{};
-							if (SUCCEEDED(event.item->GetDuration(MFP_POSITIONTYPE_100NS, &value)))
-							{
-								if (const auto duration = time_value(value))
-								{
-									status_.duration = *duration;
-									status_.hasDuration = true;
-								}
-							}
-							PropVariantClear(&value);
-							if (!check(player_->SetMediaItem(event.item.Get()))) return;
-						}
-						break;
-					case MFP_EVENT_TYPE_MEDIAITEM_SET:
-						status_.state = PlaybackState::ready;
-						commandPending_ = true;
-						if (!check(player_->Play())) return;
-						break;
-					case MFP_EVENT_TYPE_PLAY:
-						commandPending_ = false;
-						status_.state = PlaybackState::playing;
-						break;
-					case MFP_EVENT_TYPE_PAUSE:
-						commandPending_ = false;
-						status_.state = PlaybackState::paused;
-						break;
-					case MFP_EVENT_TYPE_STOP:
-						commandPending_ = false;
-						status_.state = PlaybackState::stopped;
-						status_.position = 0;
-						seek(0);
-						break;
-					case MFP_EVENT_TYPE_PLAYBACK_ENDED:
-						commandPending_ = false;
-						status_.state = PlaybackState::ended;
-						if (status_.hasDuration) status_.position = status_.duration;
-						break;
-					case MFP_EVENT_TYPE_POSITION_SET:
-						seeking_ = false;
-						if (status_.state == PlaybackState::ended) status_.state = PlaybackState::paused;
-						if (queuedSeek_) dispatch_seek();
-						else if (playAfterSeek_)
-						{
-							playAfterSeek_ = false;
-							commandPending_ = true;
-							if (!check(player_->Play())) return;
-						}
-						break;
-					default: break;
-					}
-					if (!player_) return;
-				}
-				if (stopAfterCommand_ && !commandPending_)
-				{
-					stopAfterCommand_ = false;
-					stop();
-					if (!player_) return;
-				}
-				if (!seeking_ && (status_.state == PlaybackState::playing || status_.state == PlaybackState::paused ||
-					status_.state == PlaybackState::stopped))
-				{
-					if (!status_.hasDuration)
-					{
-						PROPVARIANT duration{};
-						if (SUCCEEDED(player_->GetDuration(MFP_POSITIONTYPE_100NS, &duration)))
-						{
-							if (const auto value = time_value(duration))
-							{
-								status_.duration = *value;
-								status_.hasDuration = true;
-							}
-						}
-						PropVariantClear(&duration);
-					}
-					PROPVARIANT position{};
-					if (SUCCEEDED(player_->GetPosition(MFP_POSITIONTYPE_100NS, &position)))
-						if (const auto value = time_value(position)) status_.position = *value;
-					PropVariantClear(&position);
-				}
-				notify();
-			}
-
-			static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam)
-			{
-				auto* self = reinterpret_cast<NativePlayer*>(GetWindowLongPtrW(window, GWLP_USERDATA));
-				if (message == WM_NCCREATE)
-				{
-					self = static_cast<NativePlayer*>(reinterpret_cast<CREATESTRUCTW*>(lparam)->lpCreateParams);
-					self->window_ = window;
-					SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
-				}
-				if (!self) return DefWindowProcW(window, message, wparam, lparam);
-				try
-				{
-					switch (message)
-					{
-					case WM_TIMER: self->poll(); return 0;
-					case WM_SIZE:
-						if (self->player_ && self->status_.hasVideo &&
-							self->status_.state != PlaybackState::opening)
-							self->check(self->player_->UpdateVideo());
-						return 0;
-					case WM_LBUTTONDOWN:
-						SetFocus(GetParent(window));
-						return 0;
-					case WM_ERASEBKGND: return 1;
-					case WM_PAINT:
-					{
-						PAINTSTRUCT paint{};
-						const HDC dc = BeginPaint(window, &paint);
-						HRESULT rendered = S_OK;
-						RECT bounds{};
-						GetClientRect(window, &bounds);
-						if (self->player_ && self->status_.hasVideo &&
-							self->status_.state != PlaybackState::opening)
-							rendered = self->player_->UpdateVideo();
-						else
-						{
-							FillRect(dc, &bounds, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
-							SetTextColor(dc, RGB(230, 230, 230));
-							SetBkMode(dc, TRANSPARENT);
-							const auto text = self->status_.state == PlaybackState::error ? self->status_.error :
-								self->status_.state == PlaybackState::opening ? L"Opening media..." :
-								self->path_.filename().wstring();
-							InflateRect(&bounds, -24, -24);
-							DrawTextW(dc, text.c_str(), static_cast<int>(text.size()), &bounds,
-								DT_CENTER | DT_WORDBREAK | DT_NOPREFIX);
-						}
-						EndPaint(window, &paint);
-						if (FAILED(rendered)) self->fail(rendered);
-						return 0;
-					}
-					case WM_DESTROY: self->close(); return 0;
-					case WM_NCDESTROY:
-						self->window_ = nullptr;
-						SetWindowLongPtrW(window, GWLP_USERDATA, 0);
-						break;
-					default: break;
-					}
-				}
-				catch (...)
-				{
-					self->shutdown();
-					self->status_.state = PlaybackState::error;
-					platform::write_diagnostic(L"Media playback failed while processing a window event.\n");
-					try
-					{
-						self->status_.error = L"Media playback failed while processing a window event.";
-						self->notify();
-					}
-					catch (...) {}
-				}
-				return DefWindowProcW(window, message, wparam, lparam);
-			}
-
-			HWND window_{};
-			std::shared_ptr<const native::Api> api_;
-			ComPtr<IMFPMediaPlayer> player_;
-			ComPtr<IMFByteStream> stream_;
-			std::shared_ptr<Events> events_;
 			StatusHandler changed_;
 			PlaybackStatus status_;
 			std::filesystem::path path_;
-			std::optional<std::int64_t> queuedSeek_;
 			float volume_{1.0f};
-			bool started_{};
-			bool seeking_{};
-			bool playAfterSeek_{};
-			bool commandPending_{};
-			bool stopAfterCommand_{};
+			std::shared_ptr<::ui::surface_element> surface_;
+			platform::FrameElementPtr element_;
+			std::shared_ptr<Link> link_;
+			std::unique_ptr<Session> session_;
+			::core::const_surface_ptr picture_;
 		};
 
-		class UnavailablePlayer final : public Player
+		void Session::report(const PlaybackStatus& status) const
 		{
-		public:
-			explicit UnavailablePlayer(StatusHandler changed) : changed_(std::move(changed)) {}
+			post([status](ReaderPlayer& player) { player.reported(status); });
+		}
 
-			void open(const std::filesystem::path&) override
-			{
-				status_.state = PlaybackState::error;
-				status_.error = std::wstring(native::unavailable_message());
-				if (changed_) changed_(status_);
-			}
-			void play() override {}
-			void pause() override {}
-			void stop() override
-			{
-				status_.state = PlaybackState::stopped;
-				if (changed_) changed_(status_);
-			}
-			void seek(std::int64_t) override {}
-			void volume(const float value) override
-			{
-				if (std::isfinite(value)) status_.volume = std::clamp(value, 0.0f, 1.0f);
-				if (changed_) changed_(status_);
-			}
-			void close() override
-			{
-				status_.state = PlaybackState::closed;
-				if (changed_) changed_(status_);
-			}
-			void bounds(app::recti) override {}
-			const PlaybackStatus& status() const override { return status_; }
+		void Session::report_failure(std::wstring error) const
+		{
+			post([error = std::move(error)](ReaderPlayer& player) { player.failed(error); });
+		}
 
-		private:
-			StatusHandler changed_;
-			PlaybackStatus status_;
-		};
+		void Session::report_picture() const
+		{
+			post([](ReaderPlayer& player) { player.show_picture(); });
+		}
 	}
 
 	std::unique_ptr<Player> create_player(const platform::WindowFramePtr& parent, StatusHandler changed)
 	{
-		if (!parent || !parent->native_handle())
-			return std::make_unique<UnavailablePlayer>(std::move(changed));
-		auto player = std::make_unique<NativePlayer>(std::move(changed));
-		if (!player->create(parent)) return {};
-		return player;
+		return std::make_unique<ReaderPlayer>(parent, std::move(changed));
 	}
 }

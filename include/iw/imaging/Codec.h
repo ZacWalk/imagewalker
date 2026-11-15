@@ -27,9 +27,30 @@ namespace iw::imaging
 	// normalization and extended-path handling to libdesktop's platform layer.
 	std::filesystem::path native_path(const std::filesystem::path& path);
 
-	enum class ImageSaveFormat { png = 0, jpeg = 1, bmp = 2, tiff = 3, webp = 4 };
-	enum class CarryMetadata { none, profile, all };
-	enum class ImageError { none, invalid_input, unsupported, read_failed, encode_failed, resource_limit, cancelled };
+	enum class ImageSaveFormat
+	{
+		png = 0,
+		jpeg = 1,
+		bmp = 2,
+		tiff = 3,
+		webp = 4
+	};
+	enum class CarryMetadata
+	{
+		none,
+		profile,
+		all
+	};
+	enum class ImageError
+	{
+		none,
+		invalid_input,
+		unsupported,
+		read_failed,
+		encode_failed,
+		resource_limit,
+		cancelled
+	};
 
 	struct SaveOptions
 	{
@@ -69,10 +90,15 @@ namespace iw::imaging
 		int orientation{1};
 	};
 
-	enum class PixelDecoder { webp, wic, native };
+	enum class PixelDecoder
+	{
+		webp,
+		wic,
+		native
+	};
 	PixelDecoder pixel_decoder(std::wstring_view extension, std::span<const std::uint8_t> header = {});
-	DecodeResult decode_with(PixelDecoder decoder, std::span<const std::uint8_t> bytes,
-		std::wstring_view extension, const DecodeOptions& options);
+	DecodeResult decode_with(PixelDecoder decoder, std::span<const std::uint8_t> bytes, std::wstring_view extension,
+	                         const DecodeOptions& options);
 	bool has_webp_signature(std::span<const std::uint8_t> header);
 	std::vector<std::wstring> windows_image_extensions();
 
@@ -98,7 +124,7 @@ namespace iw::imaging
 
 	// The caller owns this temporary file and decides whether and how to publish it.
 	OperationResult encode_to_file(const PixelImage& image, const std::filesystem::path& temporary,
-	                              ImageSaveFormat format, const SaveOptions& options = {});
+	                               ImageSaveFormat format, const SaveOptions& options = {});
 }
 
 #include <iw/imaging/detail/Codec.h>

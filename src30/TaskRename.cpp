@@ -84,16 +84,13 @@ namespace iw::rename
 
 			bool same(const Snapshot& current) const
 			{
-				return valid && current.valid && exists == current.exists && (!exists ||
-					(directory == current.directory && readOnly == current.readOnly &&
-					 reparse == current.reparse && volume == current.volume && index == current.index &&
-					 size == current.size && modified == current.modified));
+				return valid && current.valid && exists == current.exists &&
+				       (!exists || (directory == current.directory && readOnly == current.readOnly &&
+				                    reparse == current.reparse && volume == current.volume && index == current.index &&
+				                    size == current.size && modified == current.modified));
 			}
 
-			bool writable_item() const
-			{
-				return valid && exists && !readOnly && !reparse;
-			}
+			bool writable_item() const { return valid && exists && !readOnly && !reparse; }
 		};
 
 		struct Reviewed
@@ -147,24 +144,23 @@ namespace iw::rename
 					result += files::expand_tokens(text, metadata, source, sequence);
 					break;
 				}
-				result += paths::iequals(text.substr(1, close - 1), L"name") ? source.filename().wstring() :
-					files::expand_tokens(text.substr(0, close + 1), metadata, source, sequence);
+				result += paths::iequals(text.substr(1, close - 1), L"name")
+				              ? source.filename().wstring()
+				              : files::expand_tokens(text.substr(0, close + 1), metadata, source, sequence);
 				text.remove_prefix(close + 1);
 			}
 			return result;
 		}
 	}
 
-	std::filesystem::path sidecar_destination(const std::filesystem::path& sidecar,
-	                                          const std::filesystem::path& source,
+	std::filesystem::path sidecar_destination(const std::filesystem::path& sidecar, const std::filesystem::path& source,
 	                                          const std::filesystem::path& destination)
 	{
 		const auto name = sidecar.filename().wstring();
 		const auto sourceName = source.filename().wstring();
 		if (name.size() > sourceName.size() &&
-			paths::iequals(std::wstring_view(name).substr(0, sourceName.size()), sourceName))
-			return destination.parent_path() /
-				(destination.filename().wstring() + name.substr(sourceName.size()));
+		    paths::iequals(std::wstring_view(name).substr(0, sourceName.size()), sourceName))
+			return destination.parent_path() / (destination.filename().wstring() + name.substr(sourceName.size()));
 		return destination.parent_path() / (destination.stem().wstring() + sidecar.extension().wstring());
 	}
 
@@ -189,7 +185,8 @@ namespace iw::rename
 					for (size_t index = 0; index < group.size(); ++index)
 					{
 						if (paths::equal(actual(group[index]), group[index])) continue;
-						const auto destination = index ? sidecar_destination(group[index], primary, candidate) : candidate;
+						const auto destination = index ? sidecar_destination(group[index], primary, candidate)
+						                               : candidate;
 						const auto state = Snapshot::read(destination);
 						if (!state.valid || state.exists) return false;
 					}
@@ -197,15 +194,13 @@ namespace iw::rename
 				};
 				auto candidate = primary;
 				for (int number = 2; !freeBundle(candidate) && number <= 10000; ++number)
-					candidate = primary.parent_path() /
-						std::format(L"{} ({}){}", primary.stem().wstring(), number, primary.extension().wstring());
+					candidate = primary.parent_path() / std::format(L"{} ({}){}", primary.stem().wstring(), number,
+					                                                primary.extension().wstring());
 				if (!freeBundle(candidate)) continue;
 				for (size_t index = 0; index < group.size(); ++index)
 				{
 					const auto entry = std::ranges::find_if(staged_, [&](const Entry& value)
-					{
-						return paths::equal(value.original, group[index]);
-					});
+					{ return paths::equal(value.original, group[index]); });
 					if (entry == staged_.end()) continue;
 					const auto destination = index ? sidecar_destination(group[index], primary, candidate) : candidate;
 					if (files::move_file_to(entry->temporary, destination, false)) continue;
@@ -240,7 +235,9 @@ namespace iw::rename
 				else ++entry;
 			}
 		}
-		catch (...) {}
+		catch (...)
+		{
+		}
 		return recovered;
 	}
 
@@ -252,14 +249,13 @@ namespace iw::rename
 	}
 
 	void Staging::register_bundle(const std::filesystem::path& primary,
-	                             const std::vector<std::filesystem::path>& sidecars)
+	                              const std::vector<std::filesystem::path>& sidecars)
 	{
 		bundles_.push_back({primary});
 		bundles_.back().insert(bundles_.back().end(), sidecars.begin(), sidecars.end());
 	}
 
-	bool Staging::stage_one(const std::filesystem::path& path,
-		std::vector<std::filesystem::path>* mutatedPaths)
+	bool Staging::stage_one(const std::filesystem::path& path, std::vector<std::filesystem::path>* mutatedPaths)
 	{
 		if (!paths::equal(actual(path), path)) return false;
 		const auto temporary = files::unique_destination(path.parent_path() / L".iw30-rename-stage");
@@ -275,8 +271,7 @@ namespace iw::rename
 		return true;
 	}
 
-	bool Staging::stage(const std::filesystem::path& path,
-		std::vector<std::filesystem::path>* mutatedPaths)
+	bool Staging::stage(const std::filesystem::path& path, std::vector<std::filesystem::path>* mutatedPaths)
 	{
 		if (!paths::equal(actual(path), path)) return false;
 		for (const auto& group : bundles_)
@@ -291,10 +286,7 @@ namespace iw::rename
 
 	void Staging::settled(const std::filesystem::path& temporary)
 	{
-		std::erase_if(staged_, [&temporary](const Entry& entry)
-		{
-			return paths::equal(entry.temporary, temporary);
-		});
+		std::erase_if(staged_, [&temporary](const Entry& entry) { return paths::equal(entry.temporary, temporary); });
 	}
 
 	void rename_row(tasks::TaskRow& row, Staging& staging,
@@ -328,16 +320,18 @@ namespace iw::rename
 				if (paths::equal(staging.actual(sources[index]), target))
 				{
 					if (sources[index].native() == target.native()) continue;
-					if (!staging.stage(sources[index], mutatedPaths)) throw std::runtime_error("The case-only rename could not be staged.");
+					if (!staging.stage(sources[index], mutatedPaths))
+						throw std::runtime_error("The case-only rename could not be staged.");
 					continue;
 				}
 				if (plannedSource && plannedSource(target) && paths::equal(staging.actual(target), target))
 				{
-					if (!staging.stage(target, mutatedPaths)) throw std::runtime_error("A name exchange could not be staged.");
+					if (!staging.stage(target, mutatedPaths))
+						throw std::runtime_error("A name exchange could not be staged.");
 					continue;
 				}
-				const bool approved = reviewed ? reviewed->destinationState[index].exists && row.replace :
-					index == 0 && row.replace;
+				const bool approved = reviewed ? reviewed->destinationState[index].exists && row.replace
+				                               : index == 0 && row.replace;
 				if (approved && reviewed && !reviewed->destinationState[index].same(current))
 					throw std::runtime_error("The approved replacement changed after Review.");
 				if (!approved)
@@ -350,8 +344,7 @@ namespace iw::rename
 					}
 					throw std::runtime_error("A companion destination was taken after review.");
 				}
-				if (!current.writable_item() || current.directory ||
-					!staging.stage(target, mutatedPaths))
+				if (!current.writable_item() || current.directory || !staging.stage(target, mutatedPaths))
 					throw std::runtime_error("The approved replacement could not be staged.");
 				replaced.push_back(staging.actual(target));
 			}
@@ -378,7 +371,8 @@ namespace iw::rename
 			for (auto item = moved.rbegin(); item != moved.rend(); ++item)
 			{
 				if (files::move_file_to(item->first, item->second, false))
-					row.detail += std::format(L" Recovery required: {} remains at {}.", item->second.wstring(), item->first.wstring());
+					row.detail += std::format(L" Recovery required: {} remains at {}.", item->second.wstring(),
+					                          item->first.wstring());
 			}
 			if (!row.detail.empty())
 			{
@@ -403,8 +397,8 @@ namespace iw::rename
 	}
 
 	tasks::TaskPlan analyze(const std::vector<std::filesystem::path>& sources, const std::wstring_view templateText,
-	                       const int start, const tasks::CollisionPolicy policy, const std::stop_token& stop,
-	                       const tasks::ProgressFunction& progress)
+	                        const int start, const tasks::CollisionPolicy policy, const std::stop_token& stop,
+	                        const tasks::ProgressFunction& progress)
 	{
 		tasks::TaskPlan plan;
 		if (templateText.empty())
@@ -447,14 +441,16 @@ namespace iw::rename
 				}
 			}
 			const auto metadata = files::read_metadata(row.source);
-			const auto name = expand_name(templateText, metadata, row.source, start + static_cast<int>(index), directory);
+			const auto name = expand_name(templateText, metadata, row.source, start + static_cast<int>(index),
+			                              directory);
 			const auto finalName = name + (directory ? L"" : row.source.extension().wstring());
 			if (const auto problem = paths::validate_file_name(finalName);
-				name.empty() || finalName.size() > 255 || problem != paths::NameProblem::none)
+			    name.empty() || finalName.size() > 255 || problem != paths::NameProblem::none)
 			{
 				row.state = tasks::RowState::blocked;
-				row.change = name.empty() ? L"The template produces an empty name." :
-					finalName.size() > 255 ? L"The new name exceeds 255 characters." : paths::describe(problem);
+				row.change = name.empty()             ? L"The template produces an empty name."
+				             : finalName.size() > 255 ? L"The new name exceeds 255 characters."
+				                                      : paths::describe(problem);
 			}
 			else row.destination = row.source.parent_path() / finalName;
 			if (row.state != tasks::RowState::blocked && unchanged(row))
@@ -521,14 +517,15 @@ namespace iw::rename
 					{
 						const auto sourceState = Snapshot::read(row.source);
 						const bool directory = sourceState.directory;
-						const auto stem = directory ? proposed[index].filename().wstring() : proposed[index].stem().wstring();
+						const auto stem = directory ? proposed[index].filename().wstring()
+						                            : proposed[index].stem().wstring();
 						const auto extension = directory ? L"" : proposed[index].extension().wstring();
 						bool found = false;
 						for (int suffix = 2; suffix <= 10000; ++suffix)
 						{
 							if (stop.stop_requested()) break;
 							auto candidate = proposed[index].parent_path() /
-								std::format(L"{} ({}){}", stem, suffix, extension);
+							                 std::format(L"{} ({}){}", stem, suffix, extension);
 							if (candidate.filename().native().size() > 255) break;
 							if (collision(candidate)) continue;
 							row.destination = std::move(candidate);
@@ -551,7 +548,8 @@ namespace iw::rename
 						removed = true;
 						continue;
 					}
-					else if (policy == tasks::CollisionPolicy::replace && !duplicate && !protectedSource && !inaccessible)
+					else if (policy == tasks::CollisionPolicy::replace && !duplicate && !protectedSource &&
+					         !inaccessible)
 					{
 						row.replace = true;
 						row.change = L"Replace existing item or companion";
@@ -559,9 +557,10 @@ namespace iw::rename
 					else
 					{
 						row.state = tasks::RowState::blocked;
-						row.change = duplicate ? L"Two items or companions claim this name." :
-							protectedSource ? L"The name belongs to an original that is not being moved." :
-							inaccessible ? L"A destination is inaccessible, read-only, or a folder." : L"File or companion exists.";
+						row.change = duplicate         ? L"Two items or companions claim this name."
+						             : protectedSource ? L"The name belongs to an original that is not being moved."
+						             : inaccessible    ? L"A destination is inaccessible, read-only, or a folder."
+						                               : L"File or companion exists.";
 						removed = true;
 						continue;
 					}
@@ -586,10 +585,12 @@ namespace iw::rename
 			if (row.state == tasks::RowState::skipped) ++plan.skips;
 			if (row.replace) ++plan.replacements;
 			if (row.replace || row.change.starts_with(L"Auto-renamed") || row.change.starts_with(L"Skip -") ||
-				(row.state == tasks::RowState::blocked && !row.destination.empty())) ++plan.collisions;
+			    (row.state == tasks::RowState::blocked && !row.destination.empty()))
+				++plan.collisions;
 		}
 		if (plan.blockReason.empty() && !plan.count(tasks::RowState::ready))
-			plan.blockReason = plan.rows.empty() ? L"Nothing to rename." : L"Every item is unchanged or would be skipped.";
+			plan.blockReason = plan.rows.empty() ? L"Nothing to rename."
+			                                     : L"Every item is unchanged or would be skipped.";
 		return plan;
 	}
 
@@ -599,10 +600,10 @@ namespace iw::rename
 		if (plan.rows.size() != 1 || plan.rows.front().state == tasks::RowState::blocked) return plan;
 		auto& row = plan.rows.front();
 		if (const auto problem = paths::validate_file_name(filename);
-			problem != paths::NameProblem::none || filename.size() > 255)
+		    problem != paths::NameProblem::none || filename.size() > 255)
 		{
-			plan.blockReason = problem == paths::NameProblem::none ?
-				L"The new name exceeds 255 characters." : paths::describe(problem);
+			plan.blockReason = problem == paths::NameProblem::none ? L"The new name exceeds 255 characters."
+			                                                       : paths::describe(problem);
 			row.state = tasks::RowState::blocked;
 			return plan;
 		}
@@ -620,7 +621,7 @@ namespace iw::rename
 			const auto current = Snapshot::read(target);
 			review->destinationState.push_back(current);
 			if (!current.valid || !claimed.insert(target.native()).second ||
-				(current.exists && !paths::equal(target, review->sources[index])))
+			    (current.exists && !paths::equal(target, review->sources[index])))
 			{
 				row.state = tasks::RowState::blocked;
 				plan.blockReason = L"The new filename or a companion destination is occupied or cannot be inspected.";
@@ -658,7 +659,10 @@ namespace iw::rename
 		tasks::RunOptions options;
 		options.undoLabel = L"Batch Rename";
 		options.undoAllBeforeRun = true;
-		options.undoMutatedPaths = [state](const tasks::TaskRow&) { return state->mutatedPaths; };
+		options.undoMutatedPaths = [state](const tasks::TaskRow&)
+		{
+			return state->mutatedPaths;
+		};
 		options.undoPaths = [](const tasks::TaskRow& row)
 		{
 			auto result = bundle(row, row.source);
@@ -684,7 +688,8 @@ namespace iw::rename
 							state->aborted = true;
 					PathSet companions;
 					if (!reviewed->sourceState.front().directory)
-						for (const auto& sidecar : files::sidecar_paths(item.source)) companions.insert(sidecar.native());
+						for (const auto& sidecar : files::sidecar_paths(item.source))
+							companions.insert(sidecar.native());
 					PathSet expected;
 					for (const auto& sidecar : item.sidecars) expected.insert(sidecar.native());
 					if (companions != expected) state->aborted = true;
@@ -701,10 +706,11 @@ namespace iw::rename
 			if (valid)
 			{
 				for (size_t index = 0; index < reviewed->sources.size(); ++index)
-					if (!reviewed->sourceState[index].same(Snapshot::read(state->staging.actual(reviewed->sources[index]))))
+					if (!reviewed->sourceState[index].same(
+							Snapshot::read(state->staging.actual(reviewed->sources[index]))))
 						valid = false;
 				if (!reviewed->sourceState.front().directory &&
-					paths::equal(state->staging.actual(row.source), row.source))
+				    paths::equal(state->staging.actual(row.source), row.source))
 				{
 					PathSet current, expected;
 					for (const auto& sidecar : files::sidecar_paths(row.source)) current.insert(sidecar.native());
@@ -721,7 +727,7 @@ namespace iw::rename
 						valid = false;
 					const auto expected = state->originalState.find(target.native());
 					if (expected == state->originalState.end() ||
-						!expected->second.same(Snapshot::read(state->staging.actual(target))))
+					    !expected->second.same(Snapshot::read(state->staging.actual(target))))
 						valid = false;
 				}
 			}
@@ -742,8 +748,8 @@ namespace iw::rename
 			};
 			try
 			{
-				rename_row(row, state->staging, [state](const auto& path) { return state->active.contains(path.native()); },
-					&state->mutatedPaths);
+				rename_row(row, state->staging, [state](const auto& path)
+				{ return state->active.contains(path.native()); }, &state->mutatedPaths);
 			}
 			catch (...)
 			{
@@ -759,19 +765,22 @@ namespace iw::rename
 				auto owner = std::ranges::find_if(result.rows, [&](const tasks::TaskRow& row)
 				{
 					return paths::equal(row.source, recovery.original) ||
-						std::ranges::any_of(row.sidecars, [&](const auto& path) { return paths::equal(path, recovery.original); });
+					       std::ranges::any_of(row.sidecars,
+					                           [&](const auto& path) { return paths::equal(path, recovery.original); });
 				});
 				if (owner == result.rows.end())
 					owner = std::ranges::find_if(result.rows, [&](const tasks::TaskRow& row)
 					{
 						const auto reviewed = std::static_pointer_cast<const Reviewed>(row.context);
-						return reviewed && std::ranges::any_of(reviewed->destinations,
-							[&](const auto& path) { return paths::equal(path, recovery.original); });
+						return reviewed && std::ranges::any_of(reviewed->destinations, [&](const auto& path)
+						{ return paths::equal(path, recovery.original); });
 					});
 				if (owner == result.rows.end()) continue;
 				if (!paths::equal(recovery.original, recovery.recovered) || recovery.failed)
-					owner->detail += std::format(L" {} at {}.", recovery.failed ? L"Recovery required; item retained" :
-						L"Unfinished item recovered", recovery.recovered.wstring());
+					owner->detail += std::format(L" {} at {}.",
+					                             recovery.failed ? L"Recovery required; item retained"
+					                                             : L"Unfinished item recovered",
+					                             recovery.recovered.wstring());
 				if (recovery.failed) owner->state = tasks::RowState::failed;
 			}
 		};
@@ -788,7 +797,7 @@ namespace iw
 		return control ? control->text : std::wstring{};
 	}
 
-	void TaskRename::set_template(std::wstring text)
+	void TaskRename::set_template(const std::wstring& text)
 	{
 		if (auto* control = panel_.find(idTemplate)) control->text = text;
 		if (templateInput_) templateInput_->set_text(text);
@@ -797,13 +806,15 @@ namespace iw
 
 	void TaskRename::build_controls()
 	{
-		const auto changed = [this] { controls_changed(); };
+		const auto changed = [this]
+		{
+			controls_changed();
+		};
 
 		ui::Control description;
 		description.id = idDescription;
 		description.kind = ui::ControlKind::label;
-		description.label =
-			L"Every selected item is renamed in place. Review the new names before you run.";
+		description.label = L"Every selected item is renamed in place. Review the new names before you run.";
 		panel_.add(std::move(description));
 
 		ui::Control heading;
@@ -868,6 +879,7 @@ namespace iw
 			platform::TextInputOptions options;
 			options.text = L"1";
 			options.cueBanner = L"Starting sequence number";
+			options.font = platform::create_message_font(dpi_);
 			options.changed = [this](const std::wstring& text)
 			{
 				if (auto* control = panel_.find(idStart)) control->text = text;
@@ -875,13 +887,13 @@ namespace iw
 			};
 			bind_text_input(idStart, options);
 			startInput_ = platform::create_text_input(frame_, std::move(options));
-			if (startInput_) startInput_->set_font(platform::create_message_font(dpi_));
 		}
 		if (!templateInput_ && frame_)
 		{
 			platform::TextInputOptions options;
 			options.text = L"file-###";
 			options.cueBanner = L"file-###";
+			options.font = platform::create_message_font(dpi_);
 			options.changed = [this](const std::wstring& text)
 			{
 				if (auto* control = panel_.find(idTemplate)) control->text = text;
@@ -889,11 +901,7 @@ namespace iw
 			};
 			bind_text_input(idTemplate, options);
 			templateInput_ = platform::create_text_input(frame_, std::move(options));
-			if (templateInput_)
-			{
-				templateInput_->set_font(platform::create_message_font(dpi_));
-				templateInput_->show(true);
-			}
+			if (templateInput_) templateInput_->show(true);
 		}
 	}
 
@@ -901,18 +909,21 @@ namespace iw
 	{
 		switch (control.id)
 		{
+			// clang-format off
 		case idTemplate: if (templateInput_) templateInput_->set_focus(); return;
 		case idStart: if (startInput_) startInput_->set_focus(); return;
 		case idSuggestFile: set_template(L"file-###"); return;
 		case idSuggestCreated: set_template(L"{created}-###"); return;
 		case idSuggestYearMonth: set_template(L"{year}-{month}-###"); return;
 		case idSuggestName: set_template(L"{name}-###"); return;
+		// clang-format on
 		case idHelp:
 		{
 			platform::ChoiceDefinition help;
 			help.title = L"Rename templates";
 			help.heading = L"Build a name from text, numbers, and metadata";
-			help.message = L"Use # for a sequence number; ### pads it to at least three digits.\n\n"
+			help.message =
+				L"Use # for a sequence number; ### pads it to at least three digits.\n\n"
 				L"{name} keeps the old name without its file extension. File extensions are kept automatically; "
 				L"a folder's dots remain part of its name.\n\n"
 				L"Date tokens: {created}, {year}, {month}, {day}, {time}.\n"
@@ -969,10 +980,11 @@ namespace iw
 		case 0: return row.source.filename().wstring();
 		case 1:
 			// A no-op row has no direction arrow.
-			return row.source.native() == row.destination.native() || row.destination.empty() ? std::wstring{} : L"\u2192";
+			return row.source.native() == row.destination.native() || row.destination.empty() ? std::wstring{}
+			                                                                                  : L"\u2192";
 		default:
 			if (finished_ || (row.state != tasks::RowState::ready && row.state != tasks::RowState::blocked &&
-				row.state != tasks::RowState::skipped && row.state != tasks::RowState::pending))
+			                  row.state != tasks::RowState::skipped && row.state != tasks::RowState::pending))
 				return row.destination.filename().wstring() + L" - " + TaskView::review_cell(row, 2);
 			if (row.destination.empty()) return row.change;
 			return row.destination.filename().wstring() + (row.change.empty() ? L"" : L" - " + row.change);
@@ -989,8 +1001,7 @@ namespace iw
 			start = text.empty() ? -1 : 0;
 			for (const auto digit : text)
 			{
-				if (digit < L'0' || digit > L'9' ||
-					start > ((std::numeric_limits<int>::max)() - (digit - L'0')) / 10)
+				if (digit < L'0' || digit > L'9' || start > ((std::numeric_limits<int>::max)() - (digit - L'0')) / 10)
 				{
 					start = -1;
 					break;
@@ -1002,8 +1013,8 @@ namespace iw
 		if (const auto* control = panel_.find(idCollision)) policy = policy_from_choice(control->value);
 		auto sources = targets();
 
-		return [templateText, start, policy, sources = std::move(sources)](
-			const std::stop_token& stop, const tasks::ProgressFunction& progress)
+		return [templateText, start, policy, sources = std::move(sources)](const std::stop_token& stop,
+		                                                                   const tasks::ProgressFunction& progress)
 		{
 			return rename::analyze(sources, templateText, start, policy, stop, progress);
 		};

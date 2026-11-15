@@ -7,48 +7,46 @@
 | `src22` | ImageWalker 2.2 application and tests |
 | `src23` | ImageWalker 2.3 application and tests |
 | `src30` | ImageWalker 3.0 application and tests |
-| `include/iw/imaging` | Modern, platform-independent inline imaging code and contracts |
+| `include/iw/imaging` | Modern, platform-independent inline imaging contracts and code |
 | `include/iw/legacy` | Header-only 2.x compatibility models and adapters |
-| `tests/imaging` | Shared imaging regression consumer and ownership/direct-dependency check |
-| `include/iw` | Header-only code shared by the four WTL applications |
+| `include/iw` | Other header-only code shared by the WTL applications, such as the shell tree, crash reporter and test runner |
+| `include/core` | `help_file.h`, used by all five, and the WTL applications' utility headers |
 | `include/wtl` | Vendored WTL headers |
-| `include/core` | Historical WTL utility headers retained by the 1.x/2.x applications; not part of modern imaging or 3.0 geometry |
-| `include/iw/ColorButton.h` | Legacy colour control shared by the 2.x trees |
+| `tests/imaging` | Shared imaging regression consumer and the ownership and dependency check |
+| `cmake` | The shared imaging CMake module |
 | `third-party` | CMake recipes, versions and patches for the fetched dependencies |
-| `Help` | Compiled-help sources for all five applications, with separate 3.0 workflow topics |
-| `res-extra` | Historical icons, bitmaps and cursors kept outside the built resource scripts |
-| `tools` | Help compiler and checkers, and repository utilities |
-| `cmake` | Shared CMake modules |
-| `Setup` | Historical installer artwork and licence text |
+| `Help` | Compiled-help sources for all five applications, with separate 3.0 topics |
+| `res-extra` | Icons, bitmaps and cursors kept outside the built resource scripts |
+| `Setup` | Installer artwork and licence text, not used by the build |
+| `tools` | Help compiler, checkers and capture script, the project commands and the dd contract test |
 | `exe` | Executables, PDBs, ini files, logs, dictionaries, tool configuration and CHM output |
-| `build` | Generated build trees and UI/image test harnesses |
+| `build` | Generated build trees |
 | `docs` | Repository reference documents |
-| `.dd` | Unmodified, pinned shared dd runtime and templates |
-| `.dd/state` | Ignored, machine-local CMake preset verification records |
+| `.dd` | The vendored dd runtime; `.dd/state` holds ignored, machine-local preset records |
 | `dd.psd1` | Target metadata and project command declarations |
 
-Track only `exe/dic` and `exe/imagewalker30-tools.json` under `exe`; keep
+Git tracks only `exe/dic` and `exe/imagewalker30-tools.json` under `exe`; keep
 generated output, settings and logs out of version control.
 
 ## Ownership
 
-Keep reusable UI, utility and test helpers header-only in `include/`. Put
-imaging contracts and their inline definitions in `include/iw/imaging` and
-`include/iw/legacy`; compiled codec and platform mechanisms belong in libfiles
-and libdesktop. There is no shared application object library. Keep translation units with their owning
-application. Follow [libiw-plan.md](libiw-plan.md) for the public API, codec
-selection and adapter boundaries.
+Keep reusable UI, utility and test helpers header-only in `include/`, imaging
+contracts and their inline definitions in `include/iw/imaging` and
+`include/iw/legacy`, and translation units with the application that owns them.
+Compiled codec and platform mechanisms belong in libfiles and libdesktop.
+[imaging.md](imaging.md) defines the imaging API, codec selection and adapter
+boundaries.
 
 Keep each application's resource script, manifest, icon, version identity,
-entry point and tests in its directory. Embed `ImageWalker.chm` in every
-resource script. Preserve independent builds of the 2.x applications; see
-[architecture-2x.md](architecture-2x.md).
+entry point and tests in its directory, and preserve the 2.x applications'
+independent builds; see [architecture-2x.md](architecture-2x.md).
 
-For ImageWalker 3.0, use libdesktop's `core`, `platform`, `render` and `ui`
-contracts and `include/iw/imaging`, not the historical compatibility headers or
-WTL utility geometry. The application frame and drawn menu bar come from
-libdesktop::ui; the folder tree remains an application-owned Win32 child. Keep
-ordinary codec acquisition in libfiles; the explicit Windows display adapter
-calls libdesktop's platform image API. `third-party/` pins the
-library and the application-owned Hunspell recipe. Place 3.0's help topics in
-the common `ImageWalker.chm`.
+ImageWalker 3.0 uses libdesktop's `core`, `platform`, `render` and `ui`
+libraries and `include/iw/imaging`, never the historical compatibility headers,
+the shared WTL-era headers in `include/iw` or the geometry helpers in
+`include/core`. Its frame, drawn menu bar and text fields come from
+`libdesktop::ui`. It draws its own folder tree and plays media into a
+libdesktop texture and audio output, so it embeds no native controls. Its
+explicit Windows display adapter calls libdesktop's platform image API; all
+other image codec work goes through libfiles. Its help topics are part of the
+common `ImageWalker.chm`.

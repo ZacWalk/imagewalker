@@ -15,6 +15,8 @@
 #include <windows.h>
 #include <tchar.h>
 #include <stdio.h>
+#include <crtdbg.h>
+#include "testwindows.h"
 
 namespace IW
 {
@@ -43,6 +45,12 @@ inline int &CaseFailures()
 	return failures;
 }
 
+inline int &Checks()
+{
+	static int checks = 0;
+	return checks;
+}
+
 // These are /SUBSYSTEM:WINDOWS executables, so the CRT never binds stdout even
 // when the caller redirected it. Writing to the handle directly is the only
 // thing that behaves the same for a console, a file and a pipe -- reopening
@@ -60,8 +68,9 @@ inline HANDLE Output()
 			return inherited;
 		}
 
+		// Scripts provide pipes; never create a visible console window for a test.
 		if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::GetConsoleWindow() == nullptr)
-			::AllocConsole();
+			return static_cast<HANDLE>(nullptr);
 
 		return ::CreateFileA("CONOUT$", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
 		                     nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -118,6 +127,7 @@ inline void Fail(const char *expression, const char *file, int line)
 #define IW_CHECK(iw_expr)                                                         \
 	do                                                                            \
 	{                                                                             \
+		++::IW::Test::Detail::Checks();                                            \
 		if (!(iw_expr))                                                           \
 			::IW::Test::Fail(#iw_expr, __FILE__, __LINE__);                       \
 	} while (0)
@@ -125,6 +135,7 @@ inline void Fail(const char *expression, const char *file, int line)
 #define IW_CHECK_EQ(iw_a, iw_b)                                                   \
 	do                                                                            \
 	{                                                                             \
+		++::IW::Test::Detail::Checks();                                            \
 		if (!((iw_a) == (iw_b)))                                                  \
 			::IW::Test::Fail(#iw_a " == " #iw_b, __FILE__, __LINE__);             \
 	} while (0)
@@ -185,7 +196,19 @@ inline void RunOne(Case *item)
 // should use as the process exit code.
 inline int RunAll(const char *appName)
 {
+	_CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+	_CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+	_CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+	_CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+	Detail::CaseFailures() = 0;
+	Detail::Checks() = 0;
 	Detail::Print("%s tests\r\n", appName);
+	const OffscreenWindows offscreen;
+	if (!offscreen)
+	{
+		Detail::Print("FAIL: cannot isolate native test windows; no cases run.\r\n");
+		return 1;
+	}
 
 	// Registration reverses source order; run them the way they were written.
 	Case *ordered = nullptr;
@@ -223,10 +246,10 @@ inline int RunAll(const char *appName)
 		}
 	}
 
-	Detail::Print("%d of %d passed, %d assertion failures\r\n",
-	              total - failed, total, Detail::CaseFailures());
+	Detail::Print("%d of %d passed, %d checks, %d assertion failures\r\n",
+	              total - failed, total, Detail::Checks(), Detail::CaseFailures());
 
-	return failed;
+	return total > 0 ? failed : 1;
 }
 
 } // namespace Test

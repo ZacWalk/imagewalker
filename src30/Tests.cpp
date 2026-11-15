@@ -37,6 +37,7 @@
 #include "TestPhotoGeometry.h"
 #include "UndoTests.h"
 #include "MediaTests.h"
+#include "FolderTreeTests.h"
 #include "PhotoOrientationTests.h"
 
 #include <array>
@@ -115,23 +116,22 @@ namespace iw::tests
 				{2, ModeBar::Glyph::folders, L"Folders", {}, true},
 				{3, ModeBar::Glyph::convert, L"Convert"},
 				{4, ModeBar::Glyph::rename, L"Rename"},
-				{5, ModeBar::Glyph::fullscreen, L"Full", {}, true}
+				{5, ModeBar::Glyph::fullscreen, L"Full", {}, true},
 			});
 			bar->set_shortcuts({
 				{100, ModeBar::Glyph::folder, L"First", L"first", false, true, true},
 				{101, ModeBar::Glyph::pin, L"Pin"},
-				{102, ModeBar::Glyph::folder, L"Clipped", L"clipped", false, true, true}
+				{102, ModeBar::Glyph::folder, L"Clipped", L"clipped", false, true, true},
 			});
 			std::vector<ModeBar::Button> commands;
 			std::vector<int> removed;
 			bar->set_command_handler([&commands](const auto& button) { commands.push_back(button); });
 			bar->set_remove_handler([&removed](const auto& button) { removed.push_back(button.id); });
 			bar->set_checked(3);
-			for (int row = 0; row < 5; ++row)
-				frame->mouse(platform::MouseMessage::leftButtonDown, {34, 34 + 64 * row});
-			reporter.check(commands.size() == 5 && !commands[0].checked && commands[1].checked &&
-				commands[2].checked && !commands[3].checked && commands[4].checked,
-				L"checking a mode clears other modes but retains Folders and Full toggles");
+			for (int row = 0; row < 5; ++row) frame->mouse(platform::MouseMessage::leftButtonDown, {34, 34 + 64 * row});
+			reporter.check(commands.size() == 5 && !commands[0].checked && commands[1].checked && commands[2].checked &&
+			                   !commands[3].checked && commands[4].checked,
+			               L"checking a mode clears other modes but retains Folders and Full toggles");
 			commands.clear();
 			bar->set_enabled(3, false);
 			frame->mouse(platform::MouseMessage::leftButtonDown, {34, 162});
@@ -148,19 +148,18 @@ namespace iw::tests
 			const int invalidations = frame->invalidations;
 			frame->mouse(platform::MouseMessage::move, {35, 35});
 			reporter.check(frame->tracks == 1 && frame->invalidations == invalidations,
-				L"moving inside the same button does not repaint or rearm leave tracking");
+			               L"moving inside the same button does not repaint or rearm leave tracking");
 			frame->mouse(platform::MouseMessage::leave, {});
 			frame->mouse(platform::MouseMessage::move, {34, 34});
 			reporter.check(frame->tracks == 2 && frame->invalidations > invalidations,
-				L"leaving clears hover and reentry rearms tracking");
+			               L"leaving clears hover and reentry rearms tracking");
 
 			bar->set_dpi(192);
 			reporter.check(bar->width() == 136, L"the strip width scales at 200 percent DPI");
 			frame->move({0, 0, bar->width(), 920});
 			bar->set_dpi(192);
 			frame->mouse(platform::MouseMessage::leftButtonDown, {68, 68});
-			reporter.check(commands.size() == 1 && commands.front().id == 1,
-				L"hit testing uses the scaled layout");
+			reporter.check(commands.size() == 1 && commands.front().id == 1, L"hit testing uses the scaled layout");
 			bar->set_dpi(0);
 			reporter.check(bar->width() == 68, L"an unspecified DPI uses 96");
 
@@ -171,7 +170,8 @@ namespace iw::tests
 				stableArgument = button.id == 1 && button.caption == L"Browse";
 			});
 			frame->mouse(platform::MouseMessage::leftButtonDown, {68, 34});
-			reporter.check(stableArgument, L"a callback can rebuild the modes without invalidating its selected button");
+			reporter.check(stableArgument,
+			               L"a callback can rebuild the modes without invalidating its selected button");
 		}
 
 		class HostedTestTask final : public TaskView
@@ -196,7 +196,11 @@ namespace iw::tests
 			void build_controls() override {}
 			std::vector<Column> review_columns() const override { return {{L"Source"}}; }
 			bool auto_analyze() const override { return false; }
-			bool confirm_cancel_close() override { ++prompts; return confirmClose; }
+			bool confirm_cancel_close() override
+			{
+				++prompts;
+				return confirmClose;
+			}
 			tasks::TaskRunner::AnalyzeFunction make_analyzer() override
 			{
 				return [](const std::stop_token&, const tasks::ProgressFunction& progress)
@@ -237,12 +241,12 @@ namespace iw::tests
 			host.canvas()->focused = false;
 			host.focus_frame();
 			reporter.check(host.canvas()->focused,
-				L"keyboard focus given to the activated frame passes on to the canvas");
+			               L"keyboard focus given to the activated frame passes on to the canvas");
 			reporter.check(host.tree->visible && host.splitter()->visible && host.modes()->visible,
-				L"browsing initially shows the folder tree, splitter and modes");
+			               L"browsing initially shows the folder tree, splitter and modes");
 			host.folders();
 			reporter.check(!host.tree->visible && !host.splitter()->visible,
-				L"the Folders mode command hides both tree and splitter");
+			               L"the Folders mode command hides both tree and splitter");
 			host.folders();
 			const auto originalBounds = host.center()->bounds;
 			auto task = std::make_shared<HostedTestTask>(dispatcher);
@@ -253,48 +257,48 @@ namespace iw::tests
 			reporter.check(host.can_undo(), L"a task can expose its reversible draft to the host");
 			host.undo();
 			reporter.check(task->undoCount == 1 && host.task() == task && !host.can_undo(),
-				L"host Undo routes to the task draft without closing it or changing file history");
+			               L"host Undo routes to the task draft without closing it or changing file history");
 			const auto taskFrame = MainWindowAccess::record(task->frame());
 			reporter.check(!host.canvas()->visible && !host.tree->visible && !host.splitter()->visible &&
-				taskFrame->visible && taskFrame->focused && host.modes()->visible,
-				L"task entry replaces Items, focuses the task and retains the mode bar");
+			                   taskFrame->visible && taskFrame->focused && host.modes()->visible,
+			               L"task entry replaces Items, focuses the task and retains the mode bar");
 			taskFrame->focused = false;
 			host.canvas()->focused = false;
 			host.focus_frame();
 			reporter.check(taskFrame->focused && !host.canvas()->focused,
-				L"keyboard focus given to the activated frame passes on to the active task");
+			               L"keyboard focus given to the activated frame passes on to the active task");
 			reporter.check(host.root->title == L"Host integration - ImageWalker 3.0" &&
-				host.center()->bounds.width > originalBounds.width &&
-				rect_equals(taskFrame->bounds, host.center()->client_rect()),
-				L"task entry updates the title and expands into the former tree area");
+			                   host.center()->bounds.width > originalBounds.width &&
+			                   rect_equals(taskFrame->bounds, host.center()->client_rect()),
+			               L"task entry updates the title and expands into the former tree area");
 			task->publish_status(L"Review status");
 			reporter.check(host.chrome->status.text == L"Review status",
-				L"TaskView status reaches MainWindow's command surface");
+			               L"TaskView status reaches MainWindow's command surface");
 			host.information_progress();
 			reporter.check(host.chrome->status.text == L"Review status",
-				L"background Items metadata progress cannot replace task status");
+			               L"background Items metadata progress cannot replace task status");
 			auto toolbar = host.chrome->taskToolbar;
 			reporter.check(toolbar.size() >= 2, L"the host installs the task toolbar");
 			if (toolbar.size() < 2) return;
 			const auto maximize = toolbar[toolbar.size() - 2].command;
 			maximize->invoke();
 			reporter.check(host.root->maximized && maximize->toolbarText() == L"Restore",
-				L"the task Maximize command changes its real host and its dynamic caption");
+			               L"the task Maximize command changes its real host and its dynamic caption");
 			maximize->invoke();
 			reporter.check(!host.root->maximized && maximize->toolbarText() == L"Maximize",
-				L"Restore returns the host to its normal placement");
+			               L"Restore returns the host to its normal placement");
 			host.resize({0, 0, 780, 520});
 			reporter.check(rect_equals(taskFrame->bounds, host.center()->client_rect()),
-				L"host resize resizes the active task");
+			               L"host resize resizes the active task");
 
 			task->analyze();
 			reporter.check(task->busy() && !background.empty(), L"analysis runs through the owned task dispatcher");
 			const auto replacement = std::make_shared<HostedTestTask>(dispatcher);
 			reporter.check(!host.set_task(replacement) && host.task() == task && !replacement->frame(),
-				L"a close veto retains the active task without creating its replacement");
+			               L"a close veto retains the active task without creating its replacement");
 			host.fullscreen();
 			reporter.check(!host.fullscreen_state() && host.task() == task && host.root->fullscreenChanges == 0,
-				L"the mode-bar fullscreen command honors a busy task's close veto");
+			               L"the mode-bar fullscreen command honors a busy task's close veto");
 			drain(background);
 			if (!uiQueue.empty())
 			{
@@ -302,33 +306,34 @@ namespace iw::tests
 				uiQueue.erase(uiQueue.begin());
 				progress();
 				reporter.check(host.chrome->status.progressPercent == 25,
-					L"task progress reaches the host as a percentage");
+				               L"task progress reaches the host as a percentage");
 			}
 			drain(uiQueue);
 			reporter.check(!task->busy(), L"the UI completion releases analysis ownership");
 			host.fullscreen();
-			reporter.check(!host.task() && host.fullscreen_state() && host.root->fullscreen &&
-				host.canvas()->visible && !host.tree->visible && !host.modes()->visible &&
-				host.chrome->taskToolbar.empty() && host.chrome->fullscreenLayout,
-				L"entering fullscreen closes the idle task, restores Items and hides browsing chrome");
+			reporter.check(!host.task() && host.fullscreen_state() && host.root->fullscreen && host.canvas()->visible &&
+			                   !host.tree->visible && !host.modes()->visible && host.chrome->taskToolbar.empty() &&
+			                   host.chrome->fullscreenLayout,
+			               L"entering fullscreen closes the idle task, restores Items and hides browsing chrome");
 			reporter.check(taskFrame->closes == 1 && !taskFrame->reactor && !task->frame(),
-				L"leaving a task destroys its native child and detaches its reactor");
+			               L"leaving a task destroys its native child and detaches its reactor");
 			host.set_fullscreen(true);
 			reporter.check(host.root->fullscreenChanges == 1, L"reentering fullscreen is idempotent");
 			host.fullscreen();
 			reporter.check(!host.fullscreen_state() && !host.root->fullscreen && host.tree->visible &&
-				host.splitter()->visible && host.modes()->visible && !host.chrome->fullscreenLayout,
-				L"leaving fullscreen restores the saved browsing panes");
+			                   host.splitter()->visible && host.modes()->visible && !host.chrome->fullscreenLayout,
+			               L"leaving fullscreen restores the saved browsing panes");
 
 			host.center()->refuseChild = true;
 			reporter.check(!host.set_task(replacement) && !host.task() && host.canvas()->visible &&
-				host.chrome->taskToolbar.empty(), L"failed task creation leaves Items available with its toolbar");
+			                   host.chrome->taskToolbar.empty(),
+			               L"failed task creation leaves Items available with its toolbar");
 			host.center()->refuseChild = false;
 			reporter.check(host.set_task(replacement), L"task creation can be retried after a platform failure");
 			const auto close = host.chrome->taskToolbar.back().command;
 			close->invoke();
 			reporter.check(!host.task() && host.canvas()->visible && host.root->closes == 0,
-				L"the task toolbar Close returns to Items without exiting the application");
+			               L"the task toolbar Close returns to Items without exiting the application");
 
 			auto cancelling = std::make_shared<HostedTestTask>(dispatcher);
 			cancelling->confirmClose = true;
@@ -336,11 +341,11 @@ namespace iw::tests
 			cancelling->analyze();
 			host.exit();
 			reporter.check(host.task() == cancelling && cancelling->closing() && host.root->closes == 0,
-				L"application exit waits for an accepted cancellation rather than destroying a busy task");
+			               L"application exit waits for an accepted cancellation rather than destroying a busy task");
 			drain(background);
 			drain(uiQueue);
 			reporter.check(!host.task() && host.root->closes == 1 && !cancelling->frame(),
-				L"the task's deferred closed callback completes pending application exit exactly once");
+			               L"the task's deferred closed callback completes pending application exit exactly once");
 		}
 
 		void test_canvas_refresh(Reporter& reporter)
@@ -359,46 +364,50 @@ namespace iw::tests
 			canvas.load(gone);
 			reporter.check(paths::equal(canvas.path(), gone), L"the folder is displayed");
 			std::vector<app::pointi> contextPoints;
-			canvas.set_context_menu_handler([&contextPoints](const app::pointi point) { contextPoints.push_back(point); });
+			canvas.set_context_menu_handler([&contextPoints](const app::pointi point)
+			{ contextPoints.push_back(point); });
 			host.canvas()->mouse(platform::MouseMessage::contextMenu, {17, 23});
 			reporter.check(contextPoints == std::vector<app::pointi>{{17, 23}},
-				L"the canvas receives a screen-space context-menu request");
-			ImageCanvasAccess::gesture(canvas, host.canvas(), {platform::GestureKind::zoom, {20, 20}, 480, true, false});
-			ImageCanvasAccess::gesture(canvas, host.canvas(), {platform::GestureKind::zoom, {20, 20}, 576, false, false});
+			               L"the canvas receives a screen-space context-menu request");
+			ImageCanvasAccess::gesture(canvas, host.canvas(),
+			                           {platform::GestureKind::zoom, {20, 20}, 480, true, false});
+			ImageCanvasAccess::gesture(canvas, host.canvas(),
+			                           {platform::GestureKind::zoom, {20, 20}, 576, false, false});
 			reporter.check(!canvas.fit(), L"a pinch distance change leaves fit mode");
 			// A fitted picture has nowhere to pan to, so the pan follows the pinch.
 			const int panInvalidations = host.canvas()->invalidations;
 			ImageCanvasAccess::gesture(canvas, host.canvas(), {platform::GestureKind::pan, {10, 10}, 0, true, false});
 			ImageCanvasAccess::gesture(canvas, host.canvas(), {platform::GestureKind::pan, {24, 31}, 0, false, false});
 			reporter.check(host.canvas()->invalidations > panInvalidations,
-				L"a forwarded pan invalidates the image canvas");
+			               L"a forwarded pan invalidates the image canvas");
 			canvas.set_items({{gone, files::ItemKind::folder}, {kept, files::ItemKind::folder}}, 2);
 			reporter.check(paths::equal(canvas.path(), gone), L"a refresh keeps a displayed item that is still listed");
 			canvas.select_index(0, false, false);
 			canvas.set_fullscreen(true);
 			canvas.select_index(1, false, false);
-			reporter.check(canvas.selected_paths() == std::vector<std::filesystem::path>{kept} &&
-				canvas.selection_count() == 1 && canvas.focused_index() == 1,
+			reporter.check(
+				canvas.selected_paths() == std::vector<std::filesystem::path>{kept} && canvas.selection_count() == 1 &&
+					canvas.focused_index() == 1,
 				L"fullscreen file commands target the visible selection rather than the saved browsing selection");
 			canvas.select_index(0, false, true);
 			reporter.check(canvas.selection_count() == 2 && canvas.selected_paths().size() == 2 &&
-				canvas.focused_index() == 0,
-				L"fullscreen command counts and focus agree with a comparison selection");
+			                   canvas.focused_index() == 0,
+			               L"fullscreen command counts and focus agree with a comparison selection");
 			canvas.set_items({{kept, files::ItemKind::folder}, {gone, files::ItemKind::folder}}, 2);
 			reporter.check(canvas.selection_count() == 2 && canvas.focused_index() == 1,
-				L"a fullscreen refresh restores its own selection and focus by path");
+			               L"a fullscreen refresh restores its own selection and focus by path");
 			canvas.set_fullscreen(false);
 			reporter.check(canvas.selected_paths() == std::vector<std::filesystem::path>{gone} &&
-				canvas.selection_count() == 1 && canvas.focused_index() == 1,
-				L"leaving fullscreen after a refresh restores the independent browsing selection");
+			                   canvas.selection_count() == 1 && canvas.focused_index() == 1,
+			               L"leaving fullscreen after a refresh restores the independent browsing selection");
 			std::filesystem::remove(gone, error);
 			canvas.set_items({{kept, files::ItemKind::folder}}, 1);
 			reporter.check(canvas.path().empty(),
-				L"a refresh stops showing an item that was moved, renamed or deleted");
+			               L"a refresh stops showing an item that was moved, renamed or deleted");
 			canvas.load(kept);
 			canvas.set_items({}, 0);
 			reporter.check(paths::equal(canvas.path(), kept),
-				L"an item that still exists stays on show after browsing to another folder");
+			               L"an item that still exists stays on show after browsing to another folder");
 			std::filesystem::remove_all(root, error);
 		}
 
@@ -411,22 +420,23 @@ namespace iw::tests
 			host.begin_folder_scan(folder, 1);
 			host.finish_folder_scan(1, folder, {{folder / L"retained", files::ItemKind::folder}});
 			reporter.check(host.collection_load_state() == LoadState::ready && host.collection_size() == 1,
-				L"a successful scan publishes the reviewed folder contents");
+			               L"a successful scan publishes the reviewed folder contents");
 			host.begin_folder_scan(folder, 2);
 			const auto denied = std::make_error_code(std::errc::permission_denied);
 			host.finish_folder_scan(1, folder, {}, denied);
 			reporter.check(host.collection_load_state() == LoadState::loading && host.collection_size() == 1,
-				L"a stale scan failure cannot replace a newer folder request");
+			               L"a stale scan failure cannot replace a newer folder request");
 			host.finish_folder_scan(2, folder, {}, denied);
-			reporter.check(host.collection_load_state() == LoadState::failed && host.collection_size() == 1 &&
-				host.chrome->status.text.find(L"Could not read") != std::wstring::npos &&
-				!host.chrome->status.scanning,
+			reporter.check(
+				host.collection_load_state() == LoadState::failed && host.collection_size() == 1 &&
+					host.chrome->status.text.find(L"Could not read") != std::wstring::npos &&
+					!host.chrome->status.scanning,
 				L"a failed refresh retains known contents and reports failure instead of an empty successful scan");
 			host.begin_folder_scan(folder, 3);
 			host.finish_folder_scan(3, folder, {});
 			reporter.check(host.collection_load_state() == LoadState::ready && host.collection_size() == 0 &&
-				host.chrome->status.text.find(L"Could not read") == std::wstring::npos,
-				L"a later successful scan clears the previous failure");
+			                   host.chrome->status.text.find(L"Could not read") == std::wstring::npos,
+			               L"a later successful scan clears the previous failure");
 		}
 
 		void test_sync_workflow(Reporter& reporter)
@@ -470,7 +480,8 @@ namespace iw::tests
 			const auto countAction = [](const tasks::TaskPlan& plan, const int action)
 			{
 				size_t count = 0;
-				for (const auto& row : plan.rows) if (row.tag == action) ++count;
+				for (const auto& row : plan.rows)
+					if (row.tag == action) ++count;
 				return count;
 			};
 
@@ -479,65 +490,67 @@ namespace iw::tests
 			write(scope.local / L"nested" / L"child.txt", "nested");
 			auto reviewed = sync::analyze(scope);
 			reporter.check(reviewed.plan.can_run() && reviewed.plan.rows.size() == 2 &&
-				countAction(reviewed.plan, sync::copyToRemote) == 2,
-				L"one-folder scope compares the entire selected tree, including nested files");
+			                   countAction(reviewed.plan, sync::copyToRemote) == 2,
+			               L"one-folder scope compares the entire selected tree, including nested files");
 			if (reviewed.plan.rows.empty())
 			{
 				emit(reviewed.plan.blockReason + L"\n");
 				return;
 			}
 			reporter.check(reviewed.plan.rows.front().destination.parent_path() == scope.remote / L"nested" ||
-				reviewed.plan.rows.back().destination.parent_path() == scope.remote / L"nested",
-				L"one-folder scope retains relative destination folders");
+			                   reviewed.plan.rows.back().destination.parent_path() == scope.remote / L"nested",
+			               L"one-folder scope retains relative destination folders");
 			scope.wholeCollection = true;
 			scope.collection = {scope.local, root / L"collection" / L"second"};
 			write(scope.collection[1] / L"second.txt", "second");
 			write(scope.remote / L"unmapped" / L"keep.txt", "unmapped");
 			reviewed = sync::analyze(scope);
 			reporter.check(reviewed.plan.can_run() && countAction(reviewed.plan, sync::copyToRemote) == 3 &&
-				reviewed.plan.count(tasks::RowState::skipped) == 1,
-				L"whole collection includes all configured roots without deleting unmapped remote files");
+			                   reviewed.plan.count(tasks::RowState::skipped) == 1,
+			               L"whole collection includes all configured roots without deleting unmapped remote files");
 			bool secondMapped = false, localMapped = false;
 			for (const auto& row : reviewed.plan.rows)
 			{
 				secondMapped |= row.destination == scope.remote / L"second" / L"second.txt";
 				localMapped |= row.destination == scope.remote / L"local" / L"top.txt";
 			}
-			reporter.check(secondMapped && localMapped, L"each collection root has a distinct visible remote folder mapping");
+			reporter.check(secondMapped && localMapped,
+			               L"each collection root has a distinct visible remote folder mapping");
 			auto unavailableCollection = scope;
 			unavailableCollection.collection.push_back(root / L"offline-collection-folder");
-			reporter.check(!sync::analyze(unavailableCollection).plan.can_run(),
+			reporter.check(
+				!sync::analyze(unavailableCollection).plan.can_run(),
 				L"an unavailable configured Sync folder blocks whole-collection analysis rather than silently omitting it");
 			auto oneRoot = scope;
 			oneRoot.collection.resize(1);
-			reporter.check(sync::analyze(oneRoot).plan.rows.size() == 3,
-				L"one remaining collection root keeps the same mapping rather than changing its remote layout");
+			reporter
+				.check(sync::analyze(oneRoot).plan.rows.size() == 3,
+			           L"one remaining collection root keeps the same mapping rather than changing its remote layout");
 
 			auto view = std::make_shared<TaskSync>(L"");
 			view->set_options(scope);
 			reporter.check(!view->busy() && view->plan().rows.empty() && !view->plan().can_run(),
-				L"changing Sync options never starts an implicit analysis");
+			               L"changing Sync options never starts an implicit analysis");
 			view->set_local_folder(root / L"different-current-folder");
 			reporter.check(view->options().local == scope.local,
-				L"opening Sync from another Items folder preserves the chosen local folder");
+			               L"opening Sync from another Items folder preserves the chosen local folder");
 			view->set_collection_folders({scope.local});
-			reporter.check(!view->busy() && view->plan().rows.empty() &&
-				view->options().collection.size() == 1,
-				L"changing collection roots invalidates review without analyzing");
+			reporter.check(!view->busy() && view->plan().rows.empty() && view->options().collection.size() == 1,
+			               L"changing collection roots invalidates review without analyzing");
 			view->add_collection_folder(scope.collection[1]);
 			reporter.check(view->options().collection.size() == 2 &&
-				view->options().collection.back() == scope.collection[1] && !view->busy() &&
-				view->plan().rows.empty(),
-				L"adding an explicit collection folder clears Review but never starts analysis");
+			                   view->options().collection.back() == scope.collection[1] && !view->busy() &&
+			                   view->plan().rows.empty(),
+			               L"adding an explicit collection folder clears Review but never starts analysis");
 			view->remove_collection_folder(0);
 			view->remove_collection_folder(99);
 			reporter.check(view->options().collection == std::vector<std::filesystem::path>{scope.collection[1]} &&
-				std::filesystem::exists(scope.local / L"top.txt") && !view->busy(),
-				L"removing a collection entry changes only configuration, not files or other roots");
+			                   std::filesystem::exists(scope.local / L"top.txt") && !view->busy(),
+			               L"removing a collection entry changes only configuration, not files or other roots");
 			view->start_run();
 			view->start_run();
 			reporter.check(!view->busy() && !view->plan().can_run(),
-				L"repeated Run without a reviewed analysis cannot start work");
+			               L"repeated Run without a reviewed analysis cannot start work");
 
 			const auto settingsSection = L"SyncTest-" + root.filename().wstring();
 			scope.toRemote = false;
@@ -546,45 +559,44 @@ namespace iw::tests
 			scope.deleteRemote = true;
 			sync::save_options(scope, settingsSection);
 			const auto retained = sync::load_options(settingsSection);
-			reporter.check(retained.wholeCollection && retained.local == scope.local &&
-				retained.remote == scope.remote && !retained.toRemote && retained.toLocal &&
-				retained.deleteLocal && retained.deleteRemote && retained.collection == scope.collection,
+			reporter.check(
+				retained.wholeCollection && retained.local == scope.local && retained.remote == scope.remote &&
+					!retained.toRemote && retained.toLocal && retained.deleteLocal && retained.deleteRemote &&
+					retained.collection == scope.collection,
 				L"scope, explicit collection folders, folder choices and action options survive settings round-trip");
 			auto restoredView = std::make_shared<TaskSync>(settingsSection);
-			reporter.check(restoredView->options().collection == scope.collection &&
-				!restoredView->busy() && restoredView->plan().rows.empty(),
-				L"opening Sync restores its saved collection independently of the current folder and pins");
+			reporter.check(restoredView->options().collection == scope.collection && !restoredView->busy() &&
+			                   restoredView->plan().rows.empty(),
+			               L"opening Sync restores its saved collection independently of the current folder and pins");
 			restoredView->remove_collection_folder(0);
-			reporter.check(sync::load_options(settingsSection).collection ==
-				std::vector<std::filesystem::path>{scope.collection[1]} &&
-				platform::read_text_setting(settingsSection, L"Collection1").empty(),
-				L"removing a collection folder persists the shorter list and clears the stale settings entry");
+			reporter
+				.check(sync::load_options(settingsSection).collection ==
+			                   std::vector<std::filesystem::path>{scope.collection[1]} &&
+			               platform::read_text_setting(settingsSection, L"Collection1").empty(),
+			           L"removing a collection folder persists the shorter list and clears the stale settings entry");
 			restoredView->add_collection_folder(root / L"offline-collection-folder");
-			reporter.check(sync::load_options(settingsSection).collection.back() ==
-				root / L"offline-collection-folder",
+			reporter.check(
+				sync::load_options(settingsSection).collection.back() == root / L"offline-collection-folder",
 				L"unavailable saved roots remain in settings instead of silently disappearing from the collection");
 			auto onlyOne = restoredView->options();
 			onlyOne.wholeCollection = false;
 			restoredView->set_options(onlyOne);
 			reporter.check(!sync::load_options(settingsSection).wholeCollection &&
-				sync::load_options(settingsSection).collection == onlyOne.collection,
-				L"switching to one-folder scope retains the saved collection list for the next visit");
+			                   sync::load_options(settingsSection).collection == onlyOne.collection,
+			               L"switching to one-folder scope retains the saved collection list for the next visit");
 			platform::clear_settings_section(settingsSection);
 
-			const std::array damagedIntegers{
-				platform::IntegerSetting{L"WholeCollection", 1},
-				platform::IntegerSetting{L"CollectionCount", 3}};
+			const std::array damagedIntegers{platform::IntegerSetting{L"WholeCollection", 1},
+			                                 platform::IntegerSetting{L"CollectionCount", 3}};
 			platform::write_integer_settings(settingsSection, damagedIntegers);
-			const std::array damagedTexts{
-				platform::TextSetting{L"Collection0", scope.local.wstring()},
-				platform::TextSetting{L"Collection2", scope.collection[1].wstring()}};
+			const std::array damagedTexts{platform::TextSetting{L"Collection0", scope.local.wstring()},
+			                              platform::TextSetting{L"Collection2", scope.collection[1].wstring()}};
 			platform::write_text_settings(settingsSection, damagedTexts);
 			const auto damagedSettings = sync::load_options(settingsSection);
-			reporter.check(damagedSettings.collection.size() == 3 &&
-				damagedSettings.collection[0] == scope.local &&
-				damagedSettings.collection[1].empty() &&
-				damagedSettings.collection[2] == scope.collection[1],
-				L"a missing collection setting stays invalid without silently truncating later saved roots");
+			reporter.check(damagedSettings.collection.size() == 3 && damagedSettings.collection[0] == scope.local &&
+			                   damagedSettings.collection[1].empty() &&
+			                   damagedSettings.collection[2] == scope.collection[1],
+			               L"a missing collection setting stays invalid without silently truncating later saved roots");
 			platform::clear_settings_section(settingsSection);
 
 			auto invalid = pair(L"invalid");
@@ -646,7 +658,7 @@ namespace iw::tests
 				checkInvalid(rootLink, L"a reparse ancestor is refused even when the selected leaf is ordinary");
 				std::filesystem::remove(link, error);
 				reporter.check(read(external / L"untouched.txt") == "outside",
-					L"reparse analysis leaves files outside the compared trees untouched");
+				               L"reparse analysis leaves files outside the compared trees untouched");
 			}
 			else emit(L"  NOTE: directory symlink tests require Windows symlink privilege.\n");
 
@@ -659,38 +671,38 @@ namespace iw::tests
 			direction.toLocal = true;
 			reviewed = sync::analyze(direction);
 			reporter.check(!reviewed.plan.can_run() && reviewed.plan.rows.front().tag == sync::ignore,
-				L"equal times and different sizes with both directions enabled are ignored");
+			               L"equal times and different sizes with both directions enabled are ignored");
 			direction.toRemote = false;
 			reviewed = sync::analyze(direction);
 			reporter.check(reviewed.plan.can_run() && reviewed.plan.rows.front().tag == sync::copyToLocal &&
-				reviewed.plan.rows.front().replace,
-				L"equal times and different sizes use the sole local direction as an explicit Replace");
+			                   reviewed.plan.rows.front().replace,
+			               L"equal times and different sizes use the sole local direction as an explicit Replace");
 			direction.toLocal = false;
 			direction.toRemote = true;
 			reviewed = sync::analyze(direction);
 			reporter.check(reviewed.plan.can_run() && reviewed.plan.rows.front().tag == sync::copyToRemote &&
-				reviewed.plan.replacements == 1,
-				L"equal times and different sizes use the sole remote direction as an explicit Replace");
+			                   reviewed.plan.replacements == 1,
+			               L"equal times and different sizes use the sole remote direction as an explicit Replace");
 			direction.toRemote = false;
 			direction.deleteLocal = true;
 			reviewed = sync::analyze(direction);
 			reporter.check(reviewed.plan.rows.front().tag == sync::ignore,
-				L"equal times with neither copy direction enabled are ignored, not deleted");
+			               L"equal times with neither copy direction enabled are ignored, not deleted");
 			direction.toRemote = true;
 			direction.toLocal = true;
 			write(direction.remote / L"equal.txt", "other");
 			std::filesystem::last_write_time(direction.remote / L"equal.txt", time);
 			reporter.check(sync::analyze(direction).plan.rows.front().tag == sync::ignore,
-				L"equal size and equal modified time are ignored");
+			               L"equal size and equal modified time are ignored");
 			std::filesystem::last_write_time(direction.local / L"equal.txt", time + std::chrono::seconds(1));
 			reporter.check(sync::analyze(direction).plan.rows.front().tag == sync::copyToRemote,
-				L"a newer local file is not incorrectly treated as equal by a two-second tolerance");
+			               L"a newer local file is not incorrectly treated as equal by a two-second tolerance");
 			std::filesystem::last_write_time(direction.remote / L"equal.txt", time + std::chrono::seconds(3));
 			reporter.check(sync::analyze(direction).plan.rows.front().tag == sync::copyToLocal,
-				L"a newer remote file copies to local when enabled");
+			               L"a newer remote file copies to local when enabled");
 			direction.toLocal = false;
 			reporter.check(sync::analyze(direction).plan.rows.front().tag == sync::ignore,
-				L"a disabled newer-source direction never copies the older side over it");
+			               L"a disabled newer-source direction never copies the older side over it");
 
 			auto stale = pair(L"stale");
 			write(stale.local / L"a-source.txt", "reviewed source");
@@ -702,18 +714,17 @@ namespace iw::tests
 			auto result = snapshot->plan;
 			auto run = sync::run_options(snapshot);
 			tasks::run_plan(result, {}, run);
-			reporter.check(result.count(tasks::RowState::failed) == 2 &&
-				result.count(tasks::RowState::success) == 1 &&
-				!std::filesystem::exists(stale.remote / L"a-source.txt") &&
-				read(stale.remote / L"b-target.txt") == "unreviewed destination" &&
-				read(stale.remote / L"c-independent.txt") == "independent",
-				L"source and destination drift refuse their rows while independent copies continue");
+			reporter.check(result.count(tasks::RowState::failed) == 2 && result.count(tasks::RowState::success) == 1 &&
+			                   !std::filesystem::exists(stale.remote / L"a-source.txt") &&
+			                   read(stale.remote / L"b-target.txt") == "unreviewed destination" &&
+			                   read(stale.remote / L"c-independent.txt") == "independent",
+			               L"source and destination drift refuse their rows while independent copies continue");
 			reporter.check(tasks::summarize_results(result).find(L"Analyze again") != std::wstring::npos,
-				L"changed-row results explicitly request another analysis");
+			               L"changed-row results explicitly request another analysis");
 			const auto completedSummary = tasks::summarize_results(result);
 			tasks::run_plan(result, {}, run);
 			reporter.check(tasks::summarize_results(result) == completedSummary,
-				L"a completed snapshot cannot run its rows a second time");
+			               L"a completed snapshot cannot run its rows a second time");
 
 			auto replacement = pair(L"replacement");
 			write(replacement.local / L"replace.txt", "new local");
@@ -725,8 +736,8 @@ namespace iw::tests
 			result = snapshot->plan;
 			tasks::run_plan(result, {}, sync::run_options(snapshot));
 			reporter.check(result.count(tasks::RowState::failed) == 1 &&
-				read(replacement.remote / L"replace.txt") == "remote changed after review",
-				L"Replace authority does not include a destination changed after Review");
+			                   read(replacement.remote / L"replace.txt") == "remote changed after review",
+			               L"Replace authority does not include a destination changed after Review");
 			auto identity = pair(L"identity");
 			write(identity.local / L"a-source.txt", "old");
 			write(identity.local / L"b-target.txt", "source");
@@ -744,11 +755,11 @@ namespace iw::tests
 			std::filesystem::last_write_time(identity.remote / L"b-target.txt", time);
 			result = snapshot->plan;
 			tasks::run_plan(result, {}, sync::run_options(snapshot));
-			reporter.check(result.count(tasks::RowState::failed) == 2 &&
-				result.count(tasks::RowState::success) == 1 &&
-				!std::filesystem::exists(identity.remote / L"a-source.txt") &&
-				read(identity.remote / L"b-target.txt") == "change" &&
-				read(identity.remote / L"c-independent.txt") == "independent",
+			reporter.check(
+				result.count(tasks::RowState::failed) == 2 && result.count(tasks::RowState::success) == 1 &&
+					!std::filesystem::exists(identity.remote / L"a-source.txt") &&
+					read(identity.remote / L"b-target.txt") == "change" &&
+					read(identity.remote / L"c-independent.txt") == "independent",
 				L"file identity changes refuse same-size same-time source and destination replacements while independent rows continue");
 
 			auto parentIdentity = pair(L"parent-identity");
@@ -758,27 +769,30 @@ namespace iw::tests
 			std::filesystem::create_directories(parentIdentity.remote);
 			result = snapshot->plan;
 			tasks::run_plan(result, {}, sync::run_options(snapshot));
-			reporter.check(result.count(tasks::RowState::failed) == 1 &&
-				!std::filesystem::exists(parentIdentity.remote / L"nested" / L"source.txt"),
-				L"a replacement destination parent cannot inherit authority to receive a reviewed nested copy");
+			reporter
+				.check(result.count(tasks::RowState::failed) == 1 &&
+			               !std::filesystem::exists(parentIdentity.remote / L"nested" / L"source.txt"),
+			           L"a replacement destination parent cannot inherit authority to receive a reviewed nested copy");
 
 			auto readOnlyReplacement = pair(L"read-only-replacement");
 			write(readOnlyReplacement.local / L"replace.txt", "new");
 			write(readOnlyReplacement.remote / L"replace.txt", "old");
-			std::filesystem::last_write_time(
-				readOnlyReplacement.local / L"replace.txt", time + std::chrono::seconds(5));
+			std::filesystem::last_write_time(readOnlyReplacement.local / L"replace.txt",
+			                                 time + std::chrono::seconds(5));
 			std::filesystem::last_write_time(readOnlyReplacement.remote / L"replace.txt", time);
 			std::filesystem::permissions(readOnlyReplacement.remote / L"replace.txt",
-				std::filesystem::perms::owner_read, std::filesystem::perm_options::replace, error);
+			                             std::filesystem::perms::owner_read, std::filesystem::perm_options::replace,
+			                             error);
 			if (!error)
 			{
 				const auto readOnlyReview = sync::analyze(readOnlyReplacement);
 				reporter.check(!readOnlyReview.plan.can_run() &&
-					readOnlyReview.plan.rows.front().state == tasks::RowState::blocked &&
-					readOnlyReview.plan.rows.front().detail.find(L"read-only") != std::wstring::npos,
-					L"a read-only replacement target blocks synchronization during Review");
+				                   readOnlyReview.plan.rows.front().state == tasks::RowState::blocked &&
+				                   readOnlyReview.plan.rows.front().detail.find(L"read-only") != std::wstring::npos,
+				               L"a read-only replacement target blocks synchronization during Review");
 				std::filesystem::permissions(readOnlyReplacement.remote / L"replace.txt",
-					std::filesystem::perms::owner_all, std::filesystem::perm_options::replace, error);
+				                             std::filesystem::perms::owner_all, std::filesystem::perm_options::replace,
+				                             error);
 			}
 			else emit(L"  NOTE: read-only Sync test could not set file permissions.\n");
 
@@ -791,31 +805,31 @@ namespace iw::tests
 			snapshot = std::make_shared<sync::Review>(sync::analyze(deletion));
 			const auto confirmation = sync::deletion_confirmation(snapshot->plan);
 			reporter.check(confirmation.warning && confirmation.defaultButton == 2 &&
-				confirmation.heading.find(L"2 files") != std::wstring::npos &&
-				confirmation.message.find(L"1 local file and 1 remote file") != std::wstring::npos &&
-				confirmation.message.find(L"cannot be recovered from the Recycle Bin") != std::wstring::npos,
-				L"permanent-delete confirmation states the total, counts each side, and defaults to Cancel");
+			                   confirmation.heading.find(L"2 files") != std::wstring::npos &&
+			                   confirmation.message.find(L"1 local file and 1 remote file") != std::wstring::npos &&
+			                   confirmation.message.find(L"cannot be recovered from the Recycle Bin") !=
+			                       std::wstring::npos,
+			               L"permanent-delete confirmation states the total, counts each side, and defaults to Cancel");
 			const bool noConfirmation = sync::confirm_deletions(snapshot->plan, {});
 			const bool declined = sync::confirm_deletions(snapshot->plan,
-				[](const platform::ChoiceDefinition&) { return 2; });
-			reporter.check(!noConfirmation && !declined &&
-				snapshot->plan.count(tasks::RowState::ready) == 2 &&
-				std::filesystem::exists(deletion.local / L"a-local.txt") &&
-				std::filesystem::exists(deletion.remote / L"b-remote.txt"),
-				L"deletion cannot proceed without affirmative confirmation and Cancel leaves Review unchanged");
-			reporter.check(sync::confirm_deletions(snapshot->plan,
-				[](const platform::ChoiceDefinition&) { return 1; }),
-				L"the explicit Synchronize answer authorizes the counted deletion plan");
+			                                              [](const platform::ChoiceDefinition&) { return 2; });
+			reporter
+				.check(!noConfirmation && !declined && snapshot->plan.count(tasks::RowState::ready) == 2 &&
+			               std::filesystem::exists(deletion.local / L"a-local.txt") &&
+			               std::filesystem::exists(deletion.remote / L"b-remote.txt"),
+			           L"deletion cannot proceed without affirmative confirmation and Cancel leaves Review unchanged");
+			reporter.check(sync::confirm_deletions(snapshot->plan, [](const platform::ChoiceDefinition&) { return 1; }),
+			               L"the explicit Synchronize answer authorizes the counted deletion plan");
 			write(deletion.remote / L"a-local.txt", "appeared after review");
 			result = snapshot->plan;
 			tasks::run_plan(result, {}, sync::run_options(snapshot));
-			reporter.check(result.count(tasks::RowState::failed) == 1 &&
-				result.count(tasks::RowState::success) == 1 &&
-				std::filesystem::exists(deletion.local / L"a-local.txt") &&
-				!std::filesystem::exists(deletion.remote / L"b-remote.txt"),
+			reporter.check(
+				result.count(tasks::RowState::failed) == 1 && result.count(tasks::RowState::success) == 1 &&
+					std::filesystem::exists(deletion.local / L"a-local.txt") &&
+					!std::filesystem::exists(deletion.remote / L"b-remote.txt"),
 				L"an appeared counterpart refuses a stale delete while an independent reviewed deletion completes");
 			reporter.check(sync::affected_folders(result).empty(),
-				L"remote-only successes do not claim that a local folder changed");
+			               L"remote-only successes do not claim that a local folder changed");
 			auto vanishedRoot = pair(L"vanished-root");
 			vanishedRoot.toRemote = false;
 			vanishedRoot.deleteLocal = true;
@@ -825,13 +839,13 @@ namespace iw::tests
 			result = snapshot->plan;
 			tasks::run_plan(result, {}, sync::run_options(snapshot));
 			reporter.check(result.count(tasks::RowState::failed) == 1 &&
-				std::filesystem::exists(vanishedRoot.local / L"keep.txt"),
-				L"a remote root that disappears after analysis never authorizes local deletion");
+			                   std::filesystem::exists(vanishedRoot.local / L"keep.txt"),
+			               L"a remote root that disappears after analysis never authorizes local deletion");
 			std::filesystem::create_directories(vanishedRoot.remote);
 			result = snapshot->plan;
 			tasks::run_plan(result, {}, sync::run_options(snapshot));
-			reporter.check(result.count(tasks::RowState::failed) == 1 &&
-				std::filesystem::exists(vanishedRoot.local / L"keep.txt"),
+			reporter.check(
+				result.count(tasks::RowState::failed) == 1 && std::filesystem::exists(vanishedRoot.local / L"keep.txt"),
 				L"a replacement remote root with the same absent counterparts does not inherit deletion authority");
 
 			auto localDelete = pair(L"local-delete-cancel");
@@ -848,11 +862,11 @@ namespace iw::tests
 				if (complete == 1) deleteStop.request_stop();
 			};
 			tasks::run_plan(result, deleteStop.get_token(), run);
-			reporter.check(result.count(tasks::RowState::success) == 1 &&
-				result.count(tasks::RowState::notRun) == 1 &&
-				!std::filesystem::exists(localDelete.local / L"a.txt") &&
-				std::filesystem::exists(localDelete.local / L"b.txt") &&
-				sync::affected_folders(result) == std::vector<std::filesystem::path>{localDelete.local},
+			reporter.check(
+				result.count(tasks::RowState::success) == 1 && result.count(tasks::RowState::notRun) == 1 &&
+					!std::filesystem::exists(localDelete.local / L"a.txt") &&
+					std::filesystem::exists(localDelete.local / L"b.txt") &&
+					sync::affected_folders(result) == std::vector<std::filesystem::path>{localDelete.local},
 				L"cancelling permanent deletion does not roll it back and still refreshes the changed local folder");
 
 			auto cancellation = pair(L"cancellation");
@@ -864,27 +878,29 @@ namespace iw::tests
 			result = snapshot->plan;
 			std::stop_source stop;
 			run = sync::run_options(snapshot);
-			run.progress = [&stop](const size_t complete, const size_t) { if (complete == 1) stop.request_stop(); };
+			run.progress = [&stop](const size_t complete, const size_t)
+			{
+				if (complete == 1) stop.request_stop();
+			};
 			tasks::run_plan(result, stop.get_token(), run);
-			reporter.check(result.count(tasks::RowState::success) == 1 &&
-				result.count(tasks::RowState::notRun) == 1 &&
-				read(cancellation.local / L"a.txt") == "first" &&
-				!std::filesystem::exists(cancellation.local / L"b.txt"),
-				L"cancellation preserves completed local copies and marks unreached rows Not run");
+			reporter.check(result.count(tasks::RowState::success) == 1 && result.count(tasks::RowState::notRun) == 1 &&
+			                   read(cancellation.local / L"a.txt") == "first" &&
+			                   !std::filesystem::exists(cancellation.local / L"b.txt"),
+			               L"cancellation preserves completed local copies and marks unreached rows Not run");
 			const auto affected = sync::affected_folders(result);
 			reporter.check(affected.size() == 1 && affected.front() == cancellation.local,
-				L"partial completion identifies the affected local folder for refresh");
+			               L"partial completion identifies the affected local folder for refresh");
 			reporter.check(tasks::summarize_results(result).find(L"1 not run") != std::wstring::npos,
-				L"cancellation results cannot be mistaken for full success");
+			               L"cancellation results cannot be mistaken for full success");
 			stop = std::stop_source{};
 			const auto cancelledAnalysis = sync::analyze(cancellation, stop.get_token(),
-				[&stop](size_t, size_t) { stop.request_stop(); });
+			                                             [&stop](size_t, size_t) { stop.request_stop(); });
 			reporter.check(!cancelledAnalysis.plan.can_run() && cancelledAnalysis.plan.rows.empty() &&
-				cancelledAnalysis.plan.blockReason.find(L"cancelled") != std::wstring::npos,
-				L"cancelled scans discard the partial review and report cancellation");
+			                   cancelledAnalysis.plan.blockReason.find(L"cancelled") != std::wstring::npos,
+			               L"cancelled scans discard the partial review and report cancellation");
 			const auto preCancelled = sync::analyze(cancellation, stop.get_token());
 			reporter.check(!preCancelled.plan.can_run() && preCancelled.plan.rows.empty(),
-				L"analysis honors cancellation before scanning any entries");
+			               L"analysis honors cancellation before scanning any entries");
 		}
 
 		void test_startup_dispatch(Reporter& reporter)
@@ -894,7 +910,7 @@ namespace iw::tests
 			::platform::run_ui([delivered] { delivered->store(true); });
 			::platform::pump_ui_tasks(1000);
 			reporter.check(delivered->load(),
-				L"startup workers can queue UI completion before the outer message loop starts");
+			               L"startup workers can queue UI completion before the outer message loop starts");
 			platform::WindowOptions options;
 			options.className = "ImageWalker30.SharedFrameTest";
 			options.title = L"Shared frame test";
@@ -903,24 +919,27 @@ namespace iw::tests
 			const auto frame = platform::create_top_level_frame(std::make_shared<platform::FrameReactor>(), options);
 			reporter.check(frame != nullptr, L"headless tests create a shared platform frame");
 			reporter.check(frame && frame->native_handle() == 0,
-				L"headless tests use the hidden platform frame rather than a private HWND");
+			               L"headless tests use the hidden platform frame rather than a private HWND");
 			if (frame)
 			{
 				reporter.check(!frame->has_focus(), L"the hidden platform frame starts unfocused");
 				frame->set_focus();
-				reporter.check(frame->has_focus(), L"the hidden platform frame records focus through the frame contract");
+				reporter.check(frame->has_focus(),
+				               L"the hidden platform frame records focus through the frame contract");
 				reporter.check(frame->screen_to_client({3, 4}) == app::pointi{3, 4},
-					L"headless screen-to-client mapping is testable through the platform fake");
+				               L"headless screen-to-client mapping is testable through the platform fake");
 				reporter.check(frame->client_to_screen({3, 4}) == app::pointi{3, 4},
-					L"headless client-to-screen mapping is testable through the platform fake");
+				               L"headless client-to-screen mapping is testable through the platform fake");
 				const auto child = frame->create_child(std::make_shared<platform::FrameReactor>(), options);
-				reporter.check(child != nullptr, L"the hidden platform frame creates child frames without native handles");
+				reporter.check(child != nullptr,
+				               L"the hidden platform frame creates child frames without native handles");
 				reporter.check(child && child->native_handle() == 0,
-					L"shared platform child frames remain free of native handles");
+				               L"shared platform child frames remain free of native handles");
 				if (child)
 				{
 					child->set_focus();
-					reporter.check(child->has_focus(), L"shared platform child focus is observable through the app contract");
+					reporter.check(child->has_focus(),
+					               L"shared platform child focus is observable through the app contract");
 				}
 				const auto surface = platform::create_command_surface(frame);
 				reporter.check(surface != nullptr, L"the command surface is hosted by shared platform child frames");
@@ -928,13 +947,15 @@ namespace iw::tests
 				{
 					const auto content = surface->layout(frame->client_rect(), false);
 					reporter.check(content.width >= 0 && content.height >= 0,
-						L"the shared platform command surface returns a bounded content layout");
+					               L"the shared platform command surface returns a bounded content layout");
 					surface->refresh();
 				}
 				frame->set_maximized(false);
-				reporter.check(!frame->placement().maximized, L"shared platform placement leaves the hidden frame unmaximized");
+				reporter.check(!frame->placement().maximized,
+				               L"shared platform placement leaves the hidden frame unmaximized");
 				frame->set_fullscreen(false);
-				reporter.check(!frame->placement().maximized, L"shared platform fullscreen state is safe in headless mode");
+				reporter.check(!frame->placement().maximized,
+				               L"shared platform fullscreen state is safe in headless mode");
 			}
 		}
 
@@ -942,12 +963,12 @@ namespace iw::tests
 		{
 			reporter.section(L"clipboard preferred file operation");
 			reporter.check(platform::ClipboardContent{}.operation == platform::FileOperation::copy &&
-				!platform::set_clipboard_files({}, {}, false),
-				L"an empty shared clipboard file request defaults to Copy and refuses no paths");
+			                   !platform::set_clipboard_files({}, {}, false),
+			               L"an empty shared clipboard file request defaults to Copy and refuses no paths");
 			const auto status = platform::clipboard_status();
 			const auto content = platform::read_clipboard({});
 			reporter.check(!status.hasFiles || !content.files.empty(),
-				L"shared clipboard file status and paths agree without a native clipboard facade");
+			               L"shared clipboard file status and paths agree without a native clipboard facade");
 		}
 
 		void test_choice_button_ids(Reporter& reporter)
@@ -958,16 +979,15 @@ namespace iw::tests
 			platform::ChoiceDefinition collision;
 			collision.buttons = {{1, L"Auto-rename"}, {2, L"Replace"}};
 			reporter.check(draft.buttons.back().id == 3 && collision.buttons.front().id == 1 &&
-				collision.buttons.back().id == 2,
-				L"shared modal choice models retain explicit safe and destructive action ids");
+			                   collision.buttons.back().id == 2,
+			               L"shared modal choice models retain explicit safe and destructive action ids");
 		}
 
 		void test_color(Reporter& reporter)
 		{
 			reporter.section(L"color");
 			constexpr color value{0x12, 0x34, 0x56, 0x78};
-			reporter.check(value.a == 0x78,
-			               L"color exposes RGBA channels");
+			reporter.check(value.a == 0x78, L"color exposes RGBA channels");
 			reporter.check(value.pack() == 0x00563412, L"color packs to COLORREF byte order");
 			reporter.check(color::from_packed(value.pack(), value.a) == value, L"packed color round-trips");
 			reporter.check(colors::black.pack() == 0x00000000, L"black palette color is stable");
@@ -976,10 +996,10 @@ namespace iw::tests
 			reporter.check(colors::light_gray.with_alpha(42) == color{238, 238, 238, 42},
 			               L"with_alpha preserves RGB channels");
 			reporter.check(platform::calc_hande_color(false, false, false) ==
-			               platform::system_color(platform::SystemColor::face),
+			                   platform::system_color(platform::SystemColor::face),
 			               L"an idle handle uses the system face color");
 			reporter.check(platform::calc_hande_color(true, true, true) ==
-			               platform::system_color(platform::SystemColor::highlight),
+			                   platform::system_color(platform::SystemColor::highlight),
 			               L"a selected handle takes precedence over hover and checked state");
 		}
 
@@ -1000,25 +1020,44 @@ namespace iw::tests
 			const auto strip = platform::load_bitmap_resource(platform::BitmapAsset::toolbarSymbols);
 			constexpr int tile = 24;
 			reporter.check(strip.size.height == tile && strip.size.width % tile == 0,
-				L"the toolbar strip is a row of 24-pixel tiles");
+			               L"the toolbar strip is a row of 24-pixel tiles");
 			reporter.check(strip.size.width / tile == static_cast<int>(platform::CommandBitmap::breadcrumbChevron) + 1,
-				L"every toolbar tile has a CommandBitmap value, so the breadcrumb chevron is the last tile");
+			               L"every toolbar tile has a CommandBitmap value, so the breadcrumb chevron is the last tile");
+		}
+
+		void test_toolbar_labels(Reporter& reporter)
+		{
+			reporter.section(L"toolbar labels");
+			const auto label = [](std::wstring name, std::function<std::wstring()> toolbarText = {})
+			{
+				platform::Command command;
+				command.name = std::move(name);
+				command.toolbarText = std::move(toolbarText);
+				return platform::toolbar_label(command);
+			};
+			reporter.check(label(L"&Refresh") == L"Refresh" && label(L"Folder &tree") == L"Folder tree",
+			               L"a toolbar shows a menu name without its mnemonic marker");
+			reporter.check(label(L"R&&D") == L"R&D" && label(L"R&B") == L"R&B",
+			               L"a doubled ampersand shows as one, and one inside a word stays");
+			reporter.check(label(L"&Maximize", [] { return std::wstring(L"Restore"); }) == L"Restore",
+			               L"a command's own toolbar text is shown as written");
 		}
 
 		void test_item_count(Reporter& reporter)
 		{
 			reporter.section(L"format::item_count");
 			reporter.check(format::item_count(1, 0) == L"1 image" && format::item_count(12, 0) == L"12 images",
-				L"images are counted in the singular and plural");
+			               L"images are counted in the singular and plural");
 			reporter.check(format::item_count(0, 15) == L"0 images, 15 folders",
-				L"a folder of folders is not reported as holding images");
+			               L"a folder of folders is not reported as holding images");
 			reporter.check(format::item_count(10, 2, 1) == L"10 images, 1 other file, 2 folders",
-				L"files that are not images are counted separately from images");
+			               L"files that are not images are counted separately from images");
 			reporter.check(format::selection_count(1, 0, 15) == L"1 of 15 items selected (0 images, 15 folders)",
-				L"a selected folder is counted against every item, not as one of no images");
-			reporter.check(format::selection_count(2, 27, 0, 3) == L"2 of 30 items selected (27 images, 3 other files)" &&
-				format::selection_count(1, 1, 0) == L"1 of 1 item selected (1 image)",
-				L"a selection is counted against all items, in the singular and plural");
+			               L"a selected folder is counted against every item, not as one of no images");
+			reporter.check(format::selection_count(2, 27, 0, 3) ==
+			                       L"2 of 30 items selected (27 images, 3 other files)" &&
+			                   format::selection_count(1, 1, 0) == L"1 of 1 item selected (1 image)",
+			               L"a selection is counted against all items, in the singular and plural");
 
 			// The dynamic dialog refuses a definition whose fields share an id, so a dialog
 			// with two links and default ids would never open.
@@ -1026,7 +1065,7 @@ namespace iw::tests
 			std::set<platform::DialogFieldId> ids;
 			for (const auto& field : about.fields) ids.insert(field.id);
 			reporter.check(about.fields.size() == 2 && ids.size() == about.fields.size(),
-				L"the About dialog's links have distinct field ids, so the dialog opens");
+			               L"the About dialog's links have distinct field ids, so the dialog opens");
 		}
 
 		void test_supported_images(Reporter& reporter)
@@ -1043,8 +1082,8 @@ namespace iw::tests
 			reporter.check(!files::is_supported_image(L"README"), L"extension-less files are not supported");
 			reporter.check(!files::is_supported_image(L"trick.jpgx"), L"a superset extension is not supported");
 			reporter.check(!files::is_supported_image(L"deck.ppt") && !files::is_supported_image(L"show.pps") &&
-				!files::is_supported_image(L"plan.vsd"),
-				L"a document with only an embedded preview is not listed, selected or converted as a photo");
+			                   !files::is_supported_image(L"plan.vsd"),
+			               L"a document with only an embedded preview is not listed, selected or converted as a photo");
 			std::error_code error;
 			const auto root = platform::unique_temp_folder(L"iw30-eligibility-tests");
 			std::filesystem::create_directories(root / L"folder.jpg", error);
@@ -1052,13 +1091,13 @@ namespace iw::tests
 			std::ofstream(photo) << "photo";
 			reporter.check(files::is_editable_image(photo), L"a writable image file is eligible for Edit");
 			reporter.check(!files::is_editable_image(root / L"folder.jpg") &&
-				!files::is_editable_image(root / L"missing.jpg"),
-				L"image-named folders and missing files are not editable photos");
+			                   !files::is_editable_image(root / L"missing.jpg"),
+			               L"image-named folders and missing files are not editable photos");
 			std::filesystem::permissions(photo, std::filesystem::perms::owner_read,
-				std::filesystem::perm_options::replace, error);
+			                             std::filesystem::perm_options::replace, error);
 			reporter.check(!error && !files::is_editable_image(photo), L"a read-only photo is not editable");
 			std::filesystem::permissions(photo, std::filesystem::perms::owner_all,
-				std::filesystem::perm_options::replace, error);
+			                             std::filesystem::perm_options::replace, error);
 			std::filesystem::remove_all(root, error);
 		}
 
@@ -1086,14 +1125,14 @@ namespace iw::tests
 			selection.click(2, false, false);
 			selection.click(5, false, true);
 			reporter.check(selection.size() == 4 && selection.contains(2) && selection.contains(5) &&
-			               !selection.contains(1) && !selection.contains(6),
+			                   !selection.contains(1) && !selection.contains(6),
 			               L"shift+click selects an inclusive range from the anchor");
 			reporter.check(selection.focus() == 5, L"shift+click moves focus to the clicked item");
 
 			selection.click(8, true, false);
 			selection.click(6, true, true);
 			reporter.check(selection.size() == 7 && selection.contains(6) && selection.contains(7) &&
-			               selection.contains(8) && selection.contains(2),
+			                   selection.contains(8) && selection.contains(2),
 			               L"ctrl+shift+click adds a range without discarding the existing selection");
 
 			selection.reset(4);
@@ -1133,10 +1172,8 @@ namespace iw::tests
 		void test_marquee(Reporter& reporter)
 		{
 			reporter.section(L"ui::SelectionModel marquee");
-			const std::vector items{
-				make_item(0, {0, 0, 50, 50}), make_item(1, {60, 0, 50, 50}),
-				make_item(2, {0, 60, 50, 50})
-			};
+			const std::vector items{make_item(0, {0, 0, 50, 50}), make_item(1, {60, 0, 50, 50}),
+			                        make_item(2, {0, 60, 50, 50})};
 
 			ui::SelectionModel selection;
 			selection.reset(3);
@@ -1159,26 +1196,27 @@ namespace iw::tests
 		{
 			reporter.section(L"CollectionState");
 			CollectionState state;
-			state.set_items({
-				{L"folder", files::ItemKind::folder}, {L"b.jpg", files::ItemKind::image},
-				{L"a.txt", files::ItemKind::document}, {L"a.jpg", files::ItemKind::image}
-			});
+			state.set_items({{L"folder", files::ItemKind::folder},
+			                 {L"b.jpg", files::ItemKind::image},
+			                 {L"a.txt", files::ItemKind::document},
+			                 {L"a.jpg", files::ItemKind::image}});
 			reporter.check(state.items().size() == 4 && state.photo_count() == 2,
 			               L"collection state retains all items and counts images");
 			reporter.check(state.visible_items().size() == 2 && state.visible_items()[0].path == L"a.jpg",
 			               L"the photos-only projection follows the selected sort order");
 			state.set_photos_only(false);
-			reporter.check(
-				state.visible_items().size() == 4 && state.visible_items()[0].kind == files::ItemKind::folder,
-				L"clearing the filter reveals all items while keeping folders first");
+			reporter.check(state.visible_items().size() == 4 &&
+			                   state.visible_items()[0].kind == files::ItemKind::folder,
+			               L"clearing the filter reveals all items while keeping folders first");
 			state.set_sort_field(files::SortField::dimensions);
 			reporter.check(state.set_dimensions(L"a.jpg", 640, 480) && state.set_dimensions(L"b.jpg", 320, 240) &&
-				!state.set_dimensions(L"b.jpg", 320, 240), L"deferred dimensions are recorded once per change");
+			                   !state.set_dimensions(L"b.jpg", 320, 240),
+			               L"deferred dimensions are recorded once per change");
 			state.resort();
 			const auto& sorted = state.visible_items();
 			reporter.check(sorted.size() == 4 && sorted[0].kind == files::ItemKind::folder &&
-				sorted[2].path == L"b.jpg" && sorted[3].path == L"a.jpg" && sorted[3].width == 640,
-				L"a dimensions sort reorders once deferred dimensions arrive");
+			                   sorted[2].path == L"b.jpg" && sorted[3].path == L"a.jpg" && sorted[3].width == 640,
+			               L"a dimensions sort reorders once deferred dimensions arrive");
 		}
 
 		void test_navigation_history(Reporter& reporter)
@@ -1229,11 +1267,12 @@ namespace iw::tests
 			reporter.check(parent && paths::equal(*parent, LR"(C:\a)"), L"a nested folder reports its parent");
 			const auto top = parent_folder(LR"(C:\a)");
 			reporter.check(top && paths::equal(*top, LR"(C:\)"), L"a top-level folder reports the drive root");
-			const auto dropped = paths::outside_folder(
-				{LR"(c:\Photos\a.jpg)", LR"(C:\Other\b.jpg)", LR"(C:\photos\sub\c.jpg)"}, LR"(C:\Photos)");
+			const auto dropped = paths::outside_folder({LR"(c:\Photos\a.jpg)", LR"(C:\Other\b.jpg)",
+			                                            LR"(C:\photos\sub\c.jpg)"},
+			                                           LR"(C:\Photos)");
 			reporter.check(dropped.size() == 2 && paths::equal(dropped[0], LR"(C:\Other\b.jpg)") &&
-				paths::equal(dropped[1], LR"(C:\photos\sub\c.jpg)"),
-				L"a drop keeps only files from other folders, comparing the folder case-insensitively");
+			                   paths::equal(dropped[1], LR"(C:\photos\sub\c.jpg)"),
+			               L"a drop keeps only files from other folders, comparing the folder case-insensitively");
 		}
 
 		void test_geometry(Reporter& reporter)
@@ -1241,10 +1280,8 @@ namespace iw::tests
 			reporter.section(L"ui::Rect geometry");
 			constexpr app::recti rect{10, 20, 30, 40};
 			reporter.check(rect.bottom() == 60, L"right/bottom derive from origin and extent");
-			reporter.check(rect.contains({39, 59}),
-			               L"contains includes the top-left and last interior pixel");
-			reporter.check(!rect.contains({9, 20}),
-			               L"contains excludes the exclusive right/bottom edge");
+			reporter.check(rect.contains({39, 59}), L"contains includes the top-left and last interior pixel");
+			reporter.check(!rect.contains({9, 20}), L"contains excludes the exclusive right/bottom edge");
 
 			constexpr app::recti a{0, 0, 10, 10};
 			constexpr app::recti overlapping{5, 5, 10, 10};
@@ -1277,10 +1314,9 @@ namespace iw::tests
 
 			const auto pair = ui::layout_collage(canvas, {{4, 3}, {4, 3}});
 			reporter.check(pair.size() == 2 && pair[0].x == canvas.x && pair[0].right() == pair[1].x &&
-			               pair[1].right() == canvas.right(),
+			                   pair[1].right() == canvas.right(),
 			               L"a wide canvas splits vertically with no gap or overlap");
-			reporter.check(pair[0].width > pair[1].width,
-			               L"the cell nearest the canvas aspect takes the larger share");
+			reporter.check(pair[0].width > pair[1].width, L"the cell nearest the canvas aspect takes the larger share");
 
 			// Every cell must be non-empty, inside the canvas, and disjoint from the others.
 			std::vector<app::sizei> dimensions;
@@ -1301,7 +1337,7 @@ namespace iw::tests
 				{
 					const app::recti cell = cells[index];
 					contained = contained && !cell.is_empty() && cell.x >= canvas.x && cell.y >= canvas.y &&
-						cell.right() <= canvas.right() && cell.bottom() <= canvas.bottom();
+					            cell.right() <= canvas.right() && cell.bottom() <= canvas.bottom();
 					area += static_cast<std::int64_t>(cell.width) * cell.height;
 					for (size_t other = index + 1; other < cells.size(); ++other)
 						disjoint = disjoint && !cell.intersects(cells[other]);
@@ -1433,8 +1469,7 @@ namespace iw::tests
 			ui::ZoomModel zoom;
 			zoom.set_source({1600, 1200});
 			const app::recti viewport{0, 0, 800, 600};
-			reporter.check(std::abs(zoom.fit_scale(viewport) - 0.5) < 1e-9,
-			               L"fit scale contains a large image");
+			reporter.check(std::abs(zoom.fit_scale(viewport) - 0.5) < 1e-9, L"fit scale contains a large image");
 			reporter.check(rect_equals(zoom.destination(viewport), viewport),
 			               L"a fitted image is centered in its viewport");
 
@@ -1446,14 +1481,13 @@ namespace iw::tests
 
 			zoom.pan_by(viewport, 10000, 10000);
 			const app::recti firstEdge = zoom.destination(viewport);
-			reporter.check(firstEdge.x == 0 && firstEdge.y == 0,
-			               L"panning clamps at the first image edges");
+			reporter.check(firstEdge.x == 0 && firstEdge.y == 0, L"panning clamps at the first image edges");
 			zoom.pan_by(viewport, -10000, -10000);
 			const app::recti lastEdge = zoom.destination(viewport);
 			reporter.check(lastEdge.right() == viewport.right() && lastEdge.bottom() == viewport.bottom(),
 			               L"panning clamps at the last image edges");
 			reporter.check(ui::ZoomModel::accelerated_pan_offset(60, 120) == 90 &&
-			               ui::ZoomModel::accelerated_pan_offset(-60, 120) == -90,
+			                   ui::ZoomModel::accelerated_pan_offset(-60, 120) == -90,
 			               L"drag panning accelerates symmetrically with distance from its origin");
 			reporter.check(ui::ZoomModel::accelerated_pan_offset(240, 120) == 720,
 			               L"a longer pointer drag covers substantially more image distance");
@@ -1476,15 +1510,14 @@ namespace iw::tests
 			zoom.set_explicit(0.75, viewport, {400, 300});
 			zoom.carry_to_source({400, 300}, viewport);
 			reporter.check(!zoom.is_fit() && zoom.is_effectively_fit(viewport) &&
-			               std::abs(zoom.effective_scale(viewport) - 1.0) < 1e-9,
+			                   std::abs(zoom.effective_scale(viewport) - 1.0) < 1e-9,
 			               L"a carried scale below the next image's Fit is remembered while that image is fitted");
 			zoom.carry_to_source({1600, 1200}, viewport);
 			reporter.check(std::abs(zoom.effective_scale(viewport) - 0.75) < 1e-9,
 			               L"the carried scale resumes on the next image large enough to use it");
 			zoom.carry_to_source({400, 300}, viewport);
 			zoom.set_explicit(0.5, viewport, {400, 300});
-			reporter.check(!zoom.is_effectively_fit(viewport) &&
-			               std::abs(zoom.effective_scale(viewport) - 0.5) < 1e-9,
+			reporter.check(!zoom.is_effectively_fit(viewport) && std::abs(zoom.effective_scale(viewport) - 0.5) < 1e-9,
 			               L"an explicitly chosen scale below Fit remains reachable");
 		}
 
@@ -1502,8 +1535,8 @@ namespace iw::tests
 			               L"a stale generation cannot publish pixels");
 			reporter.check(!loading.apply(7, ui::LoadingModel::Phase::placeholder, 1600, 1200),
 			               L"a lower phase cannot replace a better representation");
-			reporter.check(loading.apply(7, ui::LoadingModel::Phase::source, 800, 600) &&
-			               !loading.needs_more() && !loading.provisional(),
+			reporter.check(loading.apply(7, ui::LoadingModel::Phase::source, 800, 600) && !loading.needs_more() &&
+			                   !loading.provisional(),
 			               L"an adequate source decode settles the requested need");
 			reporter.check(!loading.apply(7, ui::LoadingModel::Phase::source, 400, 300),
 			               L"a smaller same-phase result cannot move quality backwards");
@@ -1512,7 +1545,7 @@ namespace iw::tests
 
 			loading.begin(8, 1600, 1200, false);
 			reporter.check(loading.fail(8, ui::LoadingModel::Failure::unreadable) &&
-			               loading.failure() == ui::LoadingModel::Failure::unreadable && loading.needs_more(),
+			                   loading.failure() == ui::LoadingModel::Failure::unreadable && loading.needs_more(),
 			               L"failure is visible without dropping the outstanding need");
 			reporter.check(!loading.fail(7, ui::LoadingModel::Failure::unsupported),
 			               L"a stale failure cannot replace current state");
@@ -1535,10 +1568,8 @@ namespace iw::tests
 		void test_image_resampler(Reporter& reporter)
 		{
 			reporter.section(L"ui::resample_bgra");
-			const std::vector<std::uint32_t> source{
-				0xff000000, 0xff000004, 0xff000008, 0xff00000c,
-				0xff000010, 0xff000014, 0xff000018, 0xff00001c
-			};
+			const std::vector<std::uint32_t> source{0xff000000, 0xff000004, 0xff000008, 0xff00000c,
+			                                        0xff000010, 0xff000014, 0xff000018, 0xff00001c};
 			const auto exact = ui::resample_bgra(source, {4, 2}, {0, 0, 4, 2}, {4, 2});
 			reporter.check(exact == source, L"one-to-one sampling reproduces source pixels bitwise");
 			const auto reduced = ui::resample_bgra(source, {4, 2}, {0, 0, 4, 2}, {2, 1});
@@ -1546,17 +1577,13 @@ namespace iw::tests
 			               L"integer downscaling area-averages each source block");
 			const auto enlarged = ui::resample_bgra(source, {4, 2}, {1, 0, 1, 1}, {4, 4});
 			reporter.check(enlarged.size() == 16 &&
-			               std::ranges::all_of(enlarged, [](const auto pixel) { return pixel == 0xff000004; }),
+			                   std::ranges::all_of(enlarged, [](const auto pixel) { return pixel == 0xff000004; }),
 			               L"high magnification preserves exact source pixels");
 			const auto edge = ui::resample_bgra(source, {4, 2}, {3.5, 1.5, 2, 2}, {3, 3});
 			reporter.check(edge.size() == 9, L"a source rectangle at the image edge is safely clamped");
-			const std::vector<std::uint32_t> corners{
-				0xff000000, 0xff0000ff,
-				0xff00ff00, 0xffff0000
-			};
+			const std::vector<std::uint32_t> corners{0xff000000, 0xff0000ff, 0xff00ff00, 0xffff0000};
 			const auto interpolated = ui::resample_bgra(corners, {2, 2}, {0, 0, 2, 2}, {3, 3});
-			reporter.check(interpolated.size() == 9,
-			               L"fractional enlargement produces the requested extent");
+			reporter.check(interpolated.size() == 9, L"fractional enlargement produces the requested extent");
 			reporter.check(interpolated.size() == 9 && interpolated[4] == 0xff404040,
 			               L"fractional enlargement bilinearly interpolates all channels");
 
@@ -1564,10 +1591,8 @@ namespace iw::tests
 			const auto first = ui::resample_bgra(source, {4, 2}, {0, 0, 4, 2}, {4, 2}, workspace);
 			const auto* allocation = first.data();
 			const auto second = ui::resample_bgra(source, {4, 2}, {0, 0, 4, 2}, {4, 2}, workspace);
-			reporter.check(std::ranges::equal(second, source),
-			               L"a retained workspace preserves exact sampling");
-			reporter.check(second.data() == allocation,
-			               L"a retained workspace reuses its pixel allocation");
+			reporter.check(std::ranges::equal(second, source), L"a retained workspace preserves exact sampling");
+			reporter.check(second.data() == allocation, L"a retained workspace reuses its pixel allocation");
 
 			std::vector<std::uint32_t> cacheSource(256 * 256, 0xff123456);
 			ui::ResampleCache cache;
@@ -1576,21 +1601,16 @@ namespace iw::tests
 			reporter.check(cache.hit_count() == 1 && cachedFirst.data() == cachedSecond.data(),
 			               L"a repeated large resample is served from the bounded cache");
 			cache.resample(cacheSource, {256, 256}, {0, 0, 256, 256}, {255, 256}, 1);
-			reporter.check(cache.hit_count() == 1,
-			               L"a changed destination invalidates the cached resample key");
+			reporter.check(cache.hit_count() == 1, L"a changed destination invalidates the cached resample key");
 			cache.resample(cacheSource, {256, 256}, {0, 0, 256, 256}, {256, 256}, 2);
-			reporter.check(cache.hit_count() == 1,
-			               L"a changed image generation cannot reuse stale cached pixels");
+			reporter.check(cache.hit_count() == 1, L"a changed image generation cannot reuse stale cached pixels");
 		}
 
 		void test_pixel_blending(Reporter& reporter)
 		{
 			reporter.section(L"ui pixel blending");
-			std::vector<std::uint32_t> source{
-				0xff000000, 0xffffffff, 0xff123456, 0xffabcdef,
-				0xff010203, 0xff102030, 0xff8090a0, 0xfffedcba,
-				0xff333333, 0xff777777, 0xff2468ac
-			};
+			std::vector<std::uint32_t> source{0xff000000, 0xffffffff, 0xff123456, 0xffabcdef, 0xff010203, 0xff102030,
+			                                  0xff8090a0, 0xfffedcba, 0xff333333, 0xff777777, 0xff2468ac};
 			auto scalar = source;
 			ui::blend_constant_bgra(scalar, color{37, 149, 231, 173}, ui::PixelBackend::scalar);
 			auto sse2 = source;
@@ -1603,11 +1623,9 @@ namespace iw::tests
 				reporter.check(avx2 == scalar, L"AVX2 constant-alpha blending matches the scalar reference");
 			}
 
-			const std::vector<std::uint32_t> first{
-				0xff000000, 0xffffffff, 0xff123456, 0xffabcdef,
-				0xff010203, 0xff102030, 0xff8090a0, 0xfffedcba,
-				0xff333333, 0xff777777, 0xff2468ac
-			};
+			const std::vector<std::uint32_t> first{0xff000000, 0xffffffff, 0xff123456, 0xffabcdef,
+			                                       0xff010203, 0xff102030, 0xff8090a0, 0xfffedcba,
+			                                       0xff333333, 0xff777777, 0xff2468ac};
 			const std::vector<std::uint32_t> second(first.rbegin(), first.rend());
 			std::vector<std::uint32_t> scalarInterpolation(first.size());
 			ui::interpolate_bgra(first, second, scalarInterpolation, 93, ui::PixelBackend::scalar);
@@ -1650,16 +1668,13 @@ namespace iw::tests
 
 			const std::stop_source stop;
 			size_t reportedImages = 0;
-			const auto found = files::scan_folder(root, stop.get_token(),
-			                                      [&reportedImages](size_t, const size_t images)
-			                                      {
-				                                      reportedImages = images;
-			                                      });
+			const auto found = files::scan_folder(root, stop.get_token(), [&reportedImages](size_t, const size_t images)
+			{ reportedImages = images; });
 			reporter.check(found.size() == 3, L"scan_folder returns only supported image files");
 			reporter.check(reportedImages == 3, L"scan_folder progress reports the final image count");
 
 			const bool sorted = found.size() == 3 && found[0].filename() == L"IMG0.BMP" &&
-				found[1].filename() == L"img1.jpg" && found[2].filename() == L"img2.png";
+			                    found[1].filename() == L"img1.jpg" && found[2].filename() == L"img2.png";
 			reporter.check(sorted, L"scan_folder returns files sorted by filename");
 
 			std::stop_source cancelled;
@@ -1736,20 +1751,21 @@ namespace iw::tests
 			reporter.check(photo != items.end() && photo->width == 0 && photo->height == 0,
 			               L"folder scanning defers image inspection to media workers");
 			reporter.check(files::classify(L"movie.mp4") == files::ItemKind::video &&
-			               files::classify(L"song.mp3") == files::ItemKind::audio &&
-			               files::classify(L"notes.txt") == files::ItemKind::document,
+			                   files::classify(L"song.mp3") == files::ItemKind::audio &&
+			                   files::classify(L"notes.txt") == files::ItemKind::document,
 			               L"common non-image file types are classified for visual treatment");
 			files::sort_items(items, files::SortField::size);
-			reporter.check(
-				items.front().kind == files::ItemKind::folder && items.back().path.filename() == L"photo.bmp",
-				L"size sorting keeps folders first and orders files by byte size");
+			reporter.check(items.front().kind == files::ItemKind::folder &&
+			                   items.back().path.filename() == L"photo.bmp",
+			               L"size sorting keeps folders first and orders files by byte size");
 			files::sort_items(items, files::SortField::dimensions);
 			reporter.check(items.front().kind == files::ItemKind::folder && items.size() == 4,
 			               L"dimensions sorting remains stable while image dimensions are deferred");
 			std::error_code scanError;
-			reporter.check(files::scan_folder_items(root / L"missing", stop.get_token(), {}, &scanError).empty() &&
-				static_cast<bool>(scanError),
-				L"an unavailable folder reports an enumeration error rather than a successful empty listing");
+			reporter
+				.check(files::scan_folder_items(root / L"missing", stop.get_token(), {}, &scanError).empty() &&
+			               static_cast<bool>(scanError),
+			           L"an unavailable folder reports an enumeration error rather than a successful empty listing");
 			std::filesystem::remove_all(root, error);
 		}
 
@@ -1772,23 +1788,22 @@ namespace iw::tests
 			bool written = false;
 			WICPixelFormatGUID format = GUID_WICPixelFormat24bppBGR;
 			std::vector<BYTE> pixels(8 * 8 * 3, 0x80);
-			if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-					IID_PPV_ARGS(&factory))) &&
-				SUCCEEDED(factory->CreateStream(&stream)) &&
-				SUCCEEDED(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE)) &&
-				SUCCEEDED(factory->CreateEncoder(GUID_ContainerFormatJpeg, nullptr, &encoder)) &&
-				SUCCEEDED(encoder->Initialize(stream, WICBitmapEncoderNoCache)) &&
-				SUCCEEDED(encoder->CreateNewFrame(&frame, &properties)) &&
-				SUCCEEDED(frame->Initialize(properties)) && SUCCEEDED(frame->SetSize(8, 8)) &&
-				SUCCEEDED(frame->SetPixelFormat(&format)) && format == GUID_WICPixelFormat24bppBGR &&
-				SUCCEEDED(frame->GetMetadataQueryWriter(&writer)) &&
-				set_text(L"/app1/ifd/{ushort=271}", "TestCam") &&
-				set_text(L"/app1/ifd/{ushort=272}", "QA-9000  ") &&
-				set_text(L"/app1/ifd/exif/{ushort=36867}", "2025:07:14 10:20:30") &&
-				SUCCEEDED(frame->WritePixels(8, 8 * 3, static_cast<UINT>(pixels.size()), pixels.data())) &&
-				SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit()))
+			if (SUCCEEDED(
+					CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))) &&
+			    SUCCEEDED(factory->CreateStream(&stream)) &&
+			    SUCCEEDED(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE)) &&
+			    SUCCEEDED(factory->CreateEncoder(GUID_ContainerFormatJpeg, nullptr, &encoder)) &&
+			    SUCCEEDED(encoder->Initialize(stream, WICBitmapEncoderNoCache)) &&
+			    SUCCEEDED(encoder->CreateNewFrame(&frame, &properties)) && SUCCEEDED(frame->Initialize(properties)) &&
+			    SUCCEEDED(frame->SetSize(8, 8)) && SUCCEEDED(frame->SetPixelFormat(&format)) &&
+			    format == GUID_WICPixelFormat24bppBGR && SUCCEEDED(frame->GetMetadataQueryWriter(&writer)) &&
+			    set_text(L"/app1/ifd/{ushort=271}", "TestCam") && set_text(L"/app1/ifd/{ushort=272}", "QA-9000  ") &&
+			    set_text(L"/app1/ifd/exif/{ushort=36867}", "2025:07:14 10:20:30") &&
+			    SUCCEEDED(frame->WritePixels(8, 8 * 3, static_cast<UINT>(pixels.size()), pixels.data())) &&
+			    SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit()))
 				written = true;
-			for (IUnknown* value : std::initializer_list<IUnknown*>{writer, properties, frame, encoder, stream, factory})
+			for (IUnknown* value :
+			     std::initializer_list<IUnknown*>{writer, properties, frame, encoder, stream, factory})
 				if (value) value->Release();
 			return written;
 		}
@@ -1806,14 +1821,17 @@ namespace iw::tests
 			{
 				const auto metadata = files::read_metadata(photo);
 				reporter.check(metadata.camera == L"TestCam QA-9000",
-					L"EXIF ASCII Make and Model are read, without the padding cameras add");
+				               L"EXIF ASCII Make and Model are read, without the padding cameras add");
 				reporter.check(metadata.dateTaken == L"2025:07:14 10:20:30", L"EXIF ASCII DateTimeOriginal is read");
 				reporter.check(files::expand_tokens(L"{camera}-{created}", metadata, photo, 1) ==
-					L"TestCam QA-9000-2025-07-14", L"rename tokens use the camera and capture date");
-				reporter.check(files::read_colour_profile(photo).empty(), L"a photo without a colour profile names none");
+				                   L"TestCam QA-9000-2025-07-14",
+				               L"rename tokens use the camera and capture date");
+				reporter.check(files::read_colour_profile(photo).empty(),
+				               L"a photo without a colour profile names none");
 
 				// The same photo with Windows' own sRGB profile as its APP2 ICC_PROFILE segment.
-				if (const auto srgb = orientation_fixtures::system_profile(L"sRGB Color Space Profile.icm"); !srgb.empty())
+				if (const auto srgb = orientation_fixtures::system_profile(L"sRGB Color Space Profile.icm");
+				    !srgb.empty())
 				{
 					const auto plain = orientation_fixtures::read_bytes(photo);
 					auto icc = orientation_fixtures::payload({"ICC_PROFILE\0\x01\x01", 14}, {});
@@ -1824,7 +1842,7 @@ namespace iw::tests
 					profiled.insert(profiled.end(), plain.begin() + 2, plain.end());
 					const auto withProfile = root / L"profiled.jpg";
 					reporter.check(orientation_fixtures::write_bytes(withProfile, profiled) &&
-					               files::read_colour_profile(withProfile) == L"sRGB IEC61966-2.1",
+					                   files::read_colour_profile(withProfile) == L"sRGB IEC61966-2.1",
 					               L"a photo's colour profile is named as the profile names itself");
 				}
 			}
@@ -1834,16 +1852,14 @@ namespace iw::tests
 		void test_image_downsample(Reporter& reporter)
 		{
 			reporter.section(L"files::downsample_bgra_2x");
-			const files::DecodedImage source{
-				4, 2, {
-					0xff000000, 0xff000004, 0xff000008, 0xff00000c,
-					0xff000010, 0xff000014, 0xff000018, 0xff00001c
-				}
-			};
+			const files::DecodedImage source{4,
+			                                 2,
+			                                 {0xff000000, 0xff000004, 0xff000008, 0xff00000c, 0xff000010, 0xff000014,
+			                                  0xff000018, 0xff00001c}};
 			const auto reduced = files::downsample_bgra_2x(source);
 			reporter.check(reduced.width == 2 && reduced.height == 1, L"a 4 x 2 image becomes 2 x 1");
 			reporter.check(reduced.pixels.size() == 2 && reduced.pixels[0] == 0xff00000a &&
-			               reduced.pixels[1] == 0xff000012,
+			                   reduced.pixels[1] == 0xff000012,
 			               L"each output pixel averages its four BGRA source pixels");
 
 			const files::DecodedImage odd{3, 1, {0xff000000, 0xff000004, 0xff112233}};
@@ -1858,7 +1874,7 @@ namespace iw::tests
 		{
 			reporter.section(L"files image save options");
 			reporter.check(std::wstring_view(files::image_save_extension(files::ImageSaveFormat::png)) == L".png" &&
-			               std::wstring_view(files::image_save_extension(files::ImageSaveFormat::jpeg)) == L".jpg",
+			                   std::wstring_view(files::image_save_extension(files::ImageSaveFormat::jpeg)) == L".jpg",
 			               L"save formats expose stable filename extensions");
 			std::error_code error;
 			const auto root = platform::unique_temp_folder(L"iw30-save-tests");
@@ -1868,60 +1884,60 @@ namespace iw::tests
 			               L"new image naming skips existing files without overwriting them");
 			const auto formats = files::writable_image_formats();
 			reporter.check(!formats.empty(), L"at least one installed WIC image encoder is available");
-			const files::DecodedImage image{
-				2, 2,
-				{0xffff0000, 0xff00ff00, 0xff0000ff, 0xffffffff}, 2, 2
-			};
+			const files::DecodedImage image{2, 2, {0xffff0000, 0xff00ff00, 0xff0000ff, 0xffffffff}, 2, 2};
 			for (const auto format : formats)
 			{
 				const auto output = root / (std::wstring(L"encoded") + files::image_save_extension(format));
-				reporter.check(
-					files::save_image(image, output, format) && std::filesystem::file_size(output, error) > 0,
-					L"each advertised WIC format encodes a non-empty image file");
+				reporter.check(files::save_image(image, output, format) &&
+				                   std::filesystem::file_size(output, error) > 0,
+				               L"each advertised WIC format encodes a non-empty image file");
 			}
 			const auto occupied = root / L"occupied.png";
 			std::ofstream(occupied, std::ios::binary) << "original";
 			reporter.check(!files::save_image(image, occupied, files::ImageSaveFormat::png, {}, false),
-				L"a new-output save never overwrites an occupied destination");
+			               L"a new-output save never overwrites an occupied destination");
 			const auto read = [](const std::filesystem::path& path)
 			{
 				std::ifstream stream(path, std::ios::binary);
 				return std::string(std::istreambuf_iterator<char>(stream), {});
 			};
 			reporter.check(read(occupied) == "original",
-				L"a refused image commit retains every original destination byte");
+			               L"a refused image commit retains every original destination byte");
 			reporter.check(!files::save_image({}, occupied, files::ImageSaveFormat::png) &&
-				read(occupied) == "original", L"an invalid image cannot truncate an existing destination");
+			                   read(occupied) == "original",
+			               L"an invalid image cannot truncate an existing destination");
 			std::filesystem::create_directory(root / L"directory.png", error);
 			reporter.check(!files::save_image(image, root / L"directory.png", files::ImageSaveFormat::png) &&
-				std::filesystem::is_directory(root / L"directory.png"),
-				L"a failed image commit cannot replace a directory");
+			                   std::filesystem::is_directory(root / L"directory.png"),
+			               L"a failed image commit cannot replace a directory");
 			reporter.check(std::ranges::none_of(std::filesystem::directory_iterator(root), [](const auto& entry)
-			{
-				return entry.path().filename().wstring().starts_with(L".iw30-");
-			}), L"failed image commits remove their incomplete temporary output");
+			{ return entry.path().filename().wstring().starts_with(L".iw30-"); }),
+			               L"failed image commits remove their incomplete temporary output");
 			reporter.check(files::save_image(image, occupied, files::ImageSaveFormat::png) &&
-				files::load_image(occupied).pixels == image.pixels,
-				L"an explicitly approved replacement publishes a complete decodable image");
+			                   files::load_image(occupied).pixels == image.pixels,
+			               L"an explicitly approved replacement publishes a complete decodable image");
 			const auto snapshot = files::snapshot_file(occupied);
 			reporter.check(snapshot && snapshot->exists && files::matches_snapshot(occupied, *snapshot),
-				L"a readable file has a matching identity snapshot");
+			               L"a readable file has a matching identity snapshot");
 			bool commitChecked = false;
 			const auto originalBytes = read(occupied);
-			reporter.check(!files::save_image(image, occupied, files::ImageSaveFormat::png, {}, true, [&]
+			reporter.check(!files::save_image(image, occupied, files::ImageSaveFormat::png, {}, true,
+			                                  [&]
 			{
 				commitChecked = true;
 				return false;
-			}) && commitChecked && read(occupied) == originalBytes,
-				L"a rejected final revalidation preserves the existing file after encoding");
+			}) && commitChecked &&
+			                   read(occupied) == originalBytes,
+			               L"a rejected final revalidation preserves the existing file after encoding");
 			const auto absent = files::snapshot_file(root / L"appeared.png");
 			reporter.check(absent && !absent->exists, L"a missing file has an explicit absent snapshot");
-			reporter.check(!files::save_image(image, root / L"appeared.png", files::ImageSaveFormat::png, {}, false, [&]
+			reporter.check(!files::save_image(image, root / L"appeared.png", files::ImageSaveFormat::png, {}, false,
+			                                  [&]
 			{
 				std::ofstream(root / L"appeared.png") << "unreviewed";
 				return true;
 			}) && read(root / L"appeared.png") == "unreviewed",
-				L"an output created at commit time is not overwritten");
+			               L"an output created at commit time is not overwritten");
 			auto longFolder = root;
 			// The legacy Windows path limit that files::native_path exists to escape.
 			constexpr size_t legacyPathLimit = 260;
@@ -1945,11 +1961,12 @@ namespace iw::tests
 			char signature[4]{};
 			std::ifstream(path, std::ios::binary).read(signature, sizeof(signature));
 			reporter.check(!path.empty() && std::memcmp(signature, "ITSF", sizeof(signature)) == 0,
-				L"the executable carries the compiled help and writes it out for HTML Help");
+			               L"the executable carries the compiled help and writes it out for HTML Help");
 			std::error_code error;
 			const auto written = std::filesystem::last_write_time(path, error);
-			reporter.check(iw::help::prepare_embedded() == path && std::filesystem::last_write_time(path, error) == written,
-				L"an identical copy is reused rather than rewritten");
+			reporter.check(iw::help::prepare_embedded() == path &&
+			                   std::filesystem::last_write_time(path, error) == written,
+			               L"an identical copy is reused rather than rewritten");
 
 			const auto root = platform::unique_temp_folder(L"iw30-help-tests");
 			std::filesystem::create_directories(root, error);
@@ -1965,26 +1982,26 @@ namespace iw::tests
 			const std::string bytes = "ITSF help bytes";
 			const auto copy = iw::help::prepare(bytes.data(), bytes.size(), root.wstring());
 			reporter.check(!copy.empty() && std::filesystem::path(copy).parent_path() == root && read(copy) == bytes,
-				L"a copy is written into the given folder");
+			               L"a copy is written into the given folder");
 			std::ofstream(copy, std::ios::binary | std::ios::trunc) << "tampered";
 			reporter.check(iw::help::prepare(bytes.data(), bytes.size(), root.wstring()) == copy && read(copy) == bytes,
-				L"a copy whose bytes differ is replaced");
+			               L"a copy whose bytes differ is replaced");
 			std::ofstream(copy + L":Zone.Identifier") << "[ZoneTransfer]\r\nZoneId=3\r\n";
 			const bool wasMarked = marked(copy);
 			reporter.check(wasMarked && iw::help::prepare(bytes.data(), bytes.size(), root.wstring()) == copy &&
-				!marked(copy) && read(copy) == bytes,
-				L"a copy marked as downloaded, which HTML Help shows blank, is replaced by an unmarked one");
+			                   !marked(copy) && read(copy) == bytes,
+			               L"a copy marked as downloaded, which HTML Help shows blank, is replaced by an unmarked one");
 			const std::string other = "ITSF another release";
 			reporter.check(iw::help::prepare(other.data(), other.size(), root.wstring()) != copy,
-				L"executables carrying different help never share a copy");
-			reporter.check(iw::help::prepare(bytes.data(), bytes.size(), (root / L"missing" / L"folder").wstring()).empty() &&
-				iw::help::prepare(nullptr, 4, root.wstring()).empty() &&
-				iw::help::prepare(bytes.data(), 0, root.wstring()).empty(),
-				L"an unwritable folder or empty help yields no copy");
-			reporter.check(std::ranges::none_of(std::filesystem::directory_iterator(root, error), [](const auto& entry)
-			{
-				return entry.path().extension() == L".tmp";
-			}), L"preparing help leaves no temporary files behind");
+			               L"executables carrying different help never share a copy");
+			reporter.check(iw::help::prepare(bytes.data(), bytes.size(), (root / L"missing" / L"folder").wstring())
+			                       .empty() &&
+			                   iw::help::prepare(nullptr, 4, root.wstring()).empty() &&
+			                   iw::help::prepare(bytes.data(), 0, root.wstring()).empty(),
+			               L"an unwritable folder or empty help yields no copy");
+			reporter.check(std::ranges::none_of(std::filesystem::directory_iterator(root, error),
+			                                    [](const auto& entry) { return entry.path().extension() == L".tmp"; }),
+			               L"preparing help leaves no temporary files behind");
 			std::filesystem::remove_all(root, error);
 		}
 
@@ -2009,9 +2026,8 @@ namespace iw::tests
 			{
 				for (int number = 2; number < 64; ++number)
 				{
-					auto candidate = proposed.parent_path() /
-						std::format(L"{} ({}){}", proposed.stem().wstring(), number,
-						            proposed.extension().wstring());
+					auto candidate = proposed.parent_path() / std::format(L"{} ({}){}", proposed.stem().wstring(),
+					                                                      number, proposed.extension().wstring());
 					if (!taken(candidate)) return candidate;
 				}
 				return std::filesystem::path{};
@@ -2022,7 +2038,10 @@ namespace iw::tests
 		{
 			reporter.section(L"tasks::TaskPlan collision policy");
 			const auto unique = make_unique_names();
-			const tasks::ExistsFunction nothingExists = [](const std::filesystem::path&) { return false; };
+			const tasks::ExistsFunction nothingExists = [](const std::filesystem::path&)
+			{
+				return false;
+			};
 			const tasks::ExistsFunction oneExists = [](const std::filesystem::path& path)
 			{
 				return path.filename() == L"b.jpg";
@@ -2035,8 +2054,7 @@ namespace iw::tests
 
 			plan = make_plan({{L"in\\a.jpg", L"out\\a.jpg"}, {L"in\\b.jpg", L"out\\b.jpg"}});
 			tasks::resolve_collisions(plan, tasks::CollisionPolicy::block, oneExists, unique);
-			reporter.check(!plan.can_run() && plan.collisions == 1 &&
-			               plan.rows[1].state == tasks::RowState::blocked,
+			reporter.check(!plan.can_run() && plan.collisions == 1 && plan.rows[1].state == tasks::RowState::blocked,
 			               L"Block run refuses a plan whose destination already exists, with a reason");
 
 			plan = make_plan({{L"in\\a.jpg", L"out\\a.jpg"}, {L"in\\b.jpg", L"out\\b.jpg"}});
@@ -2047,7 +2065,7 @@ namespace iw::tests
 			plan = make_plan({{L"in\\a.jpg", L"out\\a.jpg"}, {L"in\\b.jpg", L"out\\b.jpg"}});
 			tasks::resolve_collisions(plan, tasks::CollisionPolicy::autoRename, oneExists, unique);
 			reporter.check(plan.can_run() && plan.rows[1].destination.filename() == L"b (2).jpg" &&
-			               plan.rows[1].state == tasks::RowState::ready,
+			                   plan.rows[1].state == tasks::RowState::ready,
 			               L"Auto-rename shows the free destination it chose in Review");
 
 			plan = make_plan({{L"in\\a.jpg", L"out\\a.jpg"}, {L"in\\b.jpg", L"out\\b.jpg"}});
@@ -2060,17 +2078,15 @@ namespace iw::tests
 			reporter.check(plan.can_run() && plan.rows[1].destination.filename() == L"same (2).jpg",
 			               L"a destination claimed twice within one plan is a collision Auto-rename resolves");
 
-			for (const auto policy : {
-				     tasks::CollisionPolicy::block, tasks::CollisionPolicy::skip,
-				     tasks::CollisionPolicy::autoRename, tasks::CollisionPolicy::replace
-			     })
+			for (const auto policy : {tasks::CollisionPolicy::block, tasks::CollisionPolicy::skip,
+			                          tasks::CollisionPolicy::autoRename, tasks::CollisionPolicy::replace})
 			{
 				auto merged = make_plan({{L"in\\a.jpg", L"out\\same.jpg"}, {L"in\\b.jpg", L"out\\same.jpg"}});
 				tasks::resolve_collisions(merged, policy, nothingExists, unique);
 				reporter.check(tasks::duplicate_destination(merged).empty(),
 				               L"no policy leaves two sources merged into one destination");
 				const bool resolvable = policy == tasks::CollisionPolicy::autoRename ||
-					policy == tasks::CollisionPolicy::skip;
+				                        policy == tasks::CollisionPolicy::skip;
 				reporter.check(merged.can_run() == resolvable,
 				               L"Block run and Replace refuse two rows claiming one name");
 			}
@@ -2081,10 +2097,8 @@ namespace iw::tests
 			               L"a finished plan holding a merged destination is blocked whatever produced it");
 
 			plan = make_plan({{L"in\\a.jpg", L"out\\a.jpg"}});
-			tasks::resolve_collisions(plan, tasks::CollisionPolicy::skip, [](const std::filesystem::path&)
-			{
-				return true;
-			}, unique);
+			tasks::resolve_collisions(plan, tasks::CollisionPolicy::skip,
+			                          [](const std::filesystem::path&) { return true; }, unique);
 			reporter.check(!plan.can_run() && plan.blockReason == L"Every item would be skipped.",
 			               L"an all-skipped plan is blocked with a stated reason");
 
@@ -2103,33 +2117,36 @@ namespace iw::tests
 			plan.rows[0].detail = L"The source cannot be read.";
 			tasks::resolve_collisions(plan, tasks::CollisionPolicy::replace, nothingExists, unique);
 			reporter.check(!plan.can_run() && plan.rows[0].state == tasks::RowState::blocked &&
-				plan.rows[0].change == L"Invalid source" && plan.rows[0].detail == L"The source cannot be read.",
-				L"collision resolution preserves an analyzer's blocked row and its actionable reason");
+			                   plan.rows[0].change == L"Invalid source" &&
+			                   plan.rows[0].detail == L"The source cannot be read.",
+			               L"collision resolution preserves an analyzer's blocked row and its actionable reason");
 
 			plan = make_plan({{L"in\\a.jpg", L"out\\a.jpg"}, {L"in\\b.jpg", L"out\\b.jpg"}});
 			plan.rows[0].state = tasks::RowState::skipped;
 			plan.rows[0].change = L"Already at destination";
 			tasks::resolve_collisions(plan, tasks::CollisionPolicy::block, nothingExists, unique);
 			reporter.check(plan.can_run() && plan.skips == 1 && plan.rows[0].state == tasks::RowState::skipped,
-				L"collision resolution never resurrects a reviewed no-op");
+			               L"collision resolution never resurrects a reviewed no-op");
 
 			plan = make_plan({{L"in\\a.jpg", L"out\\b.jpg"}});
 			tasks::resolve_collisions(plan, tasks::CollisionPolicy::autoRename, oneExists,
-				[](const std::filesystem::path& proposed, const tasks::ExistsFunction&) { return proposed; });
+			                          [](const std::filesystem::path& proposed, const tasks::ExistsFunction&)
+			{ return proposed; });
 			reporter.check(!plan.can_run() && plan.rows[0].state == tasks::RowState::blocked,
-				L"a faulty unique-name provider cannot approve an occupied destination");
+			               L"a faulty unique-name provider cannot approve an occupied destination");
 
 			plan = make_plan({{L"in\\a.jpg", L"out\\same.jpg"}, {L"in\\b.jpg", L"OUT\\.\\same.jpg"}});
 			tasks::resolve_collisions(plan, tasks::CollisionPolicy::replace, nothingExists, unique);
 			reporter.check(!plan.can_run() && plan.rows[1].state == tasks::RowState::blocked,
-				L"case and dot-segment aliases cannot claim one destination twice");
+			               L"case and dot-segment aliases cannot claim one destination twice");
 
 			const auto snapshot = std::make_shared<const std::wstring>(L"reviewed source state");
 			plan.rows[0].context = snapshot;
 			const auto copiedPlan = plan;
 			reporter.check(copiedPlan.rows[0].context == snapshot &&
-				*std::static_pointer_cast<const std::wstring>(copiedPlan.rows[0].context) == L"reviewed source state",
-				L"review and worker copies share the same immutable workflow snapshot");
+			                   *std::static_pointer_cast<const std::wstring>(copiedPlan.rows[0].context) ==
+			                       L"reviewed source state",
+			               L"review and worker copies share the same immutable workflow snapshot");
 		}
 
 		void test_task_run_plan(Reporter& reporter)
@@ -2153,49 +2170,45 @@ namespace iw::tests
 			auto plan = ready_plan(5);
 			size_t acted = 0;
 			const std::stop_source running;
-			tasks::run_plan(plan, running.get_token(), {
-				                {}, [&acted](tasks::TaskRow& row)
-				                {
-					                ++acted;
-					                if (row.source.filename() == L"1.jpg") throw std::runtime_error("bad file");
-				                },
-				                {}
-			                });
+			tasks::run_plan(plan, running.get_token(),
+			                {{},
+			                 [&acted](tasks::TaskRow& row)
+			{
+				++acted;
+				if (row.source.filename() == L"1.jpg") throw std::runtime_error("bad file");
+			},
+			                 {}});
 			reporter.check(acted == 5 && plan.count(tasks::RowState::success) == 4 &&
-			               plan.count(tasks::RowState::failed) == 1,
+			                   plan.count(tasks::RowState::failed) == 1,
 			               L"a row that throws fails alone and the following rows still run");
-			reporter.check(plan.rows[1].detail == L"bad file",
-			               L"the failing row keeps its actionable error text");
+			reporter.check(plan.rows[1].detail == L"bad file", L"the failing row keeps its actionable error text");
 
 			plan = ready_plan(5);
 			std::stop_source cancelling;
 			size_t completed = 0, reportedTotal = 0;
-			tasks::run_plan(plan, cancelling.get_token(), {
-				                {}, [&cancelling](const tasks::TaskRow& row)
-				                {
-					                if (row.source.filename() == L"1.jpg") cancelling.request_stop();
-				                },
-				                [&completed, &reportedTotal](const size_t complete, const size_t total)
-				                {
-					                completed = complete;
-					                reportedTotal = total;
-				                }
-			                });
+			tasks::run_plan(plan, cancelling.get_token(),
+			                {{},
+			                 [&cancelling](const tasks::TaskRow& row)
+			{
+				if (row.source.filename() == L"1.jpg") cancelling.request_stop();
+			},
+			                 [&completed, &reportedTotal](const size_t complete, const size_t total)
+			{
+				completed = complete;
+				reportedTotal = total;
+			}});
 			reporter.check(plan.count(tasks::RowState::success) == 2 && plan.count(tasks::RowState::notRun) == 3,
 			               L"cancel stops future rows and leaves them Not run, not Success");
 			reporter.check(completed == 2 && reportedTotal == 5,
 			               L"progress carries a completed position and a known total");
 
 			plan = ready_plan(3);
-			tasks::run_plan(plan, running.get_token(), {
-				                [](const tasks::TaskRow& row) { return row.source.filename() != L"1.jpg"; },
-				                [](tasks::TaskRow&)
-				                {
-				                },
-				                {}
-			                });
+			tasks::run_plan(plan, running.get_token(),
+			                {[](const tasks::TaskRow& row) { return row.source.filename() != L"1.jpg"; },
+			                 [](tasks::TaskRow&) {},
+			                 {}});
 			reporter.check(plan.rows[1].state == tasks::RowState::failed && !plan.rows[1].detail.empty() &&
-			               plan.rows[2].state == tasks::RowState::success,
+			                   plan.rows[2].state == tasks::RowState::success,
 			               L"a row that changed since Review is refused while independent rows continue");
 
 			plan = ready_plan(2);
@@ -2203,8 +2216,7 @@ namespace iw::tests
 			tasks::run_plan(plan, running.get_token(), {{}, [](tasks::TaskRow&) {}, {}});
 			reporter.check(plan.rows[0].state == tasks::RowState::skipped,
 			               L"a skipped row keeps its reviewed outcome through a run");
-			reporter.check(!tasks::summarize_results(plan).empty(),
-			               L"a finished run summarises its counts");
+			reporter.check(!tasks::summarize_results(plan).empty(), L"a finished run summarises its counts");
 
 			plan = ready_plan(4);
 			plan.rows[0].state = tasks::RowState::skipped;
@@ -2219,34 +2231,46 @@ namespace iw::tests
 				else if (item.state == tasks::RowState::success) completedRows.push_back(index);
 			};
 			tasks::run_plan(plan, running.get_token(), observed);
-			reporter.check(activeRows == std::vector<size_t>{1, 3} && completedRows == activeRows,
+			reporter.check(
+				activeRows == std::vector<size_t>{1, 3} && completedRows == activeRows,
 				L"row progress identifies actual reviewed indices even when skipped rows precede the current item");
 
 			plan = ready_plan(3);
-			observed.progress = [](size_t, size_t) { throw std::runtime_error("broken progress sink"); };
-			observed.rowProgress = [](size_t, const tasks::TaskRow&) { throw std::runtime_error("broken row sink"); };
+			observed.progress = [](size_t, size_t)
+			{
+				throw std::runtime_error("broken progress sink");
+			};
+			observed.rowProgress = [](size_t, const tasks::TaskRow&)
+			{
+				throw std::runtime_error("broken row sink");
+			};
 			bool reportedWithoutThrow = true;
-			try { tasks::run_plan(plan, running.get_token(), observed); }
-			catch (...) { reportedWithoutThrow = false; }
+			try
+			{
+				tasks::run_plan(plan, running.get_token(), observed);
+			}
+			catch (...)
+			{
+				reportedWithoutThrow = false;
+			}
 			reporter.check(reportedWithoutThrow && plan.count(tasks::RowState::success) == 3,
-				L"a throwing progress observer cannot abandon independent rows or their final outcomes");
+			               L"a throwing progress observer cannot abandon independent rows or their final outcomes");
 
 			plan = ready_plan(1);
 			tasks::run_plan(plan, running.get_token(), {});
 			reporter.check(plan.rows[0].state == tasks::RowState::failed && !plan.rows[0].detail.empty(),
-				L"a missing operation is never reported as a successful write");
+			               L"a missing operation is never reported as a successful write");
 
 			plan = ready_plan(3);
 			plan.rows[0].state = tasks::RowState::pending;
 			plan.rows[1].state = tasks::RowState::blocked;
 			plan.rows[1].change = L"Source not readable";
-			tasks::run_plan(plan, running.get_token(), {{}, [](tasks::TaskRow& item)
-			{
-				item.state = tasks::RowState::ready;
-			}, {}});
-			reporter.check(plan.count(tasks::RowState::notRun) == 1 && plan.count(tasks::RowState::failed) == 2 &&
-				tasks::summarize_results(plan).find(L"Source not readable") != std::wstring::npos,
-				L"every final row has an outcome even when input or an operation leaves an incomplete state");
+			tasks::run_plan(plan, running.get_token(),
+			                {{}, [](tasks::TaskRow& item) { item.state = tasks::RowState::ready; }, {}});
+			reporter
+				.check(plan.count(tasks::RowState::notRun) == 1 && plan.count(tasks::RowState::failed) == 2 &&
+			               tasks::summarize_results(plan).find(L"Source not readable") != std::wstring::npos,
+			           L"every final row has an outcome even when input or an operation leaves an incomplete state");
 
 			plan = ready_plan(4);
 			std::stop_source finishCancel;
@@ -2267,22 +2291,27 @@ namespace iw::tests
 			};
 			tasks::run_plan(plan, finishCancel.get_token(), finalizing);
 			reporter.check(finalizations == 1 && plan.count(tasks::RowState::success) == 2 &&
-				plan.count(tasks::RowState::failed) == 1 && plan.count(tasks::RowState::notRun) == 1 &&
-				tasks::summarize_results(plan).find(L"restore the staged source") != std::wstring::npos,
-				L"cancel finalization runs once before publishing and retains per-row recovery failures");
+			                   plan.count(tasks::RowState::failed) == 1 && plan.count(tasks::RowState::notRun) == 1 &&
+			                   tasks::summarize_results(plan).find(L"restore the staged source") != std::wstring::npos,
+			               L"cancel finalization runs once before publishing and retains per-row recovery failures");
 
 			plan = ready_plan(1);
 			finalizing.act = [](tasks::TaskRow&) {};
-			finalizing.finish = [](tasks::TaskPlan&) { throw std::runtime_error("staging cleanup failed"); };
+			finalizing.finish = [](tasks::TaskPlan&)
+			{
+				throw std::runtime_error("staging cleanup failed");
+			};
 			tasks::run_plan(plan, running.get_token(), finalizing);
-			reporter.check(plan.rows[0].state == tasks::RowState::success && !plan.completionError.empty() &&
-				tasks::summarize_results(plan).find(L"staging cleanup failed") != std::wstring::npos,
+			reporter.check(
+				plan.rows[0].state == tasks::RowState::success && !plan.completionError.empty() &&
+					tasks::summarize_results(plan).find(L"staging cleanup failed") != std::wstring::npos,
 				L"an unexpected finalization exception preserves actual row results and reports its completion error");
 
 			plan = ready_plan(1);
 			plan.rows[0].state = tasks::RowState::notRun;
 			plan.rows[0].detail = L"The staged source needs attention at its recovery path.";
-			reporter.check(tasks::summarize_results(plan).find(plan.rows[0].detail) != std::wstring::npos,
+			reporter.check(
+				tasks::summarize_results(plan).find(plan.rows[0].detail) != std::wstring::npos,
 				L"Not run recovery details remain visible in the summary when no failed-row error takes precedence");
 		}
 
@@ -2311,7 +2340,10 @@ namespace iw::tests
 
 			tasks::TaskRunner runner(dispatcher);
 			int analyzed = 0;
-			runner.analyzed = [&analyzed](tasks::TaskPlan) { ++analyzed; };
+			runner.analyzed = [&analyzed](const tasks::TaskPlan&)
+			{
+				++analyzed;
+			};
 
 			runner.analyze([](const std::stop_token&, const tasks::ProgressFunction&)
 			{
@@ -2350,14 +2382,16 @@ namespace iw::tests
 			auto current = stale;
 			current.generation = runner.generation();
 			int finished = 0;
-			runner.finished = [&finished](tasks::TaskPlan) { ++finished; };
+			runner.finished = [&finished](const tasks::TaskPlan&)
+			{
+				++finished;
+			};
 			reporter.check(runner.run(current, {{}, [](tasks::TaskRow&) {}, {}}),
 			               L"a run against the current generation is accepted");
 			runner.cancel();
 			drain(background);
 			drain(ui);
-			reporter.check(finished == 1,
-			               L"a cancelled run still reports its partial result instead of vanishing");
+			reporter.check(finished == 1, L"a cancelled run still reports its partial result instead of vanishing");
 
 			tasks::TaskPlan blocked;
 			blocked.blockReason = L"no destination";
@@ -2365,17 +2399,21 @@ namespace iw::tests
 
 			current.generation = 0;
 			reporter.check(!runner.run(current, {{}, [](tasks::TaskRow&) {}, {}}),
-				L"an unstamped plan cannot bypass the reviewed generation check");
+			               L"an unstamped plan cannot bypass the reviewed generation check");
 			current.generation = runner.generation();
 			reporter.check(runner.run(current, {{}, [](tasks::TaskRow&) {}, {}}) &&
-				!runner.run(current, {{}, [](tasks::TaskRow&) {}, {}}) &&
-				!runner.analyze([](const std::stop_token&, const tasks::ProgressFunction&) { return tasks::TaskPlan{}; }),
-				L"reentrant Run and Analyze cannot replace an in-flight write");
+			                   !runner.run(current, {{}, [](tasks::TaskRow&) {}, {}}) &&
+			                   !runner.analyze([](const std::stop_token&, const tasks::ProgressFunction&)
+			{ return tasks::TaskPlan{}; }),
+			               L"reentrant Run and Analyze cannot replace an in-flight write");
 			drain(background);
 			drain(ui);
 
 			tasks::TaskPlan cancelledAnalysis;
-			runner.analyzed = [&cancelledAnalysis](tasks::TaskPlan plan) { cancelledAnalysis = std::move(plan); };
+			runner.analyzed = [&cancelledAnalysis](tasks::TaskPlan plan)
+			{
+				cancelledAnalysis = std::move(plan);
+			};
 			bool beganCancelledAnalysis = false;
 			runner.analyze([&beganCancelledAnalysis, row](const std::stop_token&, const tasks::ProgressFunction&)
 			{
@@ -2387,7 +2425,8 @@ namespace iw::tests
 			runner.cancel();
 			drain(background);
 			drain(ui);
-			reporter.check(!beganCancelledAnalysis && !cancelledAnalysis.can_run() && !runner.busy(),
+			reporter.check(
+				!beganCancelledAnalysis && !cancelledAnalysis.can_run() && !runner.busy(),
 				L"cancelling before analysis starts skips its scan and still completes with a non-runnable result");
 
 			runner.analyze([row](const std::stop_token&, const tasks::ProgressFunction&)
@@ -2400,15 +2439,18 @@ namespace iw::tests
 			runner.cancel();
 			drain(ui);
 			reporter.check(!cancelledAnalysis.can_run() &&
-				cancelledAnalysis.blockReason.find(L"cancelled") != std::wstring::npos,
-				L"cancel while an analysis completion is queued cannot enable Run on that partial review");
+			                   cancelledAnalysis.blockReason.find(L"cancelled") != std::wstring::npos,
+			               L"cancel while an analysis completion is queued cannot enable Run on that partial review");
 
 			int acceptedGeneration = 0, progressReports = 0;
 			runner.analyzed = [&acceptedGeneration](tasks::TaskPlan plan)
 			{
 				acceptedGeneration = plan.rows.empty() ? 0 : plan.rows.front().tag;
 			};
-			runner.progress = [&progressReports](tasks::TaskRunner::Phase, size_t, size_t) { ++progressReports; };
+			runner.progress = [&progressReports](tasks::TaskRunner::Phase, size_t, size_t)
+			{
+				++progressReports;
+			};
 			runner.analyze([row](const std::stop_token&, const tasks::ProgressFunction& report) mutable
 			{
 				report(1, 1);
@@ -2430,13 +2472,14 @@ namespace iw::tests
 			drain(background);
 			drain(ui);
 			reporter.check(acceptedGeneration == 2 && progressReports == 1 && !runner.busy(),
-				L"queued stale progress and completion cannot replace a newer review");
+			               L"queued stale progress and completion cannot replace a newer review");
 
 			int chained = 0;
-			runner.analyzed = [&runner, &chained](tasks::TaskPlan)
+			runner.analyzed = [&runner, &chained](const tasks::TaskPlan&)
 			{
 				if (++chained == 1)
-					runner.analyze([](const std::stop_token&, const tasks::ProgressFunction&) { return tasks::TaskPlan{}; });
+					runner.analyze([](const std::stop_token&, const tasks::ProgressFunction&)
+					{ return tasks::TaskPlan{}; });
 			};
 			runner.analyze([](const std::stop_token&, const tasks::ProgressFunction&) { return tasks::TaskPlan{}; });
 			drain(background);
@@ -2444,7 +2487,7 @@ namespace iw::tests
 			drain(background);
 			drain(ui);
 			reporter.check(chained == 2 && !runner.busy(),
-				L"an analysis completion can schedule the next request without that request being retired");
+			               L"an analysis completion can schedule the next request without that request being retired");
 
 			bool rejectWork = true;
 			auto rejectingDispatcher = dispatcher;
@@ -2456,27 +2499,36 @@ namespace iw::tests
 			};
 			tasks::TaskRunner restartable(rejectingDispatcher);
 			reporter.check(!restartable.analyze([](const std::stop_token&, const tasks::ProgressFunction&)
-				{ return tasks::TaskPlan{}; }) && !restartable.busy(),
-				L"a rejected work queue does not strand the runner in Analyzing");
+			{ return tasks::TaskPlan{}; }) &&
+			                   !restartable.busy(),
+			               L"a rejected work queue does not strand the runner in Analyzing");
 			rejectWork = false;
 			int resumed = 0;
-			restartable.analyzed = [&resumed](tasks::TaskPlan) { ++resumed; };
-			restartable.analyze([](const std::stop_token&, const tasks::ProgressFunction&) { return tasks::TaskPlan{}; });
+			restartable.analyzed = [&resumed](const tasks::TaskPlan&)
+			{
+				++resumed;
+			};
+			restartable.analyze([](const std::stop_token&, const tasks::ProgressFunction&)
+			{ return tasks::TaskPlan{}; });
 			drain(background);
 			drain(ui);
 			reporter.check(resumed == 1 && !restartable.busy(),
-				L"the same runner can retry successfully after its queue refused a request");
+			               L"the same runner can retry successfully after its queue refused a request");
 
 			int postDestructionCallbacks = 0;
 			{
 				auto destroyed = std::make_unique<tasks::TaskRunner>(dispatcher);
-				destroyed->analyzed = [&postDestructionCallbacks](tasks::TaskPlan) { ++postDestructionCallbacks; };
-				destroyed->analyze([](const std::stop_token&, const tasks::ProgressFunction&) { return tasks::TaskPlan{}; });
+				destroyed->analyzed = [&postDestructionCallbacks](const tasks::TaskPlan&)
+				{
+					++postDestructionCallbacks;
+				};
+				destroyed->analyze([](const std::stop_token&, const tasks::ProgressFunction&)
+				{ return tasks::TaskPlan{}; });
 				drain(background);
 			}
 			drain(ui);
 			reporter.check(postDestructionCallbacks == 0,
-				L"a completion queued before runner destruction never calls its dead owner");
+			               L"a completion queued before runner destruction never calls its dead owner");
 
 			bool finalizedOnWorker = false, publishedFinalizedResult = false;
 			tasks::RunOptions finishBeforePublish;
@@ -2489,17 +2541,16 @@ namespace iw::tests
 			};
 			runner.finished = [&finalizedOnWorker, &publishedFinalizedResult](const tasks::TaskPlan& result)
 			{
-				publishedFinalizedResult = finalizedOnWorker &&
-					result.rows.front().state == tasks::RowState::failed;
+				publishedFinalizedResult = finalizedOnWorker && result.rows.front().state == tasks::RowState::failed;
 			};
 			current.generation = runner.generation();
 			runner.run(current, finishBeforePublish);
 			drain(background);
 			reporter.check(finalizedOnWorker && !publishedFinalizedResult,
-				L"staging finalization completes on the worker before a result is delivered to the UI");
+			               L"staging finalization completes on the worker before a result is delivered to the UI");
 			drain(ui);
 			reporter.check(publishedFinalizedResult && !runner.busy(),
-				L"TaskRunner publishes the finalized recovery outcomes rather than a pre-cleanup snapshot");
+			               L"TaskRunner publishes the finalized recovery outcomes rather than a pre-cleanup snapshot");
 
 			class TestFrame final : public platform::WindowFrame, public std::enable_shared_from_this<TestFrame>
 			{
@@ -2509,7 +2560,8 @@ namespace iw::tests
 				platform::FrameReactorPtr reactor;
 				platform::NativeHandle native_handle() const override { return {}; }
 				void set_reactor(platform::FrameReactorPtr value) override { reactor = std::move(value); }
-				platform::WindowFramePtr create_child(platform::FrameReactorPtr value, const platform::WindowOptions&) override
+				platform::WindowFramePtr create_child(platform::FrameReactorPtr value,
+				                                      const platform::WindowOptions&) override
 				{
 					if (retainReactor) set_reactor(std::move(value));
 					return shared_from_this();
@@ -2559,7 +2611,9 @@ namespace iw::tests
 				void focus_control(const int id) { panel_.focus(id); }
 				void rebuild_for_test() { rebuild_controls(); }
 				std::wstring cell(const tasks::TaskRow& row, const size_t column) const
-					{ return review_cell(row, column); }
+				{
+					return review_cell(row, column);
+				}
 				std::vector<ui::Control> controlsToBuild;
 				bool confirmClose{true};
 				bool automatic{true};
@@ -2578,7 +2632,9 @@ namespace iw::tests
 				bool auto_analyze() const override { return automatic; }
 				std::wstring analysis_block_reason() const override { return analysisProblem; }
 				std::wstring analysis_summary() const override
-					{ return customSummary.empty() ? TaskView::analysis_summary() : customSummary; }
+				{
+					return customSummary.empty() ? TaskView::analysis_summary() : customSummary;
+				}
 				std::vector<Column> review_columns() const override { return {{L"Source"}, {L"Target"}, {L"Status"}}; }
 				tasks::TaskRunner::AnalyzeFunction make_analyzer() override
 				{
@@ -2599,9 +2655,21 @@ namespace iw::tests
 					};
 				}
 				tasks::RunOptions build_run_options() override
-					{ return {{}, [this](tasks::TaskRow& row) { ++actions; row.change = outcomeText; }, {}}; }
+				{
+					return {{},
+					        [this](tasks::TaskRow& row)
+					{
+						++actions;
+						row.change = outcomeText;
+					},
+					        {}};
+				}
 				void work_state_changed(const bool active) override { controlsLocked = active; }
-				bool confirm_cancel_close() override { ++prompts; return confirmClose; }
+				bool confirm_cancel_close() override
+				{
+					++prompts;
+					return confirmClose;
+				}
 			};
 			const auto testFrame = std::make_shared<TestFrame>();
 			auto view = std::make_shared<TestView>(dispatcher);
@@ -2611,56 +2679,67 @@ namespace iw::tests
 			bool maximized = false;
 			std::wstring viewStatus;
 			TaskView::Host host;
-			host.closed = [&closedViews] { ++closedViews; };
-			host.status = [&viewStatus](std::wstring text) { viewStatus = std::move(text); };
+			host.closed = [&closedViews]
+			{
+				++closedViews;
+			};
+			host.status = [&viewStatus](std::wstring text)
+			{
+				viewStatus = std::move(text);
+			};
 			host.completed = [&completedViews, &completedViewPlan](const tasks::TaskPlan& plan)
 			{
 				++completedViews;
 				completedViewPlan = plan;
 			};
-			host.toggleMaximize = [&maximized] { maximized = !maximized; };
-			host.maximized = [&maximized] { return maximized; };
+			host.toggleMaximize = [&maximized]
+			{
+				maximized = !maximized;
+			};
+			host.maximized = [&maximized]
+			{
+				return maximized;
+			};
 			view->create(testFrame, host);
 			auto toolbar = view->toolbar_items();
 			reporter.check(!view->plan().can_run() && !toolbar.front().command->enabled(),
-				L"a newly opened task cannot run an empty, unreviewed plan");
+			               L"a newly opened task cannot run an empty, unreviewed plan");
 			reporter.check(toolbar.back().command->name == L"Close" &&
-				toolbar[toolbar.size() - 2].command->toolbarText() == L"Maximize",
-				L"the task toolbar ends with Maximize and Close");
+			                   toolbar[toolbar.size() - 2].command->toolbarText() == L"Maximize",
+			               L"the task toolbar ends with Maximize and Close");
 			toolbar[toolbar.size() - 2].command->invoke();
 			reporter.check(maximized && toolbar[toolbar.size() - 2].command->toolbarText() == L"Restore",
-				L"the task's window action toggles the host and displays Restore when maximized");
+			               L"the task's window action toggles the host and displays Restore when maximized");
 			view->analyze();
 			reporter.check(view->busy() && !toolbar.front().command->enabled(),
-				L"Run is disabled throughout analysis, including before a worker starts");
+			               L"Run is disabled throughout analysis, including before a worker starts");
 			drain(background);
 			view->change();
 			drain(background);
 			drain(ui);
-			reporter.check(!view->busy() && view->plan().rows.front().tag == 2 &&
-				toolbar.front().command->enabled(),
-				L"a control change replaces a queued analysis result with the new generation");
+			reporter.check(!view->busy() && view->plan().rows.front().tag == 2 && toolbar.front().command->enabled(),
+			               L"a control change replaces a queued analysis result with the new generation");
 
 			view->start_run();
 			reporter.check(!view->dispose() && view->frame(),
-				L"a task cannot dispose its native surface while reviewed work is still active");
+			               L"a task cannot dispose its native surface while reviewed work is still active");
 			view->confirmClose = false;
 			reporter.check(view->controlsLocked && !view->request_close() && view->busy() && !view->closing(),
-				L"Keep running vetoes close and leaves the immutable running controls locked");
+			               L"Keep running vetoes close and leaves the immutable running controls locked");
 			view->confirmClose = true;
 			reporter.check(!view->request_close() && closedViews == 0 && view->busy() && view->closing(),
-				L"Cancel operation defers closing until the worker reports its partial results");
+			               L"Cancel operation defers closing until the worker reports its partial results");
 			const int promptCount = view->prompts;
 			reporter.check(!view->request_close() && view->prompts == promptCount,
-				L"repeated Close while cancellation is pending neither prompts again nor abandons the job");
+			               L"repeated Close while cancellation is pending neither prompts again nor abandons the job");
 			drain(background);
 			drain(ui);
 			reporter.check(closedViews == 1 && !view->busy() && !view->closing() && !view->controlsLocked &&
-				view->plan().count(tasks::RowState::notRun) == 2 && view->actions == 0 &&
-				viewStatus.find(L"2 not run") != std::wstring::npos,
-				L"cancel-and-close retains Not run outcomes and closes exactly once after completion");
+			                   view->plan().count(tasks::RowState::notRun) == 2 && view->actions == 0 &&
+			                   viewStatus.find(L"2 not run") != std::wstring::npos,
+			               L"cancel-and-close retains Not run outcomes and closes exactly once after completion");
 			reporter.check(completedViews == 1 && completedViewPlan.count(tasks::RowState::notRun) == 2,
-				L"the host receives the complete partial outcome before cancellation closes the task");
+			               L"the host receives the complete partial outcome before cancellation closes the task");
 
 			auto outcomeView = std::make_shared<TestView>(dispatcher);
 			outcomeView->outcomeText = L"Skipped because the destination appeared after Review";
@@ -2672,42 +2751,45 @@ namespace iw::tests
 			drain(background);
 			drain(ui);
 			reporter.check(outcomeView->cell(outcomeView->plan().rows.front(), 2).find(outcomeView->outcomeText) !=
-				std::wstring::npos,
-				L"the result column retains each row's workflow-specific outcome after processing");
+			                   std::wstring::npos,
+			               L"the result column retains each row's workflow-specific outcome after processing");
 
 			auto cancelView = std::make_shared<TestView>(dispatcher);
 			int cancelClosed = 0;
 			TaskView::Host cancelHost;
-			cancelHost.closed = [&cancelClosed] { ++cancelClosed; };
+			cancelHost.closed = [&cancelClosed]
+			{
+				++cancelClosed;
+			};
 			cancelView->create(testFrame, std::move(cancelHost));
 			const auto installedToolbar = cancelView->toolbar_items();
 			const auto cancelItem = std::ranges::find_if(installedToolbar, [](const platform::ToolbarItem& item)
-			{
-				return item.command && item.command->name == L"Cancel";
-			});
-			const auto installedCancel = cancelItem == installedToolbar.end() ? platform::CommandPtr{} : cancelItem->command;
+			{ return item.command && item.command->name == L"Cancel"; });
+			const auto installedCancel = cancelItem == installedToolbar.end() ? platform::CommandPtr{}
+			                                                                  : cancelItem->command;
 			reporter.check(installedCancel && !installedCancel->enabled(),
-				L"the idle task installs a disabled Cancel button before analysis starts");
+			               L"the idle task installs a disabled Cancel button before analysis starts");
 			cancelView->analyze();
 			reporter.check(installedCancel && installedCancel->enabled(),
-				L"the installed Cancel button enables for analysis without rebuilding the toolbar");
+			               L"the installed Cancel button enables for analysis without rebuilding the toolbar");
 			if (installedCancel) installedCancel->invoke();
 			drain(background);
 			drain(ui);
 			reporter.check(!cancelView->busy() && !cancelView->plan().can_run() && cancelClosed == 0,
-				L"toolbar cancellation stops analysis without closing the task");
+			               L"toolbar cancellation stops analysis without closing the task");
 			cancelView->analyze();
 			drain(background);
 			drain(ui);
 			cancelView->start_run();
 			reporter.check(installedCancel && installedCancel->enabled(),
-				L"the same installed Cancel button enables for a reviewed run");
+			               L"the same installed Cancel button enables for a reviewed run");
 			if (installedCancel) installedCancel->invoke();
 			drain(background);
 			drain(ui);
-			reporter.check(installedCancel && !installedCancel->enabled() && cancelClosed == 0 &&
-				cancelView->actions == 0 && cancelView->plan().count(tasks::RowState::notRun) == 2,
-				L"toolbar cancellation retains Not run results in the open task and disables after completion");
+			reporter
+				.check(installedCancel && !installedCancel->enabled() && cancelClosed == 0 &&
+			               cancelView->actions == 0 && cancelView->plan().count(tasks::RowState::notRun) == 2,
+			           L"toolbar cancellation retains Not run results in the open task and disables after completion");
 
 			view->change();
 			drain(background);
@@ -2716,22 +2798,23 @@ namespace iw::tests
 			view->change();
 			drain(background);
 			drain(ui);
-			reporter.check(!view->busy() && view->plan().count(tasks::RowState::notRun) == 2 &&
-				viewStatus.find(L"Options changed") != std::wstring::npos,
-				L"a late native control change cancels future writes without discarding their partial results");
+			reporter
+				.check(!view->busy() && view->plan().count(tasks::RowState::notRun) == 2 &&
+			               viewStatus.find(L"Options changed") != std::wstring::npos,
+			           L"a late native control change cancels future writes without discarding their partial results");
 
 			rejectWork = true;
 			auto refusedView = std::make_shared<TestView>(rejectingDispatcher);
 			refusedView->create(testFrame, {});
 			refusedView->analyze();
 			reporter.check(!refusedView->busy() && !refusedView->plan().can_run(),
-				L"a task view whose worker queue rejects analysis does not stay permanently busy");
+			               L"a task view whose worker queue rejects analysis does not stay permanently busy");
 			rejectWork = false;
 			refusedView->analyze();
 			drain(background);
 			drain(ui);
 			reporter.check(!refusedView->busy() && refusedView->plan().can_run(),
-				L"the same task view can recover by analyzing again after dispatch failure");
+			               L"the same task view can recover by analyzing again after dispatch failure");
 
 			auto reentrantView = std::make_shared<TestView>(dispatcher);
 			bool changeFromStatus = true;
@@ -2746,9 +2829,8 @@ namespace iw::tests
 			reentrantView->analyze();
 			drain(background);
 			drain(ui);
-			reporter.check(reentrantView->analyses == 1 && !reentrantView->busy() &&
-				reentrantView->plan().can_run(),
-				L"reentrant status callbacks cannot let an older Analyze clear or replace a newer request");
+			reporter.check(reentrantView->analyses == 1 && !reentrantView->busy() && reentrantView->plan().can_run(),
+			               L"reentrant status callbacks cannot let an older Analyze clear or replace a newer request");
 
 			auto earlyCancelView = std::make_shared<TestView>(dispatcher);
 			TaskView::Host earlyCancelHost;
@@ -2762,16 +2844,17 @@ namespace iw::tests
 			drain(ui);
 			earlyCancelView->start_run();
 			reporter.check(background.empty() && !earlyCancelView->busy() && earlyCancelView->actions == 0 &&
-				earlyCancelView->plan().count(tasks::RowState::notRun) == 2,
-				L"Cancel from a reentrant start notification cannot be lost before the worker is submitted");
+			                   earlyCancelView->plan().count(tasks::RowState::notRun) == 2,
+			               L"Cancel from a reentrant start notification cannot be lost before the worker is submitted");
 
 			auto explicitView = std::make_shared<TestView>(dispatcher);
 			explicitView->automatic = false;
 			explicitView->create(testFrame, {});
 			explicitView->initialize();
 			reporter.check(!explicitView->analyzes_automatically() && view->analyzes_automatically() &&
-				background.empty() && explicitView->analyses == 0 && !explicitView->busy() &&
-				!explicitView->plan().can_run(), L"initializing an explicit-analysis task does not scan its folder trees");
+			                   background.empty() && explicitView->analyses == 0 && !explicitView->busy() &&
+			                   !explicitView->plan().can_run(),
+			               L"initializing an explicit-analysis task does not scan its folder trees");
 
 			auto refreshingView = std::make_shared<TestView>(dispatcher);
 			bool preservedCompletion = false;
@@ -2788,34 +2871,37 @@ namespace iw::tests
 			refreshingView->start_run();
 			drain(background);
 			drain(ui);
-			reporter.check(preservedCompletion && refreshingView->busy(),
+			reporter.check(
+				preservedCompletion && refreshingView->busy(),
 				L"host refresh can start a new analysis without invalidating the completion reference or next request");
 			drain(background);
 			drain(ui);
 			reporter.check(!refreshingView->busy() && refreshingView->plan().can_run(),
-				L"a host-triggered follow-up analysis remains runnable after the preceding run completes");
+			               L"a host-triggered follow-up analysis remains runnable after the preceding run completes");
 
 			auto nativeKeyView = std::make_shared<TestView>(dispatcher);
 			int escapedInputs = 0;
 			TaskView::Host nativeKeyHost;
-			nativeKeyHost.closed = [&escapedInputs] { ++escapedInputs; };
+			nativeKeyHost.closed = [&escapedInputs]
+			{
+				++escapedInputs;
+			};
 			nativeKeyView->create(testFrame, std::move(nativeKeyHost));
 			nativeKeyView->text_options(1);
 			auto textOptions = nativeKeyView->text_options(2);
 			nativeKeyView->text_options(3);
 			textOptions.tabbed(false);
 			reporter.check(nativeKeyView->focused_control() == 3,
-				L"Tab from a native text field advances from that field's actual control id");
+			               L"Tab from a text field advances from that field's actual control id");
 			textOptions.tabbed(true);
 			reporter.check(nativeKeyView->focused_control() == 1,
-				L"Shift-Tab from a native text field reverses drawn control focus");
+			               L"Shift-Tab from a text field reverses drawn control focus");
 			textOptions.escaped();
-			reporter.check(escapedInputs == 1, L"Escape inside a native text field uses the task's guarded host close");
+			reporter.check(escapedInputs == 1, L"Escape inside a text field uses the task's guarded host close");
 			nativeKeyView.reset();
 			textOptions.tabbed(false);
 			textOptions.escaped();
-			reporter.check(escapedInputs == 1,
-				L"native input callbacks cannot call a task after its lifetime has ended");
+			reporter.check(escapedInputs == 1, L"text field callbacks cannot call a task after its lifetime has ended");
 
 			auto ownedFrame = std::make_shared<TestFrame>();
 			ownedFrame->retainReactor = true;
@@ -2826,7 +2912,7 @@ namespace iw::tests
 			reporter.check(!weakOwnedView.expired(), L"the native frame retains its task reactor while open");
 			weakOwnedView.lock()->dispose();
 			reporter.check(weakOwnedView.expired() && !ownedFrame->reactor && ownedFrame->closes == 1,
-				L"disposing a task closes its child and breaks the shared frame/reactor ownership cycle");
+			               L"disposing a task closes its child and breaks the shared frame/reactor ownership cycle");
 
 			auto externallyClosed = std::make_shared<TestView>(dispatcher);
 			externallyClosed->create(ownedFrame, {});
@@ -2835,32 +2921,36 @@ namespace iw::tests
 			auto retainedReactor = ownedFrame->reactor;
 			retainedReactor->message(ownedFrame, platform::WindowMessage::destroy);
 			retainedReactor.reset();
-			reporter.check(weakExternallyClosed.expired() && !ownedFrame->reactor,
-				L"native child destruction also releases the retained task reactor without explicit disposal");
+			reporter
+				.check(weakExternallyClosed.expired() && !ownedFrame->reactor,
+			           L"native child destruction also releases the retained task reactor without explicit disposal");
 
 			auto eligibleView = std::make_shared<TestView>(dispatcher);
 			eligibleView->analysisProblem = L"Choose both folders.";
 			std::wstring eligibilityStatus;
 			TaskView::Host eligibilityHost;
-			eligibilityHost.status = [&eligibilityStatus](std::wstring text) { eligibilityStatus = std::move(text); };
+			eligibilityHost.status = [&eligibilityStatus](std::wstring text)
+			{
+				eligibilityStatus = std::move(text);
+			};
 			eligibleView->create(testFrame, std::move(eligibilityHost));
 			const auto eligibilityToolbar = eligibleView->toolbar_items();
 			const auto analysisCommand = std::ranges::find_if(eligibilityToolbar, [](const auto& item)
-				{ return item.command && item.command->name == L"Refresh"; });
-			reporter.check(analysisCommand != eligibilityToolbar.end() &&
-				!analysisCommand->command->enabled() && analysisCommand->command->tooltip == L"Choose both folders.",
-				L"analysis eligibility disables its toolbar command with the same actionable reason");
+			{ return item.command && item.command->name == L"Refresh"; });
+			reporter.check(analysisCommand != eligibilityToolbar.end() && !analysisCommand->command->enabled() &&
+			                   analysisCommand->command->tooltip == L"Choose both folders.",
+			               L"analysis eligibility disables its toolbar command with the same actionable reason");
 			eligibleView->analyze();
 			reporter.check(background.empty() && eligibleView->analyses == 0 && !eligibleView->busy() &&
-				eligibleView->plan().blockReason == L"Choose both folders.",
-				L"direct Analyze cannot bypass workflow eligibility or leave a previously runnable plan");
+			                   eligibleView->plan().blockReason == L"Choose both folders.",
+			               L"direct Analyze cannot bypass workflow eligibility or leave a previously runnable plan");
 			eligibleView->analysisProblem.clear();
 			eligibleView->customSummary = L"2 copies, 0 deletions, 0 ignored";
 			eligibleView->analyze();
 			drain(background);
 			drain(ui);
 			reporter.check(eligibleView->plan().can_run() && eligibilityStatus == eligibleView->customSummary,
-				L"completed analysis presents the workflow-specific action summary");
+			               L"completed analysis presents the workflow-specific action summary");
 
 			auto rebuiltView = std::make_shared<TestView>(dispatcher);
 			ui::Control rebuiltControl;
@@ -2871,11 +2961,11 @@ namespace iw::tests
 			rebuiltView->focus_control(42);
 			rebuiltView->rebuild_for_test();
 			reporter.check(rebuiltView->focused_control() == 42,
-				L"workflow control rebuilds preserve keyboard focus on the same still-enabled control");
+			               L"workflow control rebuilds preserve keyboard focus on the same still-enabled control");
 			rebuiltView->controlsToBuild.front().enabled = false;
 			rebuiltView->rebuild_for_test();
 			reporter.check(rebuiltView->focused_control() == 0,
-				L"rebuilding a disabled control does not leave stale keyboard focus");
+			               L"rebuilding a disabled control does not leave stale keyboard focus");
 		}
 
 		void test_file_services(Reporter& reporter)
@@ -2898,12 +2988,9 @@ namespace iw::tests
 			const auto sidecars = files::sidecar_paths(root / L"photo.jpg");
 			reporter.check(sidecars.size() == 2, L"sidecar_paths finds only companions that exist");
 			reporter.check(std::ranges::any_of(sidecars, [](const std::filesystem::path& path)
-			               {
-				               return path.filename() == L"photo.xmp";
-			               }) && std::ranges::any_of(sidecars, [](const std::filesystem::path& path)
-			               {
-				               return path.filename() == L"photo.jpg.thm";
-			               }),
+			{ return path.filename() == L"photo.xmp"; }) &&
+			                   std::ranges::any_of(sidecars, [](const std::filesystem::path& path)
+			{ return path.filename() == L"photo.jpg.thm"; }),
 			               L"both the stem and the full-name sidecar conventions are recognised");
 			reporter.check(files::sidecar_paths(root / L"missing.jpg").empty(),
 			               L"a primary with no companions has no sidecars");
@@ -2917,26 +3004,24 @@ namespace iw::tests
 			reporter.check(files::unique_destination(root / L"photo.jpg").filename() == L"photo (3).jpg",
 			               L"unique_destination keeps counting past occupied names");
 			reporter.check(files::unique_destination(root / L"free.jpg", [](const std::filesystem::path&)
-			               {
-				               return true;
-			               }).empty(),
+			{ return true; }).empty(),
 			               L"unique_destination is bounded and gives up rather than looping");
 
 			reporter.check(!files::copy_file_to(root / L"photo.jpg", root / L"sub" / L"copied.jpg", false),
 			               L"copy creates a missing destination folder");
 			reporter.check(std::filesystem::exists(root / L"sub" / L"copied.jpg", error) &&
-			               std::filesystem::exists(root / L"photo.jpg", error),
+			                   std::filesystem::exists(root / L"photo.jpg", error),
 			               L"copy keeps every source file");
 			reporter.check(files::copy_file_to(root / L"photo.jpg", root / L"sub" / L"copied.jpg", false) ==
-			               std::errc::file_exists,
+			                   std::errc::file_exists,
 			               L"copy refuses an existing destination unless overwrite was asked for");
 			reporter.check(!files::copy_file_to(root / L"photo.jpg", root / L"sub" / L"copied.jpg", true),
 			               L"copy replaces an existing destination when overwrite was asked for");
 			reporter.check(!files::move_file_to(root / L"sub" / L"copied.jpg", root / L"sub" / L"moved.jpg", false) &&
-			               !std::filesystem::exists(root / L"sub" / L"copied.jpg", error),
+			                   !std::filesystem::exists(root / L"sub" / L"copied.jpg", error),
 			               L"move removes the source after a successful move");
 			reporter.check(files::move_file_to(root / L"photo.jpg", root / L"sub" / L"moved.jpg", false) ==
-			               std::errc::file_exists,
+			                   std::errc::file_exists,
 			               L"move refuses an existing destination unless overwrite was asked for");
 			reporter.check(std::filesystem::exists(root / L"photo.jpg", error),
 			               L"a refused move leaves the source where it was");
@@ -2948,32 +3033,32 @@ namespace iw::tests
 			const auto blockedSource = root / L"blocked-read.txt";
 			const auto blockedDestination = root / L"blocked-move.txt";
 			write(L"blocked-read.txt", "blocked");
-			const auto blockedHandle = ::platform::open_file(
-				desktop::file_path(blockedSource), ::platform::file_open_mode::read);
+			const auto blockedHandle = ::platform::open_file(desktop::file_path(blockedSource),
+			                                                 ::platform::file_open_mode::read);
 			const auto blockedMove = files::move_file_to(blockedSource, blockedDestination, false);
 			std::error_code blockedProbe;
 			const bool blockedPublished = std::filesystem::exists(blockedDestination, blockedProbe);
 			reporter.check(blockedHandle && blockedMove && !blockedPublished && !blockedProbe &&
-			               read(blockedSource) == "blocked",
+			                   read(blockedSource) == "blocked",
 			               L"a move blocked by a live read handle fails without publishing a copied destination");
 			write(L"replace.txt", "unchanged");
 			reporter.check(files::copy_file_to(root / L"missing.txt", root / L"replace.txt", true) &&
-				read(root / L"replace.txt") == "unchanged",
-				L"a failed replacement copy leaves the existing destination intact");
+			                   read(root / L"replace.txt") == "unchanged",
+			               L"a failed replacement copy leaves the existing destination intact");
 			reporter.check(files::move_file_to(root / L"missing.txt", root / L"replace.txt", true) &&
-				read(root / L"replace.txt") == "unchanged",
-				L"a failed replacement move leaves the existing destination intact");
+			                   read(root / L"replace.txt") == "unchanged",
+			               L"a failed replacement move leaves the existing destination intact");
 			reporter.check(files::copy_file_to(root / L"photo.jpg", root / L"photo.jpg", true) &&
-				read(root / L"photo.jpg") == "primary", L"copy cannot replace its own source");
+			                   read(root / L"photo.jpg") == "primary",
+			               L"copy cannot replace its own source");
 			std::filesystem::create_directory(root / L"folder", error);
 			std::ofstream(root / L"folder" / L"child.txt") << "child";
 			reporter.check(!files::move_file_to(root / L"folder", root / L"renamed-folder", false) &&
-				read(root / L"renamed-folder" / L"child.txt") == "child",
-				L"directory renames retain their complete contents");
+			                   read(root / L"renamed-folder" / L"child.txt") == "child",
+			               L"directory renames retain their complete contents");
 			reporter.check(std::ranges::none_of(std::filesystem::directory_iterator(root), [](const auto& entry)
-			{
-				return entry.path().filename().wstring().starts_with(L".iw30-");
-			}), L"failed transfers remove their incomplete temporary output");
+			{ return entry.path().filename().wstring().starts_with(L".iw30-"); }),
+			               L"failed transfers remove their incomplete temporary output");
 
 			std::filesystem::remove_all(root, error);
 		}
@@ -3013,7 +3098,7 @@ namespace iw::tests
 			reporter.check(limited_output_size(4000, 3000, 0).width == 4000,
 			               L"no limit leaves the photo at its own size");
 			reporter.check(limited_output_size(800, 600, 1920).width == 800 &&
-			               limited_output_size(800, 600, 1920).height == 600,
+			                   limited_output_size(800, 600, 1920).height == 600,
 			               L"a photo already inside the limit is never enlarged");
 			const auto reduced = limited_output_size(4000, 3000, 1000);
 			reporter.check(reduced.width == 1000 && reduced.height == 750,
@@ -3034,7 +3119,11 @@ namespace iw::tests
 			struct Cleanup
 			{
 				std::filesystem::path path;
-				~Cleanup() { std::error_code ignored; std::filesystem::remove_all(path, ignored); }
+				~Cleanup()
+				{
+					std::error_code ignored;
+					std::filesystem::remove_all(path, ignored);
+				}
 			} cleanup{root};
 			const auto write = [](const std::filesystem::path& path, const std::string& bytes)
 			{
@@ -3053,8 +3142,8 @@ namespace iw::tests
 			const auto source = root / L"photo.png";
 			const auto second = root / L"second.png";
 			reporter.check(files::save_image(image, source, files::ImageSaveFormat::png, {}, false) &&
-				files::save_image(image, second, files::ImageSaveFormat::png, {}, false),
-				L"Convert fixtures use a real decodable image");
+			                   files::save_image(image, second, files::ImageSaveFormat::png, {}, false),
+			               L"Convert fixtures use a real decodable image");
 			const auto original = read(source);
 			convert::Settings settings;
 			settings.format = files::ImageSaveFormat::png;
@@ -3062,7 +3151,8 @@ namespace iw::tests
 			settings.destination = root / L"output";
 			settings.limitEnabled = true;
 			settings.maximumDimension = 0;
-			reporter.check(!convert::settings_problem(settings).empty(), L"an enabled zero dimension has a Run blocker");
+			reporter.check(!convert::settings_problem(settings).empty(),
+			               L"an enabled zero dimension has a Run blocker");
 			settings.maximumDimension = 2;
 			auto reviewed = convert::analyze({source}, settings);
 			const auto originalChange = reviewed.rows.front().change;
@@ -3071,20 +3161,21 @@ namespace iw::tests
 			settings.maximumDimension = 1;
 			settings.quality = 42;
 			reporter.check(preview.find(L"2 x 1") != std::wstring::npos &&
-				convert::describe_changes(reviewed.rows.front(), settings).find(L"1 x 1") != std::wstring::npos &&
-				reviewed.generation == generation && reviewed.rows.front().change == originalChange,
-				L"dimension and quality previews preserve the immutable filesystem plan and its generation");
+			                   convert::describe_changes(reviewed.rows.front(), settings).find(L"1 x 1") !=
+			                       std::wstring::npos &&
+			                   reviewed.generation == generation && reviewed.rows.front().change == originalChange,
+			               L"dimension and quality previews preserve the immutable filesystem plan and its generation");
 
 			settings.destination = root;
 			settings.policy = tasks::CollisionPolicy::replace;
 			reporter.check(!convert::analyze({source}, settings).can_run(),
-				L"Replace cannot overwrite the original photo in its own folder");
+			               L"Replace cannot overwrite the original photo in its own folder");
 			settings.policy = tasks::CollisionPolicy::skip;
 			reporter.check(!convert::analyze({source}, settings).can_run(), L"an all-skipped conversion cannot run");
 			settings.policy = tasks::CollisionPolicy::autoRename;
 			auto autoPlan = convert::analyze({source}, settings);
 			reporter.check(autoPlan.can_run() && !paths::equal(source, autoPlan.rows.front().destination),
-				L"Auto-rename retains originals while converting into their own folder");
+			               L"Auto-rename retains originals while converting into their own folder");
 
 			settings.destination = root / L"output";
 			settings.policy = tasks::CollisionPolicy::block;
@@ -3093,36 +3184,41 @@ namespace iw::tests
 			write(appeared.rows.front().destination, "arrived after Review");
 			tasks::run_plan(appeared, {}, convert::run_options(settings, {source}));
 			reporter.check(appeared.rows.front().state == tasks::RowState::skipped &&
-				read(appeared.rows.front().destination) == "arrived after Review" && read(source) == original,
-				L"an unreviewed arrival is skipped and neither destination nor original is changed");
+			                   read(appeared.rows.front().destination) == "arrived after Review" &&
+			                   read(source) == original,
+			               L"an unreviewed arrival is skipped and neither destination nor original is changed");
 
 			settings.policy = tasks::CollisionPolicy::replace;
 			auto replacement = convert::analyze({source}, settings);
 			reporter.check(replacement.can_run() && replacement.rows.front().replace,
-				L"the existing destination is explicitly reviewed as Replace");
+			               L"the existing destination is explicitly reviewed as Replace");
 			tasks::run_plan(replacement, {}, convert::run_options(settings, {source}));
 			const auto converted = files::load_image(replacement.rows.front().destination);
 			reporter.check(replacement.count(tasks::RowState::success) == 1 && converted.width == 1 &&
-				converted.height == 1 && read(source) == original,
-				L"approved Replace writes the reviewed transformation and retains the original bytes");
+			                   converted.height == 1 && read(source) == original,
+			               L"approved Replace writes the reviewed transformation and retains the original bytes");
 			auto changedReplacement = convert::analyze({source}, settings);
 			write(changedReplacement.rows.front().destination, "a different destination appeared");
 			tasks::run_plan(changedReplacement, {}, convert::run_options(settings, {source}));
 			reporter.check(changedReplacement.count(tasks::RowState::failed) == 1 &&
-				read(changedReplacement.rows.front().destination) == "a different destination appeared",
-				L"Replace refuses a destination whose reviewed identity or contents changed");
+			                   read(changedReplacement.rows.front().destination) == "a different destination appeared",
+			               L"Replace refuses a destination whose reviewed identity or contents changed");
 
 			settings.destination = root / L"cancel";
 			settings.policy = tasks::CollisionPolicy::block;
 			auto cancelled = convert::analyze({source, second}, settings);
 			std::stop_source stop;
 			auto options = convert::run_options(settings, {source, second});
-			options.progress = [&stop](const size_t complete, size_t) { if (complete == 1) stop.request_stop(); };
+			options.progress = [&stop](const size_t complete, size_t)
+			{
+				if (complete == 1) stop.request_stop();
+			};
 			tasks::run_plan(cancelled, stop.get_token(), options);
-			reporter.check(cancelled.count(tasks::RowState::success) == 1 && cancelled.count(tasks::RowState::notRun) == 1 &&
-				std::filesystem::exists(cancelled.rows.front().destination) &&
-				!std::filesystem::exists(cancelled.rows.back().destination),
-				L"cancellation retains completed conversion output and marks unreached items Not run");
+			reporter.check(cancelled.count(tasks::RowState::success) == 1 &&
+			                   cancelled.count(tasks::RowState::notRun) == 1 &&
+			                   std::filesystem::exists(cancelled.rows.front().destination) &&
+			                   !std::filesystem::exists(cancelled.rows.back().destination),
+			               L"cancellation retains completed conversion output and marks unreached items Not run");
 
 			const auto malformed = root / L"malformed.png";
 			write(malformed, "not an image");
@@ -3130,25 +3226,25 @@ namespace iw::tests
 			auto continued = convert::analyze({malformed, second}, settings);
 			tasks::run_plan(continued, {}, convert::run_options(settings, {malformed, second}));
 			reporter.check(continued.rows[0].state == tasks::RowState::failed &&
-				continued.rows[1].state == tasks::RowState::success,
-				L"a decoding failure does not prevent a later conversion");
+			                   continued.rows[1].state == tasks::RowState::success,
+			               L"a decoding failure does not prevent a later conversion");
 			settings.destination = root / L"changed-source";
 			auto stalePhoto = convert::analyze({source}, settings);
 			write(source, "a replacement photo");
 			tasks::run_plan(stalePhoto, {}, convert::run_options(settings, {source}));
 			reporter.check(stalePhoto.count(tasks::RowState::failed) == 1 &&
-				!std::filesystem::exists(stalePhoto.rows.front().destination),
-				L"conversion refuses a source changed since its dimensions were reviewed");
+			                   !std::filesystem::exists(stalePhoto.rows.front().destination),
+			               L"conversion refuses a source changed since its dimensions were reviewed");
 			const auto missingSource = root / L"missing-source.png";
 			reporter.check(files::save_image(image, missingSource, files::ImageSaveFormat::png, {}, false),
-				L"the missing-source fixture is created");
+			               L"the missing-source fixture is created");
 			settings.destination = root / L"missing-source-output";
 			auto missingSourcePlan = convert::analyze({missingSource}, settings);
 			std::filesystem::remove(missingSource, error);
 			tasks::run_plan(missingSourcePlan, {}, convert::run_options(settings, {missingSource}));
 			reporter.check(missingSourcePlan.count(tasks::RowState::failed) == 1 &&
-				missingSourcePlan.rows.front().detail.find(L"Analyze again") != std::wstring::npos,
-				L"a source removed after Review fails with an actionable explanation");
+			                   missingSourcePlan.rows.front().detail.find(L"Analyze again") != std::wstring::npos,
+			               L"a source removed after Review fails with an actionable explanation");
 		}
 
 		void test_tools_configuration(Reporter& reporter)
@@ -3162,18 +3258,17 @@ namespace iw::tests
 			const auto configuration = tools::parse_configuration(document);
 			reporter.check(configuration.valid, L"a well-formed document is accepted");
 			reporter.check(configuration.folders.size() == 1, L"configured search roots are read");
-			reporter.check(configuration.apps.size() == 1,
-			               L"a declaration without exe or invoke is rejected outright");
+			reporter.check(configuration.apps.size() == 1, L"a declaration without exe or invoke is rejected outright");
 			reporter.check(configuration.issues.size() == 2,
-				L"each unusable declaration produces a user-visible configuration issue");
+			               L"each unusable declaration produces a user-visible configuration issue");
 			reporter.check(!tools::declaration_is_usable({L"", L"{exe-path}"}) &&
-			               !tools::declaration_is_usable({L"a.exe", L""}) &&
-			               tools::declaration_is_usable({L"a.exe", L"{exe-path}"}),
+			                   !tools::declaration_is_usable({L"a.exe", L""}) &&
+			                   tools::declaration_is_usable({L"a.exe", L"{exe-path}"}),
 			               L"both exe and invoke are required");
 
 			const auto extensions = tools::split_extensions(L"jpg, PNG;.tif");
 			reporter.check(extensions.size() == 3 && extensions[0] == L".jpg" && extensions[1] == L".png" &&
-			               extensions[2] == L".tif",
+			                   extensions[2] == L".tif",
 			               L"extensions are normalised to lowercase with a leading dot");
 			reporter.check(tools::split_extensions(L"jpg,JPG").size() == 1,
 			               L"an extension repeated in one declaration is listed once");
@@ -3192,24 +3287,23 @@ namespace iw::tests
 			reporter.check(!tools::parse_configuration(L"").valid, L"an empty document is rejected");
 
 			std::vector<tools::InstalledTool> installed;
-			installed.push_back({L"Group tool", L"C:\\Apps\\group.exe", L"{exe-path} {item-path}", {},
-			                     files::ItemKind::image, true});
-			installed.push_back({L"Both", L"C:\\Apps\\both.exe", L"{exe-path} {item-path}", {L".jpg"},
-			                     files::ItemKind::image, true});
+			installed.push_back(
+				{L"Group tool", L"C:\\Apps\\group.exe", L"{exe-path} {item-path}", {}, files::ItemKind::image, true});
+			installed.push_back(
+				{L"Both", L"C:\\Apps\\both.exe", L"{exe-path} {item-path}", {L".jpg"}, files::ItemKind::image, true});
 			installed.push_back({L"Extension tool", L"C:\\Apps\\ext.exe", L"{exe-path} {item-path}", {L".JPG"}});
 			const auto matched = tools::tools_for(installed, L"C:\\photos\\a.jpg");
 			reporter.check(matched.size() == 3, L"extension and media-group tools are both offered");
 			reporter.check(matched[0]->name == L"Both" && matched[1]->name == L"Extension tool" &&
-			               matched[2]->name == L"Group tool",
+			                   matched[2]->name == L"Group tool",
 			               L"extension tools sort before group tools");
 			reporter.check(std::ranges::count(matched, installed.data() + 1) == 1,
 			               L"a tool matching by extension and by group is listed once");
 			reporter.check(tools::tools_for(installed, L"C:\\photos\\a.txt").empty(),
 			               L"an unsupported extension offers no tool");
 
-			const tools::InstalledTool spaced{
-				L"Spaced", L"C:\\Program Files\\App\\run.exe", L"{exe-path} --open {item-path}"
-			};
+			const tools::InstalledTool spaced{L"Spaced", L"C:\\Program Files\\App\\run.exe",
+			                                  L"{exe-path} --open {item-path}"};
 			const auto arguments = tools::build_arguments(spaced, L"C:\\my photos\\a b.jpg");
 			reporter.check(arguments == LR"(--open "C:\my photos\a b.jpg")",
 			               L"the template's own program token is dropped and paths with spaces are quoted");
@@ -3217,82 +3311,88 @@ namespace iw::tests
 			reporter.check(tools::build_arguments(plain, L"C:\\a.jpg") == L"\"C:\\a.jpg\"",
 			               L"an item path is always quoted, including one without spaces");
 			const tools::InstalledTool alreadyQuoted{L"Quoted", L"C:\\Apps\\run.exe",
-				L"  \"{exe-path}\" --open \"{item-path}\""};
+			                                         L"  \"{exe-path}\" --open \"{item-path}\""};
 			reporter.check(tools::build_arguments(alreadyQuoted, L"C:\\my photos\\a.jpg") ==
-				L"--open \"C:\\my photos\\a.jpg\"", L"templates which quote placeholders do not double-quote paths");
+			                   L"--open \"C:\\my photos\\a.jpg\"",
+			               L"templates which quote placeholders do not double-quote paths");
 			reporter.check(tools::build_arguments(plain, L"C:\\photos\\") == L"\"C:\\photos\\\\\"",
-				L"a trailing backslash is escaped before the closing command-line quote");
-			const std::array<std::filesystem::path, 2> multiple{
-				L"C:\\my photos\\first.jpg", L"C:\\my photos\\second \u00e9.jpg"};
-			const tools::InstalledTool multi{L"Multi", L"C:\\Apps\\run.exe",
-				L"{exe-path} --open {item-paths}"};
+			               L"a trailing backslash is escaped before the closing command-line quote");
+			const std::array<std::filesystem::path, 2> multiple{L"C:\\my photos\\first.jpg",
+			                                                    L"C:\\my photos\\second \u00e9.jpg"};
+			const tools::InstalledTool multi{L"Multi", L"C:\\Apps\\run.exe", L"{exe-path} --open {item-paths}"};
 			reporter.check(tools::accepts_multiple_items(multi) &&
-				tools::build_arguments(multi, multiple) ==
-					L"--open \"C:\\my photos\\first.jpg\" \"C:\\my photos\\second \u00e9.jpg\"",
-				L"an opted-in tool receives every selected path, quoted independently");
+			                   tools::build_arguments(multi, multiple) ==
+			                       L"--open \"C:\\my photos\\first.jpg\" \"C:\\my photos\\second \u00e9.jpg\"",
+			               L"an opted-in tool receives every selected path, quoted independently");
 			const tools::InstalledTool multiQuoted{L"Multi", L"C:\\Apps\\run.exe",
-				L"{exe-path} --open \"{item-paths}\""};
+			                                       L"{exe-path} --open \"{item-paths}\""};
 			reporter.check(tools::build_arguments(multiQuoted, multiple) == tools::build_arguments(multi, multiple),
-				L"quoting the multi-item placeholder does not combine all paths into one argument");
+			               L"quoting the multi-item placeholder does not combine all paths into one argument");
 			reporter.check(!tools::accepts_multiple_items(plain) && tools::build_arguments(plain, multiple).empty(),
-				L"a single-file declaration cannot silently receive a multi-file invocation");
-			const std::vector<tools::InstalledTool> mixedTools{
-				{L"Photo batch", L"C:\\Apps\\photo.exe", L"{exe-path} {item-paths}", {L".jpg"}, files::ItemKind::image, true},
-				{L"JPEG batch", L"C:\\Apps\\jpeg.exe", L"{exe-path} {item-paths}", {L".jpg"}},
-				{L"Legacy", L"C:\\Apps\\legacy.exe", L"{exe-path} {item-path}", {L".jpg"}}
-			};
+			               L"a single-file declaration cannot silently receive a multi-file invocation");
+			const std::vector<tools::InstalledTool>
+				mixedTools{{L"Photo batch",
+			                L"C:\\Apps\\photo.exe",
+			                L"{exe-path} {item-paths}",
+			                {L".jpg"},
+			                files::ItemKind::image,
+			                true},
+			               {L"JPEG batch", L"C:\\Apps\\jpeg.exe", L"{exe-path} {item-paths}", {L".jpg"}},
+			               {L"Legacy", L"C:\\Apps\\legacy.exe", L"{exe-path} {item-path}", {L".jpg"}}};
 			const std::array<std::filesystem::path, 2> mixedFiles{L"C:\\a.jpg", L"C:\\b.png"};
 			const auto mixedMatches = tools::tools_for(mixedTools, mixedFiles);
-			reporter.check(mixedMatches.size() == 2 && mixedMatches[0]->name == L"Photo batch" &&
-				mixedMatches[1]->name == L"Legacy",
+			reporter.check(
+				mixedMatches.size() == 2 && mixedMatches[0]->name == L"Photo batch" &&
+					mixedMatches[1]->name == L"Legacy",
 				L"mixed file types require a batch tool to accept every item while legacy tools retain first-item behavior");
-			const std::vector<tools::InstalledTool> aliases{
-				{L"JPEG alias", L"C:\\Apps\\photo.exe", L"{exe-path} {item-paths}", {L".jpg"}},
-				{L"PNG alias", L"C:\\Apps\\photo.exe", L"{exe-path} {item-paths}", {L".png"}}
-			};
-			reporter.check(tools::tools_for(aliases, mixedFiles).size() == 1,
+			const std::vector<tools::InstalledTool>
+				aliases{{L"JPEG alias", L"C:\\Apps\\photo.exe", L"{exe-path} {item-paths}", {L".jpg"}},
+			            {L"PNG alias", L"C:\\Apps\\photo.exe", L"{exe-path} {item-paths}", {L".png"}}};
+			reporter.check(
+				tools::tools_for(aliases, mixedFiles).size() == 1,
 				L"declarations of the same executable and template combine their accepted file types without duplicate entries");
 			reporter.check(!tools::declaration_is_usable({L"C:\\Apps\\run.exe", L"{exe-path} {item-path}"}) &&
-				!tools::declaration_is_usable({L"run.exe", L"other.exe {item-path}"}) &&
-				!tools::declaration_is_usable({L"run.exe", L"{exe-path}suffix {item-path}"}) &&
-				!tools::declaration_is_usable({L"run.cmd", L"{exe-path} {item-path}"}) &&
-				tools::declaration_is_usable({L"run", L"{exe-path} {item-path}"}),
-				L"tools require discovered executable base names rather than paths or arbitrary commands");
-			const std::wstring_view invalidDocuments[]{
-				LR"({"tools":{"folders":["C:\\Apps"},"apps":[]}})",
-				LR"({"tools":{}} trailing)",
-				LR"({"tools":{"folders":false}})",
-				LR"({"tools":{},"unknown":banana})",
-				LR"({"tools":{},"unknown":01})",
-				LR"({"tools":{},"unknown":1.})",
-				LR"({"tools":{},"unknown":1e+})",
-				LR"({"tools":{},"unknown":"\q"})",
-				LR"({"tools":{},"unknown":"\u12"})",
-				LR"({"tools":{},"unknown":"\ud800"})",
-				LR"({"tools":{},"unknown":"\udc00"})",
-				L"{\"tools\":{},\"unknown\":\"raw\nnewline\"}",
-				LR"({"tools":{},"unknown":[1,]})"
-			};
+			                   !tools::declaration_is_usable({L"run.exe", L"other.exe {item-path}"}) &&
+			                   !tools::declaration_is_usable({L"run.exe", L"{exe-path}suffix {item-path}"}) &&
+			                   !tools::declaration_is_usable({L"run.cmd", L"{exe-path} {item-path}"}) &&
+			                   tools::declaration_is_usable({L"run", L"{exe-path} {item-path}"}),
+			               L"tools require discovered executable base names rather than paths or arbitrary commands");
+			const std::wstring_view invalidDocuments[]{LR"({"tools":{"folders":["C:\\Apps"},"apps":[]}})",
+			                                           LR"({"tools":{}} trailing)",
+			                                           LR"({"tools":{"folders":false}})",
+			                                           LR"({"tools":{},"unknown":banana})",
+			                                           LR"({"tools":{},"unknown":01})",
+			                                           LR"({"tools":{},"unknown":1.})",
+			                                           LR"({"tools":{},"unknown":1e+})",
+			                                           LR"({"tools":{},"unknown":"\q"})",
+			                                           LR"({"tools":{},"unknown":"\u12"})",
+			                                           LR"({"tools":{},"unknown":"\ud800"})",
+			                                           LR"({"tools":{},"unknown":"\udc00"})",
+			                                           L"{\"tools\":{},\"unknown\":\"raw\nnewline\"}",
+			                                           LR"({"tools":{},"unknown":[1,]})"};
 			for (const auto invalid : invalidDocuments)
 				reporter.check(!tools::parse_configuration(invalid).valid, L"malformed JSON is rejected completely");
 			reporter.check(tools::parse_configuration(
-				LR"({"tools":{},"maps":{"ignored":[-0.5e+2,true,false,null,"\ud83d\ude00"]}})").valid,
-				L"empty tools and well-formed ignored JSON values, including Unicode pairs, are accepted");
+							   LR"({"tools":{},"maps":{"ignored":[-0.5e+2,true,false,null,"\ud83d\ude00"]}})")
+			                   .valid,
+			               L"empty tools and well-formed ignored JSON values, including Unicode pairs, are accepted");
 			const auto wrongFieldType = tools::parse_configuration(
 				LR"({"tools":{"apps":[{"exe":12,"invoke":"{exe-path}"},{"exe":"ok.exe","invoke":"{exe-path}"}]}})");
 			reporter.check(wrongFieldType.valid && wrongFieldType.apps.size() == 1,
-				L"a malformed app declaration is omitted without hiding the other valid declarations");
-			const auto deep = L"{\"tools\":{},\"unknown\":" + std::wstring(32, L'[') +
-				L"null" + std::wstring(32, L']') + L"}";
+			               L"a malformed app declaration is omitted without hiding the other valid declarations");
+			const auto deep = L"{\"tools\":{},\"unknown\":" + std::wstring(32, L'[') + L"null" +
+			                  std::wstring(32, L']') + L"}";
 			reporter.check(!tools::parse_configuration(deep).valid, L"ignored values obey the JSON depth bound");
 			reporter.check(!tools::parse_configuration(std::wstring(256 * 1024 + 1, L' ')).valid,
-				L"the in-memory JSON reader enforces its document size bound");
+			               L"the in-memory JSON reader enforces its document size bound");
 			installed.push_back(installed[1]);
 			reporter.check(tools::tools_for(installed, L"C:\\photos\\a.jpg").size() == 3,
-				L"duplicate declarations of the same executable and command are listed once");
+			               L"duplicate declarations of the same executable and command are listed once");
 
 			const auto root = std::filesystem::current_path() /
-				(L"tools-test-fixture-" + std::to_wstring(std::filesystem::file_time_type::clock::now().time_since_epoch().count()));
+			                  (L"tools-test-fixture-" +
+			                   std::to_wstring(
+								   std::filesystem::file_time_type::clock::now().time_since_epoch().count()));
 			std::error_code error;
 			const bool created = std::filesystem::create_directory(root, error);
 			reporter.check(created && !error, L"an isolated project-local discovery fixture can be created");
@@ -3301,20 +3401,25 @@ namespace iw::tests
 				struct Cleanup
 				{
 					std::filesystem::path path;
-					~Cleanup() { std::error_code ignored; std::filesystem::remove_all(path, ignored); }
+					~Cleanup()
+					{
+						std::error_code ignored;
+						std::filesystem::remove_all(path, ignored);
+					}
 				} cleanup{root};
 				reporter.section(L"latest-run UTF-8 diagnostic log");
 				diagnostics::LogFile log;
 				reporter.check(log.write(L"not open") == std::errc::bad_file_descriptor,
-					L"logging to a closed file reports failure");
+				               L"logging to a closed file reports failure");
 				const auto logPath = root / L"run.log";
 				reporter.check(!log.open(logPath), L"a diagnostic log opens in an owned fixture");
 				diagnostics::LogFile competingLog;
 				reporter.check(static_cast<bool>(competingLog.open(logPath)),
-					L"a second process or writer cannot truncate a live run's log");
-				reporter.check(!diagnostics::open_run_log(competingLog, logPath, 4242) &&
-					!competingLog.write(L"second run") && std::filesystem::exists(root / L"run-4242.log"),
-					L"a second run writes its own process-named log instead of reporting an unwritable folder");
+				               L"a second process or writer cannot truncate a live run's log");
+				reporter
+					.check(!diagnostics::open_run_log(competingLog, logPath, 4242) &&
+				               !competingLog.write(L"second run") && std::filesystem::exists(root / L"run-4242.log"),
+				           L"a second run writes its own process-named log instead of reporting an unwritable folder");
 				competingLog.close();
 				reporter.check(!log.write(L"Unicode \u00e9 \u4e2d"), L"Unicode diagnostics are written");
 				std::atomic_bool writesSucceeded{true};
@@ -3331,21 +3436,21 @@ namespace iw::tests
 				const std::string logBytes((std::istreambuf_iterator<char>(logInput)), {});
 				logInput.close();
 				reporter.check(writesSucceeded && std::ranges::count(logBytes, '\n') == 101 &&
-					logBytes.find("Unicode \xc3\xa9 \xe4\xb8\xad") != std::string::npos,
-					L"threaded UTF-8 log writes retain every complete record");
-				reporter.check(!log.open(logPath) && !log.write(L"latest run"),
-					L"reopening starts a new run");
+				                   logBytes.find("Unicode \xc3\xa9 \xe4\xb8\xad") != std::string::npos,
+				               L"threaded UTF-8 log writes retain every complete record");
+				reporter.check(!log.open(logPath) && !log.write(L"latest run"), L"reopening starts a new run");
 				log.close();
 				std::ifstream latest(logPath, std::ios::binary);
 				const std::string latestBytes((std::istreambuf_iterator<char>(latest)), {});
 				latest.close();
 				reporter.check(latestBytes.find("latest run") != std::string::npos &&
-					latestBytes.find("Unicode") == std::string::npos,
-					L"the latest-run log does not retain stale content");
+				                   latestBytes.find("Unicode") == std::string::npos,
+				               L"the latest-run log does not retain stale content");
 				reporter.check(static_cast<bool>(log.open(root / L"missing" / L"run.log")),
-					L"an unavailable log destination reports failure");
-				reporter.check(static_cast<bool>(diagnostics::open_run_log(log, root / L"missing" / L"run.log", 4242)),
-					L"an unavailable folder is still reported when the process-named log cannot open either");
+				               L"an unavailable log destination reports failure");
+				reporter
+					.check(static_cast<bool>(diagnostics::open_run_log(log, root / L"missing" / L"run.log", 4242)),
+				           L"an unavailable folder is still reported when the process-named log cannot open either");
 				reporter.section(L"tools discovery and configuration diagnostics");
 				const auto fourth = root / L"one" / L"two" / L"three" / L"four";
 				std::filesystem::create_directories(fourth / L"five", error);
@@ -3354,20 +3459,22 @@ namespace iw::tests
 				tools::Configuration discovery;
 				discovery.valid = true;
 				discovery.folders.push_back(root);
-				discovery.apps = {
-					{L"paint", L"{exe-path} {item-path}", L"jpg"},
-					{L"hidden.exe", L"{exe-path} {item-path}", L"jpg"},
-					{L"missing.exe", L"{exe-path} {item-path}", L"jpg"},
-					{L"paint.exe", L"undiscovered.exe {item-path}", L"jpg"}};
+				discovery.apps = {{L"paint", L"{exe-path} {item-path}", L"jpg"},
+				                  {L"hidden.exe", L"{exe-path} {item-path}", L"jpg"},
+				                  {L"missing.exe", L"{exe-path} {item-path}", L"jpg"},
+				                  {L"paint.exe", L"undiscovered.exe {item-path}", L"jpg"}};
 				const auto found = tools::discover(discovery);
-				reporter.check(found.size() == 1 && paths::iequals(found.front().executable.filename().wstring(), L"paint.exe"),
+				reporter.check(
+					found.size() == 1 && paths::iequals(found.front().executable.filename().wstring(), L"paint.exe"),
 					L"discovery includes depth four, ignores depth five, and matches executable base names case-insensitively");
-				reporter.check(tools::discover(discovery, 0).empty(), L"zero search depth examines only the configured root");
+				reporter.check(tools::discover(discovery, 0).empty(),
+				               L"zero search depth examines only the configured root");
 				std::stop_source closing;
 				closing.request_stop();
 				std::vector<std::wstring> closingIssues;
 				reporter.check(tools::discover(discovery, 4, &closingIssues, closing.get_token()).empty() &&
-					closingIssues.empty(), L"a stopped discovery finds nothing and reports no tool missing");
+				                   closingIssues.empty(),
+				               L"a stopped discovery finds nothing and reports no tool missing");
 
 				std::ofstream(root / L"paint.exe") << "fixture";
 				std::string escapedRoot;
@@ -3379,14 +3486,15 @@ namespace iw::tests
 				const auto configurationPath = root / L"tools.json";
 				{
 					std::ofstream stream(configurationPath, std::ios::binary);
-					stream << "\xef\xbb\xbf{\"tools\":{\"folders\":[\"" << escapedRoot <<
-						"\"],\"apps\":[{\"exe\":\"paint.exe\",\"invoke\":\"{exe-path} {item-path}\","
-						"\"extensions\":\"jpg\",\"text\":\"\xc3\x89" "diteur\"}]}}";
+					stream << "\xef\xbb\xbf{\"tools\":{\"folders\":[\"" << escapedRoot
+						   << "\"],\"apps\":[{\"exe\":\"paint.exe\",\"invoke\":\"{exe-path} {item-path}\","
+							  "\"extensions\":\"jpg\",\"text\":\"\xc3\x89"
+							  "diteur\"}]}}";
 				}
 				tools::ToolTable table;
 				table.load(configurationPath);
 				reporter.check(table.installed().size() == 1 && table.installed().front().name == L"\u00c9diteur",
-					L"UTF-8 tool names and a UTF-8 BOM are decoded losslessly");
+				               L"UTF-8 tool names and a UTF-8 BOM are decoded losslessly");
 				table.load(configurationPath, closing.get_token());
 				reporter.check(table.installed().empty(), L"a tool table loaded as the app closes stays empty");
 				{
@@ -3394,12 +3502,13 @@ namespace iw::tests
 					stream << "{\"tools\":{},\"text\":\"\xc0\xaf\"}";
 				}
 				table.load(configurationPath);
-				reporter.check(table.installed().empty(), L"invalid UTF-8 clears the table instead of guessing Latin-1");
+				reporter.check(table.installed().empty(),
+				               L"invalid UTF-8 clears the table instead of guessing Latin-1");
 				reporter.check(!table.issues().empty(), L"invalid tool files retain a visible diagnostic");
 				table.load(root / L"missing-tools.json");
 				reporter.check(table.installed().empty() && !table.issues().empty() &&
-					table.issue_summary().find(L"missing-tools.json") != std::wstring::npos,
-					L"a missing tool file identifies the configuration path rather than failing silently");
+				                   table.issue_summary().find(L"missing-tools.json") != std::wstring::npos,
+				               L"a missing tool file identifies the configuration path rather than failing silently");
 				const auto reviewedPath = root / L"reviewed.jpg";
 				const auto replacementPath = root / L"replacement.jpg";
 				std::ofstream(reviewedPath) << "same data";
@@ -3408,18 +3517,19 @@ namespace iw::tests
 				if (!error) std::filesystem::last_write_time(replacementPath, modified, error);
 				const auto reviewed = files::snapshot_file(reviewedPath);
 				reporter.check(!error && reviewed && files::matches_snapshot(reviewedPath, *reviewed),
-					L"a transfer destination snapshot recognizes the unchanged reviewed file");
-				reporter.check(reviewed && !files::matches_snapshot(replacementPath, *reviewed),
-					L"file identity distinguishes different destinations with identical data and timestamps");
+				               L"a transfer destination snapshot recognizes the unchanged reviewed file");
+				reporter
+					.check(reviewed && !files::matches_snapshot(replacementPath, *reviewed),
+				           L"file identity distinguishes different destinations with identical data and timestamps");
 				std::filesystem::remove(reviewedPath, error);
 				if (!error) std::filesystem::rename(replacementPath, reviewedPath, error);
 				reporter.check(!error && reviewed && !files::matches_snapshot(reviewedPath, *reviewed),
-					L"an externally replaced transfer destination no longer matches Review");
+				               L"an externally replaced transfer destination no longer matches Review");
 				const auto absentPath = root / L"not-reviewed.jpg";
 				const auto absent = files::snapshot_file(absentPath);
 				std::ofstream(absentPath) << "created after review";
 				reporter.check(absent && !absent->exists && !files::matches_snapshot(absentPath, *absent),
-					L"a destination created after Review is not granted overwrite permission");
+				               L"a destination created after Review is not granted overwrite permission");
 				const auto transferSource = root / L"transfer-source.jpg";
 				std::ofstream(transferSource) << "source bytes";
 				const auto commitReview = files::snapshot_file(reviewedPath);
@@ -3434,21 +3544,21 @@ namespace iw::tests
 					std::getline(stream, preservedDestination);
 				}
 				reporter.check(refusedCopy == std::errc::operation_canceled &&
-					preservedDestination == "changed while copying",
-					L"a destination changed during copying survives a refused final commit");
+				                   preservedDestination == "changed while copying",
+				               L"a destination changed during copying survives a refused final commit");
 				const auto moveTarget = root / L"move-target.jpg";
 				const auto refusedMove = files::move_file_to(transferSource, moveTarget, false, [] { return false; });
 				reporter.check(refusedMove == std::errc::operation_canceled &&
-					std::filesystem::exists(transferSource) && !std::filesystem::exists(moveTarget),
-					L"a refused move commit neither removes the source nor creates an unreviewed target");
+				                   std::filesystem::exists(transferSource) && !std::filesystem::exists(moveTarget),
+				               L"a refused move commit neither removes the source nor creates an unreviewed target");
 			}
 		}
 
 		void test_rename_staging(Reporter& reporter)
 		{
 			reporter.section(L"rename staging");
-			reporter.check(rename::sidecar_destination(L"C:\\a\\photo.xmp", L"C:\\a\\photo.jpg",
-			                                           L"C:\\a\\new.jpg") == L"C:\\a\\new.xmp",
+			reporter.check(rename::sidecar_destination(L"C:\\a\\photo.xmp", L"C:\\a\\photo.jpg", L"C:\\a\\new.jpg") ==
+			                   L"C:\\a\\new.xmp",
 			               L"a stem sidecar follows the primary's new stem");
 			reporter.check(rename::sidecar_destination(L"C:\\a\\photo.jpg.thm", L"C:\\a\\photo.jpg",
 			                                           L"C:\\a\\new.jpg") == L"C:\\a\\new.jpg.thm",
@@ -3462,7 +3572,11 @@ namespace iw::tests
 			struct Cleanup
 			{
 				std::filesystem::path path;
-				~Cleanup() { std::error_code ignored; std::filesystem::remove_all(path, ignored); }
+				~Cleanup()
+				{
+					std::error_code ignored;
+					std::filesystem::remove_all(path, ignored);
+				}
 			} cleanup{root};
 			const auto write = [&root](const std::wstring& name, const std::string& content)
 			{
@@ -3496,20 +3610,15 @@ namespace iw::tests
 				const auto planned = [&plan](const std::filesystem::path& path)
 				{
 					return std::ranges::any_of(plan.rows, [&path](const tasks::TaskRow& value)
-					{
-						return paths::equal(value.source, path);
-					});
+					{ return paths::equal(value.source, path); });
 				};
 				const std::stop_source running;
-				tasks::run_plan(plan, running.get_token(), {
-					                {}, [&staging, &planned](tasks::TaskRow& value)
-					                {
-						                rename::rename_row(value, staging, planned);
-					                },
-					                {}
-				                });
-				reporter.check(plan.count(tasks::RowState::success) == 2,
-				               L"a two-file name swap completes");
+				tasks::run_plan(plan, running.get_token(),
+				                {{},
+				                 [&staging, &planned](tasks::TaskRow& value)
+				{ rename::rename_row(value, staging, planned); },
+				                 {}});
+				reporter.check(plan.count(tasks::RowState::success) == 2, L"a two-file name swap completes");
 				reporter.check(staging.pending() == 0, L"nothing is left under a temporary name");
 			}
 			reporter.check(content(L"a.txt") == "second" && content(L"b.txt") == "first",
@@ -3528,22 +3637,17 @@ namespace iw::tests
 				const auto planned = [&plan](const std::filesystem::path& path)
 				{
 					return std::ranges::any_of(plan.rows, [&path](const tasks::TaskRow& value)
-					{
-						return paths::equal(value.source, path);
-					});
+					{ return paths::equal(value.source, path); });
 				};
 				const std::stop_source running;
-				tasks::run_plan(plan, running.get_token(), {
-					                {}, [&staging, &planned](tasks::TaskRow& value)
-					                {
-						                rename::rename_row(value, staging, planned);
-					                },
-					                {}
-				                });
+				tasks::run_plan(plan, running.get_token(),
+				                {{},
+				                 [&staging, &planned](tasks::TaskRow& value)
+				{ rename::rename_row(value, staging, planned); },
+				                 {}});
 				reporter.check(plan.count(tasks::RowState::success) == 3, L"a three-file cycle completes");
 			}
-			reporter.check(content(L"c2.txt") == "one" && content(L"c3.txt") == "two" &&
-			               content(L"c1.txt") == "three",
+			reporter.check(content(L"c2.txt") == "one" && content(L"c3.txt") == "two" && content(L"c1.txt") == "three",
 			               L"every file in a cycle ends up with the right contents");
 
 			// Sidecars move as one logical rename with their primary.
@@ -3558,9 +3662,9 @@ namespace iw::tests
 				reporter.check(value.sidecars.size() == 2, L"both companion conventions are collected");
 			}
 			reporter.check(std::filesystem::exists(root / L"holiday.jpg", error) &&
-			               std::filesystem::exists(root / L"holiday.xmp", error) &&
-			               std::filesystem::exists(root / L"holiday.jpg.thm", error) &&
-			               !std::filesystem::exists(root / L"photo.jpg", error),
+			                   std::filesystem::exists(root / L"holiday.xmp", error) &&
+			                   std::filesystem::exists(root / L"holiday.jpg.thm", error) &&
+			                   !std::filesystem::exists(root / L"photo.jpg", error),
 			               L"sidecars are renamed with their primary");
 
 			// A destination that appeared since Review and is not one of ours is skipped.
@@ -3573,8 +3677,7 @@ namespace iw::tests
 				reporter.check(value.state == tasks::RowState::skipped,
 				               L"an occupied destination outside the plan is skipped, not overwritten");
 			}
-			reporter.check(content(L"taken.txt") == "existing" &&
-			               std::filesystem::exists(root / L"src.txt", error),
+			reporter.check(content(L"taken.txt") == "existing" && std::filesystem::exists(root / L"src.txt", error),
 			               L"a skipped row leaves both files exactly where they were");
 
 			// Anything still staged is restored when the run's staging is destroyed.
@@ -3586,8 +3689,7 @@ namespace iw::tests
 				reporter.check(!std::filesystem::exists(root / L"parked.txt", error),
 				               L"the original name is free while the file is staged");
 			}
-			reporter.check(std::filesystem::exists(root / L"parked.txt", error) &&
-			               content(L"parked.txt") == "parked",
+			reporter.check(std::filesystem::exists(root / L"parked.txt", error) && content(L"parked.txt") == "parked",
 			               L"a file left staged is restored by the destructor, not only on success");
 
 			reporter.section(L"Rename reviewed planning and sidecar cycles");
@@ -3597,131 +3699,142 @@ namespace iw::tests
 			write(L"r1.xmp", "one metadata");
 			auto swap = rename::analyze({root / L"r2.jpg", root / L"r1.jpg"}, L"r#", 1, tasks::CollisionPolicy::block);
 			reporter.check(swap.can_run() && swap.rows.size() == 2 && swap.collisions == 0,
-				L"a primary-and-sidecar exchange is reviewed as a cycle rather than a collision");
+			               L"a primary-and-sidecar exchange is reviewed as a cycle rather than a collision");
 			tasks::run_plan(swap, {}, rename::run_options(swap));
-			reporter.check(swap.count(tasks::RowState::success) == 2 &&
-				content(L"r1.jpg") == "two" && content(L"r2.jpg") == "one" &&
-				content(L"r1.xmp") == "two metadata" && content(L"r2.xmp") == "one metadata",
-				L"a reviewed name swap moves both primaries and their occupied sidecars");
+			reporter.check(swap.count(tasks::RowState::success) == 2 && content(L"r1.jpg") == "two" &&
+			                   content(L"r2.jpg") == "one" && content(L"r1.xmp") == "two metadata" &&
+			                   content(L"r2.xmp") == "one metadata",
+			               L"a reviewed name swap moves both primaries and their occupied sidecars");
 
 			write(L"keep.txt", "keep");
 			auto noOp = rename::analyze({root / L"keep.txt"}, L"{name}", 1, tasks::CollisionPolicy::block);
 			reporter.check(!noOp.can_run() && noOp.rows.front().state == tasks::RowState::skipped &&
-				noOp.rows.front().source.native() == noOp.rows.front().destination.native(),
-				L"an all-no-op review has no writing row or direction arrow");
+			                   noOp.rows.front().source.native() == noOp.rows.front().destination.native(),
+			               L"an all-no-op review has no writing row or direction arrow");
 			write(L"case.txt", "case");
 			auto caseOnly = rename::analyze({root / L"case.txt"}, L"CASE", 1, tasks::CollisionPolicy::block);
 			tasks::run_plan(caseOnly, {}, rename::run_options(caseOnly));
 			reporter.check(caseOnly.count(tasks::RowState::success) == 1 &&
-				std::ranges::any_of(std::filesystem::directory_iterator(root), [](const auto& entry)
-				{
-					return entry.path().filename().native() == L"CASE.txt";
-				}), L"a case-only name change is staged and committed rather than mistaken for a no-op");
+			                   std::ranges::any_of(std::filesystem::directory_iterator(root), [](const auto& entry)
+			{ return entry.path().filename().native() == L"CASE.txt"; }),
+			               L"a case-only name change is staged and committed rather than mistaken for a no-op");
 			std::filesystem::create_directory(root / L"folder.with.dots", error);
-			auto folderNoOp = rename::analyze({root / L"folder.with.dots"}, L"{name}", 1, tasks::CollisionPolicy::block);
+			auto folderNoOp = rename::analyze({root / L"folder.with.dots"}, L"{name}", 1,
+			                                  tasks::CollisionPolicy::block);
 			reporter.check(!folderNoOp.can_run() && folderNoOp.rows.front().state == tasks::RowState::skipped,
-				L"folder names keep all dots when expanding the old name");
-			auto folderRename = rename::analyze({root / L"folder.with.dots"}, L"new-folder", 1, tasks::CollisionPolicy::block);
+			               L"folder names keep all dots when expanding the old name");
+			auto folderRename = rename::analyze({root / L"folder.with.dots"}, L"new-folder", 1,
+			                                    tasks::CollisionPolicy::block);
 			tasks::run_plan(folderRename, {}, rename::run_options(folderRename));
 			reporter.check(folderRename.count(tasks::RowState::success) == 1 &&
-				std::filesystem::exists(root / L"new-folder"),
-				L"renaming a dotted folder does not append a spurious extension");
+			                   std::filesystem::exists(root / L"new-folder"),
+			               L"renaming a dotted folder does not append a spurious extension");
 
-			reporter.check(!rename::analyze({root / L"keep.txt"}, L"bad:name", 1, tasks::CollisionPolicy::block).can_run(),
-				L"invalid generated names block the reviewed plan");
+			reporter
+				.check(!rename::analyze({root / L"keep.txt"}, L"bad:name", 1, tasks::CollisionPolicy::block).can_run(),
+			           L"invalid generated names block the reviewed plan");
 			write(L"other.txt", "other");
-			auto duplicates = rename::analyze({root / L"keep.txt", root / L"other.txt"}, L"same", 1, tasks::CollisionPolicy::block);
+			auto duplicates = rename::analyze({root / L"keep.txt", root / L"other.txt"}, L"same", 1,
+			                                  tasks::CollisionPolicy::block);
 			reporter.check(!duplicates.can_run(), L"two primary destinations cannot claim one name");
-			auto unique = rename::analyze({root / L"keep.txt", root / L"other.txt"}, L"same", 1, tasks::CollisionPolicy::autoRename);
+			auto unique = rename::analyze({root / L"keep.txt", root / L"other.txt"}, L"same", 1,
+			                              tasks::CollisionPolicy::autoRename);
 			reporter.check(unique.can_run() && !paths::equal(unique.rows[0].destination, unique.rows[1].destination),
-				L"Auto-rename resolves duplicate destinations inside the plan");
-			auto retained = rename::analyze({root / L"keep.txt", root / L"other.txt"}, L"keep", 1, tasks::CollisionPolicy::replace);
+			               L"Auto-rename resolves duplicate destinations inside the plan");
+			auto retained = rename::analyze({root / L"keep.txt", root / L"other.txt"}, L"keep", 1,
+			                                tasks::CollisionPolicy::replace);
 			reporter.check(!retained.can_run(), L"Replace cannot consume a selected original held by a no-op row");
 			write(L"chain1.txt", "one");
 			write(L"chain2.txt", "two");
 			write(L"chain3.txt", "three");
-			auto skippedChain = rename::analyze({root / L"chain1.txt", root / L"chain2.txt"}, L"chain#", 2, tasks::CollisionPolicy::skip);
+			auto skippedChain = rename::analyze({root / L"chain1.txt", root / L"chain2.txt"}, L"chain#", 2,
+			                                    tasks::CollisionPolicy::skip);
 			reporter.check(!skippedChain.can_run() && skippedChain.count(tasks::RowState::skipped) == 2,
-				L"a skipped dependency is not advertised as a source that a preceding row can vacate");
+			               L"a skipped dependency is not advertised as a source that a preceding row can vacate");
 			write(L"shared.jpg", "jpeg");
 			write(L"shared.png", "png");
 			write(L"shared.xmp", "shared metadata");
 			reporter.check(!rename::analyze({root / L"shared.jpg", root / L"shared.png"}, L"shared-#", 1,
-				tasks::CollisionPolicy::autoRename).can_run(),
-				L"a companion shared by two selected primaries cannot be moved twice");
+			                                tasks::CollisionPolicy::autoRename)
+			                    .can_run(),
+			               L"a companion shared by two selected primaries cannot be moved twice");
 
 			write(L"companion.jpg", "primary");
 			write(L"companion.xmp", "source metadata");
 			write(L"next.xmp", "destination metadata");
-			reporter.check(!rename::analyze({root / L"companion.jpg"}, L"next", 1, tasks::CollisionPolicy::block).can_run(),
-				L"a sidecar-only collision blocks Rename before any primary is moved");
-			auto sidecarAuto = rename::analyze({root / L"companion.jpg"}, L"next", 1, tasks::CollisionPolicy::autoRename);
+			reporter
+				.check(!rename::analyze({root / L"companion.jpg"}, L"next", 1, tasks::CollisionPolicy::block).can_run(),
+			           L"a sidecar-only collision blocks Rename before any primary is moved");
+			auto sidecarAuto = rename::analyze({root / L"companion.jpg"}, L"next", 1,
+			                                   tasks::CollisionPolicy::autoRename);
 			reporter.check(sidecarAuto.can_run() && sidecarAuto.rows.front().destination.filename() != L"next.jpg",
-				L"Auto-rename chooses a name free for the entire companion bundle");
-			auto sidecarReplace = rename::analyze({root / L"companion.jpg"}, L"next", 1, tasks::CollisionPolicy::replace);
+			               L"Auto-rename chooses a name free for the entire companion bundle");
+			auto sidecarReplace = rename::analyze({root / L"companion.jpg"}, L"next", 1,
+			                                      tasks::CollisionPolicy::replace);
 			reporter.check(sidecarReplace.can_run() && sidecarReplace.rows.front().replace,
-				L"a sidecar-only replacement requires an explicit reviewed Replace decision");
+			               L"a sidecar-only replacement requires an explicit reviewed Replace decision");
 			tasks::run_plan(sidecarReplace, {}, rename::run_options(sidecarReplace));
-			reporter.check(sidecarReplace.count(tasks::RowState::success) == 1 &&
-				content(L"next.jpg") == "primary" && content(L"next.xmp") == "source metadata",
-				L"an approved sidecar replacement commits with its primary");
+			reporter.check(sidecarReplace.count(tasks::RowState::success) == 1 && content(L"next.jpg") == "primary" &&
+			                   content(L"next.xmp") == "source metadata",
+			               L"an approved sidecar replacement commits with its primary");
 
 			write(L"stale1.jpg", "first");
 			write(L"stale2.jpg", "second");
-			auto stale = rename::analyze({root / L"stale1.jpg", root / L"stale2.jpg"}, L"fresh-#", 1, tasks::CollisionPolicy::block);
+			auto stale = rename::analyze({root / L"stale1.jpg", root / L"stale2.jpg"}, L"fresh-#", 1,
+			                             tasks::CollisionPolicy::block);
 			write(L"stale2.xmp", "a new companion");
 			tasks::run_plan(stale, {}, rename::run_options(stale));
-			reporter.check(stale.count(tasks::RowState::success) == 0 &&
-				content(L"stale1.jpg") == "first" && !std::filesystem::exists(root / L"fresh-1.jpg"),
-				L"a changed sidecar snapshot aborts before the first primary rename");
-			auto changedSource = rename::analyze({root / L"stale1.jpg", root / L"stale2.jpg"}, L"fresh-#", 1, tasks::CollisionPolicy::block);
+			reporter.check(stale.count(tasks::RowState::success) == 0 && content(L"stale1.jpg") == "first" &&
+			                   !std::filesystem::exists(root / L"fresh-1.jpg"),
+			               L"a changed sidecar snapshot aborts before the first primary rename");
+			auto changedSource = rename::analyze({root / L"stale1.jpg", root / L"stale2.jpg"}, L"fresh-#", 1,
+			                                     tasks::CollisionPolicy::block);
 			write(L"stale2.jpg", "different source contents");
 			tasks::run_plan(changedSource, {}, rename::run_options(changedSource));
 			reporter.check(changedSource.count(tasks::RowState::success) == 0 && content(L"stale1.jpg") == "first",
-				L"a modified later source prevents an earlier row from running against a stale snapshot");
+			               L"a modified later source prevents an earlier row from running against a stale snapshot");
 			write(L"identity.txt", "same");
-			auto identity = rename::analyze({root / L"identity.txt"}, L"identity-new", 1, tasks::CollisionPolicy::block);
+			auto identity = rename::analyze({root / L"identity.txt"}, L"identity-new", 1,
+			                                tasks::CollisionPolicy::block);
 			const auto timestamp = std::filesystem::last_write_time(root / L"identity.txt");
 			std::filesystem::rename(root / L"identity.txt", root / L"identity-old.txt");
 			write(L"identity.txt", "same");
 			std::filesystem::last_write_time(root / L"identity.txt", timestamp);
 			tasks::run_plan(identity, {}, rename::run_options(identity));
 			reporter.check(identity.count(tasks::RowState::success) == 0 && content(L"identity.txt") == "same",
-				L"a substituted file is stale even when its size and modification time are unchanged");
+			               L"a substituted file is stale even when its size and modification time are unchanged");
 
 			write(L"arrival1.txt", "first");
 			write(L"arrival2.txt", "second");
-			auto primaryArrival = rename::analyze(
-				{root / L"arrival1.txt", root / L"arrival2.txt"}, L"arrival-new-#", 1,
-				tasks::CollisionPolicy::block);
+			auto primaryArrival = rename::analyze({root / L"arrival1.txt", root / L"arrival2.txt"}, L"arrival-new-#", 1,
+			                                      tasks::CollisionPolicy::block);
 			write(L"arrival-new-1.txt", "arrived");
 			tasks::run_plan(primaryArrival, {}, rename::run_options(primaryArrival));
-			reporter.check(primaryArrival.rows[0].state == tasks::RowState::skipped &&
-				primaryArrival.rows[1].state == tasks::RowState::success &&
-				content(L"arrival-new-1.txt") == "arrived" &&
-				content(L"arrival-new-2.txt") == "second",
+			reporter.check(
+				primaryArrival.rows[0].state == tasks::RowState::skipped &&
+					primaryArrival.rows[1].state == tasks::RowState::success &&
+					content(L"arrival-new-1.txt") == "arrived" && content(L"arrival-new-2.txt") == "second",
 				L"a primary destination appearing after Review skips only that row and independent renames continue");
 
 			write(L"sidecar-arrival1.jpg", "first");
 			write(L"sidecar-arrival1.xmp", "first metadata");
 			write(L"sidecar-arrival2.jpg", "second");
-			auto sidecarArrival = rename::analyze(
-				{root / L"sidecar-arrival1.jpg", root / L"sidecar-arrival2.jpg"}, L"sidecar-new-#", 1,
-				tasks::CollisionPolicy::block);
+			auto sidecarArrival = rename::analyze({root / L"sidecar-arrival1.jpg", root / L"sidecar-arrival2.jpg"},
+			                                      L"sidecar-new-#", 1, tasks::CollisionPolicy::block);
 			write(L"sidecar-new-1.xmp", "arrived metadata");
 			tasks::run_plan(sidecarArrival, {}, rename::run_options(sidecarArrival));
-			reporter.check(sidecarArrival.rows[0].state == tasks::RowState::failed &&
-				sidecarArrival.rows[1].state == tasks::RowState::success &&
-				content(L"sidecar-arrival1.jpg") == "first" &&
-				content(L"sidecar-new-1.xmp") == "arrived metadata" &&
-				content(L"sidecar-new-2.jpg") == "second",
+			reporter.check(
+				sidecarArrival.rows[0].state == tasks::RowState::failed &&
+					sidecarArrival.rows[1].state == tasks::RowState::success &&
+					content(L"sidecar-arrival1.jpg") == "first" &&
+					content(L"sidecar-new-1.xmp") == "arrived metadata" && content(L"sidecar-new-2.jpg") == "second",
 				L"a sidecar destination appearing after Review fails only that row and independent renames continue");
 
 			write(L"live1.jpg", "one");
 			write(L"live2.jpg", "two");
 			write(L"live3.jpg", "three");
-			auto live = rename::analyze({root / L"live1.jpg", root / L"live2.jpg", root / L"live3.jpg"},
-				L"live-new-#", 1, tasks::CollisionPolicy::block);
+			auto live = rename::analyze({root / L"live1.jpg", root / L"live2.jpg", root / L"live3.jpg"}, L"live-new-#",
+			                            1, tasks::CollisionPolicy::block);
 			auto liveOptions = rename::run_options(live);
 			liveOptions.progress = [&](const size_t complete, size_t)
 			{
@@ -3729,9 +3842,10 @@ namespace iw::tests
 			};
 			tasks::run_plan(live, {}, liveOptions);
 			reporter.check(live.rows[0].state == tasks::RowState::success &&
-				live.rows[1].state == tasks::RowState::failed && live.rows[2].state == tasks::RowState::success &&
-				content(L"live2.jpg") == "two" && content(L"live2.xmp") == "unreviewed metadata",
-				L"a new companion between rows refuses only its row and independent later rows still run");
+			                   live.rows[1].state == tasks::RowState::failed &&
+			                   live.rows[2].state == tasks::RowState::success && content(L"live2.jpg") == "two" &&
+			                   content(L"live2.xmp") == "unreviewed metadata",
+			               L"a new companion between rows refuses only its row and independent later rows still run");
 
 			write(L"failure.jpg", "pixels");
 			write(L"failure.xmp", "metadata");
@@ -3740,23 +3854,35 @@ namespace iw::tests
 			{
 				rename::Staging staging;
 				bool failed = false;
-				try { rename::rename_row(failedSidecar, staging, {}); }
-				catch (...) { failed = true; }
+				try
+				{
+					rename::rename_row(failedSidecar, staging, {});
+				}
+				catch (...)
+				{
+					failed = true;
+				}
 				reporter.check(failed && content(L"failure.jpg") == "pixels" && content(L"failure.xmp") == "metadata" &&
-					!std::filesystem::exists(root / L"failed-out.jpg") && !std::filesystem::exists(root / L"failed-out.xmp"),
-					L"a late companion failure restores already-moved companions and primary");
+				                   !std::filesystem::exists(root / L"failed-out.jpg") &&
+				                   !std::filesystem::exists(root / L"failed-out.xmp"),
+				               L"a late companion failure restores already-moved companions and primary");
 			}
 
 			write(L"cancel2.txt", "two");
 			write(L"cancel1.txt", "one");
-			auto partial = rename::analyze({root / L"cancel2.txt", root / L"cancel1.txt"}, L"cancel#", 1, tasks::CollisionPolicy::block);
+			auto partial = rename::analyze({root / L"cancel2.txt", root / L"cancel1.txt"}, L"cancel#", 1,
+			                               tasks::CollisionPolicy::block);
 			std::stop_source cancelled;
 			auto partialOptions = rename::run_options(partial);
-			partialOptions.progress = [&cancelled](const size_t complete, size_t) { if (complete == 1) cancelled.request_stop(); };
+			partialOptions.progress = [&cancelled](const size_t complete, size_t)
+			{
+				if (complete == 1) cancelled.request_stop();
+			};
 			tasks::run_plan(partial, cancelled.get_token(), partialOptions);
-			reporter.check(partial.count(tasks::RowState::success) == 1 && partial.count(tasks::RowState::notRun) == 1 &&
-				content(L"cancel1.txt") == "two" && content(L"cancel1 (2).txt") == "one" &&
-				!partial.rows.back().detail.empty(),
+			reporter.check(
+				partial.count(tasks::RowState::success) == 1 && partial.count(tasks::RowState::notRun) == 1 &&
+					content(L"cancel1.txt") == "two" && content(L"cancel1 (2).txt") == "one" &&
+					!partial.rows.back().detail.empty(),
 				L"cancelled cycles preserve completed rows and visibly recover staged originals under a free name");
 
 			write(L"bundle2.jpg", "two");
@@ -3764,15 +3890,18 @@ namespace iw::tests
 			write(L"bundle1.xmp", "one metadata");
 			write(L"bundle1 (2).jpg", "unrelated");
 			auto bundleCancel = rename::analyze({root / L"bundle2.jpg", root / L"bundle1.jpg"}, L"bundle#", 1,
-				tasks::CollisionPolicy::block);
+			                                    tasks::CollisionPolicy::block);
 			std::stop_source bundleStop;
 			auto bundleOptions = rename::run_options(bundleCancel);
-			bundleOptions.progress = [&bundleStop](const size_t complete, size_t) { if (complete == 1) bundleStop.request_stop(); };
+			bundleOptions.progress = [&bundleStop](const size_t complete, size_t)
+			{
+				if (complete == 1) bundleStop.request_stop();
+			};
 			tasks::run_plan(bundleCancel, bundleStop.get_token(), bundleOptions);
-			reporter.check(bundleCancel.count(tasks::RowState::success) == 1 &&
-				content(L"bundle1.jpg") == "two" && content(L"bundle1 (2).jpg") == "unrelated" &&
-				content(L"bundle1 (3).jpg") == "one" && content(L"bundle1 (3).xmp") == "one metadata" &&
-				!std::filesystem::exists(root / L"bundle1.xmp"),
+			reporter.check(
+				bundleCancel.count(tasks::RowState::success) == 1 && content(L"bundle1.jpg") == "two" &&
+					content(L"bundle1 (2).jpg") == "unrelated" && content(L"bundle1 (3).jpg") == "one" &&
+					content(L"bundle1 (3).xmp") == "one metadata" && !std::filesystem::exists(root / L"bundle1.xmp"),
 				L"cancelled exchanges stage all displaced companions and recover the bundle under one free stem");
 
 			write(L"guard.txt", "guarded original");
@@ -3782,8 +3911,9 @@ namespace iw::tests
 				write(L"guard.txt", "new arrival");
 				const auto recovered = staging.restore();
 				reporter.check(recovered.size() == 1 && !recovered.front().failed && staging.pending() == 0 &&
-					content(L"guard.txt") == "new arrival" && content(L"guard (2).txt") == "guarded original",
-					L"bounded restoration never overwrites an unrelated arrival");
+				                   content(L"guard.txt") == "new arrival" &&
+				                   content(L"guard (2).txt") == "guarded original",
+				               L"bounded restoration never overwrites an unrelated arrival");
 			}
 		}
 
@@ -3791,8 +3921,7 @@ namespace iw::tests
 
 	struct EditAccess
 	{
-		static void prepare(TaskEdit& task, const std::filesystem::path& path,
-		                    const files::DecodedImage& image)
+		static void prepare(TaskEdit& task, const std::filesystem::path& path, const files::DecodedImage& image)
 		{
 			task.targets_ = {path, path.parent_path() / L"next.png"};
 			task.set_photo(path);
@@ -3815,7 +3944,7 @@ namespace iw::tests
 		{
 			task.build_controls();
 			return std::ranges::count_if(task.panel_.controls(), [](const auto& control)
-				{ return control.label.find(L"WebP") != std::wstring::npos; }) == 2;
+			{ return control.label.find(L"WebP") != std::wstring::npos; }) == 2;
 		}
 	};
 
@@ -3851,17 +3980,15 @@ namespace iw::tests
 			{
 				value.straighten = tenths;
 				bounds = edits::crop_bounds(source, value);
-				reporter.check(bounds.width > 0 && bounds.height > 0 && bounds.width <= 400 &&
-				               bounds.height <= 300 && bounds.x >= 0 && bounds.y >= 0 &&
-				               bounds.right() <= 400 && bounds.bottom() <= 300,
+				reporter.check(bounds.width > 0 && bounds.height > 0 && bounds.width <= 400 && bounds.height <= 300 &&
+				                   bounds.x >= 0 && bounds.y >= 0 && bounds.right() <= 400 && bounds.bottom() <= 300,
 				               L"a straightened crop stays inside the picture at every angle");
 			}
 			value.straighten = 100;
 			const app::recti tilted = edits::crop_bounds(source, value);
-			reporter.check(tilted.width < 400 && tilted.height < 300,
-			               L"straightening shrinks the usable rectangle");
+			reporter.check(tilted.width < 400 && tilted.height < 300, L"straightening shrinks the usable rectangle");
 			reporter.check(std::abs(tilted.x * 2 + tilted.width - 400) <= 1 &&
-			               std::abs(tilted.y * 2 + tilted.height - 300) <= 1,
+			                   std::abs(tilted.y * 2 + tilted.height - 300) <= 1,
 			               L"the usable rectangle stays centred in the frame");
 
 			value = {};
@@ -3888,13 +4015,14 @@ namespace iw::tests
 							{
 								const double sx = cx + (x - cx) * std::cos(radians) + (y - cy) * std::sin(radians);
 								const double sy = cy - (x - cx) * std::sin(radians) + (y - cy) * std::cos(radians);
-								cornersInside = cornersInside && crop.width > 0 && crop.height > 0 &&
-									sx >= -1e-8 && sy >= -1e-8 && sx <= frame.width - 1 + 1e-8 &&
-									sy <= frame.height - 1 + 1e-8;
+								cornersInside = cornersInside && crop.width > 0 && crop.height > 0 && sx >= -1e-8 &&
+								                sy >= -1e-8 && sx <= frame.width - 1 + 1e-8 &&
+								                sy <= frame.height - 1 + 1e-8;
 							}
 					}
-			reporter.check(cornersInside,
-				L"every crop corner inverse-maps between real pixel centres, including narrow and odd frames");
+			reporter
+				.check(cornersInside,
+			           L"every crop corner inverse-maps between real pixel centres, including narrow and odd frames");
 
 			files::DecodedImage previewImage;
 			previewImage.width = 400;
@@ -3903,26 +4031,25 @@ namespace iw::tests
 			previewImage.originalHeight = 3000;
 			previewImage.pixels.assign(400 * 300, 0xff123456u);
 			edits::PreviewSource cache;
-			reporter.check(cache.update(previewImage, {200, 150}) &&
-				cache.image().width == 200 && cache.image().originalWidth == 4000,
-				L"the preview scales pixels but retains full-resolution dimensions");
+			reporter.check(cache.update(previewImage, {200, 150}) && cache.image().width == 200 &&
+			                   cache.image().originalWidth == 4000,
+			               L"the preview scales pixels but retains full-resolution dimensions");
 			const auto* retained = cache.image().pixels.data();
-			reporter.check(!cache.update(previewImage, {200, 150}) &&
-				cache.image().pixels.data() == retained,
-				L"unchanged pane dimensions reuse the retained scaled source");
-			reporter.check(cache.update(previewImage, {100, 100}) &&
-				cache.image().width == 100 && cache.image().height == 75,
-				L"a changed pane rebuilds the scaled source with its aspect ratio");
+			reporter.check(!cache.update(previewImage, {200, 150}) && cache.image().pixels.data() == retained,
+			               L"unchanged pane dimensions reuse the retained scaled source");
+			reporter.check(cache.update(previewImage, {100, 100}) && cache.image().width == 100 &&
+			                   cache.image().height == 75,
+			               L"a changed pane rebuilds the scaled source with its aspect ratio");
 			cache.reset();
 			reporter.check(cache.update(previewImage, {100, 100}),
-				L"loading a different photo invalidates the scaled source even at the same pane size");
+			               L"loading a different photo invalidates the scaled source even at the same pane size");
 
 			value = {};
 			value.rotation = 1;
 			value.crop = static_cast<::core::recti>(app::recti{30, 40, 120, 200});
 			const auto scaled = edits::scaled_edits(value, {400, 300}, {100, 75});
 			reporter.check(rect_equals(scaled.crop, {7, 10, 30, 50}),
-				L"preview crop coordinates scale in the rotated frame, not the original orientation");
+			               L"preview crop coordinates scale in the rotated frame, not the original orientation");
 		}
 
 		void test_image_edit_pixels(Reporter& reporter)
@@ -3939,8 +4066,7 @@ namespace iw::tests
 
 			const edits::ImageEdits identity;
 			const auto untouched = edits::apply(photo, identity);
-			reporter.check(untouched.width == 4 && untouched.height == 3 &&
-			               untouched.pixels == photo.pixels,
+			reporter.check(untouched.width == 4 && untouched.height == 3 && untouched.pixels == photo.pixels,
 			               L"an identity stack leaves every pixel bit-identical");
 
 			edits::ImageEdits quarter;
@@ -3951,10 +4077,8 @@ namespace iw::tests
 			               L"four quarter turns return the original pixels exactly");
 
 			const auto once = edits::apply(photo, quarter);
-			reporter.check(once.width == 3 && once.height == 4,
-			               L"one quarter turn transposes the picture");
-			reporter.check(once.pixels[0] == photo.pixels[8],
-			               L"a clockwise turn puts the bottom-left pixel top-left");
+			reporter.check(once.width == 3 && once.height == 4, L"one quarter turn transposes the picture");
+			reporter.check(once.pixels[0] == photo.pixels[8], L"a clockwise turn puts the bottom-left pixel top-left");
 
 			edits::ImageEdits cropped;
 			cropped.crop = static_cast<::core::recti>(app::recti{1, 1, 2, 2});
@@ -3962,11 +4086,10 @@ namespace iw::tests
 			reporter.check(cut.width == 2 && cut.height == 2 && cut.pixels[0] == photo.pixels[5],
 			               L"a crop takes exactly the reviewed rectangle");
 
-			for (const auto control : {
-				     &edits::ImageEdits::brightness, &edits::ImageEdits::contrast, &edits::ImageEdits::darks,
-				     &edits::ImageEdits::midtones, &edits::ImageEdits::lights, &edits::ImageEdits::saturation,
-				     &edits::ImageEdits::vibrance, &edits::ImageEdits::temperature, &edits::ImageEdits::tint
-			     })
+			for (const auto control :
+			     {&edits::ImageEdits::brightness, &edits::ImageEdits::contrast, &edits::ImageEdits::darks,
+			      &edits::ImageEdits::midtones, &edits::ImageEdits::lights, &edits::ImageEdits::saturation,
+			      &edits::ImageEdits::vibrance, &edits::ImageEdits::temperature, &edits::ImageEdits::tint})
 			{
 				edits::ImageEdits colour;
 				auto pixels = photo.pixels;
@@ -3978,9 +4101,7 @@ namespace iw::tests
 					colour.*control = extreme;
 					edits::apply_color(extremePixels, colour);
 					reporter.check(std::ranges::all_of(extremePixels, [](const std::uint32_t pixel)
-					               {
-						               return (pixel & 0xff000000u) == 0xff000000u;
-					               }),
+					{ return (pixel & 0xff000000u) == 0xff000000u; }),
 					               L"a colour control at its extreme keeps the alpha channel");
 				}
 			}
@@ -4006,12 +4127,10 @@ namespace iw::tests
 					const auto after = channels(moved[index]);
 					const auto before = channels(photo.pixels[index]);
 					for (size_t channel = 0; channel < after.size(); ++channel)
-						ordered = ordered && (direction > 0
-							                      ? after[channel] >= before[channel]
-							                      : after[channel] <= before[channel]);
+						ordered = ordered && (direction > 0 ? after[channel] >= before[channel]
+						                                    : after[channel] <= before[channel]);
 				}
-				reporter.check(ordered,
-				               L"full brightness only ever moves a channel towards its own limit");
+				reporter.check(ordered, L"full brightness only ever moves a channel towards its own limit");
 
 				auto ends = extremes.pixels;
 				edits::apply_color(ends, colour);
@@ -4022,36 +4141,33 @@ namespace iw::tests
 			edits::ImageEdits straightened;
 			straightened.straighten = 50;
 			const auto warped = edits::apply(photo, straightened, false);
-			reporter.check(warped.width == 4 && warped.height == 3,
-			               L"a warp keeps the frame it was given");
+			reporter.check(warped.width == 4 && warped.height == 3, L"a warp keeps the frame it was given");
 			const auto saved = edits::apply(photo, straightened);
 			reporter.check(saved.width <= 4 && saved.height <= 3 && saved.width > 0,
 			               L"saving a straightened photo crops the emptied corners away");
-			reporter.check(std::ranges::all_of(saved.pixels,
-				[](const auto pixel) { return (pixel >> 24) == 255; }),
-				L"the final straightened crop contains no partly transparent corner pixels");
+			reporter.check(std::ranges::all_of(saved.pixels, [](const auto pixel) { return (pixel >> 24) == 255; }),
+			               L"the final straightened crop contains no partly transparent corner pixels");
 
 			files::DecodedImage alpha;
 			alpha.width = 16;
 			alpha.height = 16;
 			alpha.pixels.assign(256, 0x00ff0000u);
 			for (int y = 0; y < 16; ++y)
-				for (int x = 0; x < 8; ++x)
-					alpha.pixels[static_cast<size_t>(y) * 16 + x] = 0xff0000ffu;
+				for (int x = 0; x < 8; ++x) alpha.pixels[static_cast<size_t>(y) * 16 + x] = 0xff0000ffu;
 			const auto alphaWarp = edits::apply(alpha, straightened, false);
 			reporter.check(std::ranges::all_of(alphaWarp.pixels, [](const auto pixel)
-				{ return (pixel >> 24) == 0 || (pixel & 0x00ffffffu) == 0x000000ffu; }),
-				L"straightening interpolates alpha-weighted colour without bleeding invisible red pixels");
+			{ return (pixel >> 24) == 0 || (pixel & 0x00ffffffu) == 0x000000ffu; }),
+			               L"straightening interpolates alpha-weighted colour without bleeding invisible red pixels");
 			edits::PreviewSource alphaPreview;
 			alphaPreview.update(alpha, {3, 3});
 			reporter.check(std::ranges::all_of(alphaPreview.image().pixels, [](const auto pixel)
-				{ return (pixel >> 24) == 0 || (pixel & 0x00ffffffu) == 0x000000ffu; }),
-				L"scaled previews do not bleed invisible colour into translucent pixels");
+			{ return (pixel >> 24) == 0 || (pixel & 0x00ffffffu) == 0x000000ffu; }),
+			               L"scaled previews do not bleed invisible colour into translucent pixels");
 
 			auto malformed = photo;
 			malformed.pixels.resize(1);
 			reporter.check(edits::apply(malformed, quarter).pixels.empty(),
-				L"an incomplete pixel buffer is rejected before rotate or crop reads it");
+			               L"an incomplete pixel buffer is rejected before rotate or crop reads it");
 		}
 
 		void test_auto_adjustments(Reporter& reporter)
@@ -4078,14 +4194,13 @@ namespace iw::tests
 						const double distance = -(x - 160.0) * sine + (y - 120.0) * cosine;
 						const auto band = static_cast<int>(std::floor(distance / 16.0));
 						const std::uint32_t level = band & 1 ? 230 : 25;
-						banded.pixels[static_cast<size_t>(y) * 320 + x] =
-							0xff000000u | level << 16 | level << 8 | level;
+						banded.pixels[static_cast<size_t>(y) * 320 + x] = 0xff000000u | level << 16 | level << 8 |
+						                                                  level;
 					}
 				edits::ImageEdits recovered;
 				reporter.check(edits::auto_straighten(banded, recovered),
 				               L"a picture full of straight edges can be straightened automatically");
-				reporter.check(recovered.straighten != 0 &&
-				               std::abs(recovered.straighten + tenths) <= 3,
+				reporter.check(recovered.straighten != 0 && std::abs(recovered.straighten + tenths) <= 3,
 				               L"auto straighten recovers a known tilt to within a third of a degree");
 			}
 
@@ -4110,8 +4225,7 @@ namespace iw::tests
 				for (int x = 0; x < 64; ++x)
 				{
 					const auto level = static_cast<std::uint32_t>(10 + x * 145 / 63);
-					dim.pixels[static_cast<size_t>(y) * 64 + x] =
-						0xff000000u | level << 16 | level << 8 | level;
+					dim.pixels[static_cast<size_t>(y) * 64 + x] = 0xff000000u | level << 16 | level << 8 | level;
 				}
 			edits::ImageEdits lifted;
 			reporter.check(edits::auto_color(dim, lifted), L"auto colour reads the picture's histogram");
@@ -4123,8 +4237,7 @@ namespace iw::tests
 			double mean = 0;
 			for (const std::uint32_t pixel : corrected) mean += pixel >> 8 & 0xff;
 			mean /= corrected.size();
-			reporter.check(mean > 112 && mean < 144,
-			               L"auto colour carries an underexposed picture to mid grey");
+			reporter.check(mean > 112 && mean < 144, L"auto colour carries an underexposed picture to mid grey");
 
 			// Grey-world balance: a blue cast comes back closer to neutral, not further from it.
 			files::DecodedImage cast;
@@ -4140,7 +4253,7 @@ namespace iw::tests
 			edits::apply_color(neutral, temperatureOnly);
 			const int beforeGap = static_cast<int>(0xc0) - static_cast<int>(0x40);
 			const int afterGap = std::abs(static_cast<int>(neutral[0] & 0xff) -
-				static_cast<int>(neutral[0] >> 16 & 0xff));
+			                              static_cast<int>(neutral[0] >> 16 & 0xff));
 			reporter.check(afterGap < beforeGap, L"the balance closes the cast rather than widening it");
 
 			edits::ImageEdits nothing;
@@ -4150,50 +4263,54 @@ namespace iw::tests
 			auto malformed = flat;
 			malformed.pixels.resize(1);
 			reporter.check(!edits::auto_color(malformed, nothing) && !edits::auto_straighten(malformed, nothing),
-				L"automatic adjustments reject truncated image buffers");
+			               L"automatic adjustments reject truncated image buffers");
 
 			auto invisible = dim;
 			for (auto& pixel : invisible.pixels) pixel &= 0x00ffffffu;
 			nothing.brightness = 17;
 			nothing.straighten = 12;
 			reporter.check(!edits::auto_color(invisible, nothing) && nothing.brightness == 17 &&
-				!edits::auto_straighten(invisible, nothing) && nothing.straighten == 12,
-				L"invisible colours neither bias the histogram nor manufacture straightening edges");
+			                   !edits::auto_straighten(invisible, nothing) && nothing.straighten == 12,
+			               L"invisible colours neither bias the histogram nor manufacture straightening edges");
 
 			files::DecodedImage single;
 			single.width = single.height = 1;
 			single.pixels = {0xff808080u};
 			nothing.contrast = 60;
 			reporter.check(edits::auto_color(single, nothing) && nothing.contrast == 0 && nothing.brightness == 0,
-				L"a one-pixel neutral histogram has no invented zero percentile or stale contrast");
+			               L"a one-pixel neutral histogram has no invented zero percentile or stale contrast");
 
 			auto redRamp = dim;
 			for (size_t index = 0; index < redRamp.pixels.size(); ++index)
 				redRamp.pixels[index] = 0xff005000u | static_cast<std::uint32_t>(index % 256) << 16;
 			edits::ImageEdits lumaAdjustment;
-			reporter.check(edits::auto_color(redRamp, lumaAdjustment) && lumaAdjustment.contrast > 0,
+			reporter.check(
+				edits::auto_color(redRamp, lumaAdjustment) && lumaAdjustment.contrast > 0,
 				L"auto colour measures luminance rather than mistaking a constant green channel for a flat image");
 		}
 
 		void test_edit_naming(Reporter& reporter)
 		{
 			reporter.section(L"Save as naming");
-			reporter.check(platform::run_with_status({}, L"Edit test", L"Saving test image...", [] { return true; }),
+			reporter.check(
+				platform::run_with_status({}, L"Edit test", L"Saving test image...", [] { return true; }),
 				L"modal status joins a successful task-queue work item without requiring a UI completion message");
 			reporter.check(!platform::run_with_status({}, L"Edit test", L"Saving test image...", [] { return false; }),
-				L"modal status propagates a failed save result");
+			               L"modal status propagates a failed save result");
 			bool workerException = false;
 			try
 			{
-				platform::run_with_status({}, L"Edit test", L"Saving test image...", []() -> bool
-				{
-					throw std::runtime_error("save failed");
-				});
+				platform::run_with_status({}, L"Edit test", L"Saving test image...",
+				                          []() -> bool { throw std::runtime_error("save failed"); });
 			}
-			catch (const std::runtime_error&) { workerException = true; }
-			reporter.check(workerException &&
-				platform::run_with_status({}, L"Edit test", L"Saving test image...", [] { return true; }),
-				L"worker exceptions return to the caller and do not strand completion or retire the save queue");
+			catch (const std::runtime_error&)
+			{
+				workerException = true;
+			}
+			reporter
+				.check(workerException &&
+			               platform::run_with_status({}, L"Edit test", L"Saving test image...", [] { return true; }),
+			           L"worker exceptions return to the caller and do not strand completion or retire the save queue");
 			std::error_code error;
 			const auto root = files::unique_destination(std::filesystem::current_path() / L"iw30-edit-tests");
 			if (root.empty())
@@ -4222,19 +4339,17 @@ namespace iw::tests
 			               L"Save as never proposes an existing name");
 
 			const auto backup = files::create_original_backup(root / L"photo.jpg");
-			reporter.check(backup.filename() == L"photo-original.jpg" &&
-			               std::filesystem::exists(backup, error) &&
-			               std::filesystem::exists(root / L"photo.jpg", error),
+			reporter.check(backup.filename() == L"photo-original.jpg" && std::filesystem::exists(backup, error) &&
+			                   std::filesystem::exists(root / L"photo.jpg", error),
 			               L"an original backup is written beside the photo and keeps the photo");
 			const auto second = files::create_original_backup(root / L"photo.jpg");
-			reporter.check(second.filename() == L"photo-original (2).jpg",
-			               L"a second backup never replaces the first");
+			reporter.check(second.filename() == L"photo-original (2).jpg", L"a second backup never replaces the first");
 			reporter.check(files::create_original_backup(root / L"missing.jpg").empty(),
 			               L"backing up a file that is not there writes nothing");
 			reporter.check(proposed_edit_path({}).empty(), L"an empty source never proposes an unrelated -edit file");
 			std::filesystem::create_directories(root / L"folder-edit.png", error);
 			reporter.check(proposed_edit_path(root / L"folder.png").filename() == L"folder-edit 2.png",
-				L"Save as also skips directories with the proposed filename");
+			               L"Save as also skips directories with the proposed filename");
 			const auto identityPath = root / L"identity.dat";
 			std::ofstream(identityPath, std::ios::binary) << "same";
 			const auto identity = files::snapshot_file(identityPath);
@@ -4243,7 +4358,7 @@ namespace iw::tests
 			std::ofstream(identityPath, std::ios::binary) << "same";
 			std::filesystem::last_write_time(identityPath, timestamp, error);
 			reporter.check(identity && !files::matches_snapshot(identityPath, *identity),
-				L"a replacement source is detected even when its size and modification time are unchanged");
+			               L"a replacement source is detected even when its size and modification time are unchanged");
 
 			files::DecodedImage image;
 			image.width = 20;
@@ -4259,78 +4374,86 @@ namespace iw::tests
 				bool checkedAtCommit = false;
 				auto changed = image;
 				changed.pixels.assign(changed.pixels.size(), 0xffabcdefu);
-				reporter.check(!files::save_image(changed, source, files::ImageSaveFormat::png, {}, true, [&]
-					{
-						checkedAtCommit = true;
-						return false;
-					}) && checkedAtCommit && files::load_image(source).pixels == image.pixels,
-					L"a rejected final commit leaves the previous encoded image intact");
+				reporter.check(!files::save_image(changed, source, files::ImageSaveFormat::png, {}, true,
+				                                  [&]
+				{
+					checkedAtCommit = true;
+					return false;
+				}) && checkedAtCommit &&
+				                   files::load_image(source).pixels == image.pixels,
+				               L"a rejected final commit leaves the previous encoded image intact");
 				const auto racedDestination = root / L"arrived-during-save.png";
-				reporter.check(!files::save_image(image, racedDestination, files::ImageSaveFormat::png, {}, false, [&]
-					{
-						std::ofstream(racedDestination, std::ios::binary) << "new arrival";
-						return true;
-					}) && std::filesystem::file_size(racedDestination) == 11,
-					L"an unreviewed destination created during encoding is never replaced");
+				reporter.check(!files::save_image(image, racedDestination, files::ImageSaveFormat::png, {}, false,
+				                                  [&]
+				{
+					std::ofstream(racedDestination, std::ios::binary) << "new arrival";
+					return true;
+				}) && std::filesystem::file_size(racedDestination) == 11,
+				               L"an unreviewed destination created during encoding is never replaced");
 				const auto beforeChange = files::snapshot_file(source);
 				reporter.check(beforeChange &&
-					!files::save_image(changed, source, files::ImageSaveFormat::png, {}, true, [&]
-					{
-						std::filesystem::last_write_time(source,
-							std::filesystem::last_write_time(source) + std::chrono::seconds(5), error);
-						return files::matches_snapshot(source, *beforeChange);
-					}) && files::load_image(source).pixels == image.pixels,
-					L"a source changed immediately before replacement refuses the encoded edit");
+				                   !files::save_image(changed, source, files::ImageSaveFormat::png, {}, true,
+				                                      [&]
+				{
+					std::filesystem::last_write_time(source,
+					                                 std::filesystem::last_write_time(source) + std::chrono::seconds(5),
+					                                 error);
+					return files::matches_snapshot(source, *beforeChange);
+				}) && files::load_image(source).pixels == image.pixels,
+				               L"a source changed immediately before replacement refuses the encoded edit");
 				TaskEdit editor;
 				EditAccess::prepare(editor, source, image);
 				reporter.check(EditAccess::backup(editor),
-					L"original backups are enabled even before the options panel is created");
+				               L"original backups are enabled even before the options panel is created");
 				const auto formats = files::writable_image_formats();
 				const bool webpAvailable = std::ranges::find(formats, files::ImageSaveFormat::webp) != formats.end();
 				TaskEdit optionsEditor;
 				EditAccess::prepare(optionsEditor, source, image);
 				reporter.check(EditAccess::offers_webp(optionsEditor) == webpAvailable,
-					L"WebP quality and lossless controls appear only when a runtime encoder is available");
+				               L"WebP quality and lossless controls appear only when a runtime encoder is available");
 				if (!webpAvailable)
-					reporter.check(!EditAccess::write(editor, root / L"unavailable.webp", false) &&
-						!std::filesystem::exists(root / L"unavailable.webp", error),
+					reporter.check(
+						!EditAccess::write(editor, root / L"unavailable.webp", false) &&
+							!std::filesystem::exists(root / L"unavailable.webp", error),
 						L"an unavailable WebP encoder refuses the save without writing another format under its extension");
 				reporter.check(!EditAccess::write(editor, source, false) && EditAccess::dirty(editor) &&
-					paths::equal(EditAccess::path(editor), source),
-					L"Save as cannot select the original file and leaves its draft and target intact");
+				                   paths::equal(EditAccess::path(editor), source),
+				               L"Save as cannot select the original file and leaves its draft and target intact");
 				reporter.check(!EditAccess::write(editor, root / L"wrong.gif", false) &&
-					!std::filesystem::exists(root / L"wrong.gif", error),
-					L"an unrecognised extension never receives silently encoded PNG pixels");
+				                   !std::filesystem::exists(root / L"wrong.gif", error),
+				               L"an unrecognised extension never receives silently encoded PNG pixels");
 
 				const auto reviewedTime = std::filesystem::last_write_time(source);
 				const auto replacedSource = root / L"replaced-source.png";
 				std::filesystem::rename(source, replacedSource, error);
 				const auto copiedSource = files::copy_file_to(replacedSource, source, false);
 				std::filesystem::last_write_time(source, reviewedTime, error);
-				reporter.check(!copiedSource && !error && !EditAccess::write(editor, source, true) &&
-					EditAccess::dirty(editor) && paths::equal(EditAccess::path(editor), source) &&
-					!std::filesystem::exists(root / L"source-original.png", error),
+				reporter.check(
+					!copiedSource && !error && !EditAccess::write(editor, source, true) && EditAccess::dirty(editor) &&
+						paths::equal(EditAccess::path(editor), source) &&
+						!std::filesystem::exists(root / L"source-original.png", error),
 					L"replacing the source with identical bytes and time still vetoes Save without losing or navigating the draft");
 				EditAccess::prepare(editor, source, image);
 				std::filesystem::last_write_time(source,
-					std::filesystem::last_write_time(source) + std::chrono::seconds(5), error);
+				                                 std::filesystem::last_write_time(source) + std::chrono::seconds(5),
+				                                 error);
 				reporter.check(!EditAccess::write(editor, source, true) && EditAccess::dirty(editor) &&
-					!std::filesystem::exists(root / L"source-original.png", error),
-					L"a changed source refuses save before creating a backup and keeps the draft");
+				                   !std::filesystem::exists(root / L"source-original.png", error),
+				               L"a changed source refuses save before creating a backup and keeps the draft");
 
 				EditAccess::prepare(editor, source, image);
 				std::filesystem::permissions(source, std::filesystem::perms::owner_read,
-					std::filesystem::perm_options::replace, error);
+				                             std::filesystem::perm_options::replace, error);
 				reporter.check(!error && !EditAccess::write(editor, source, true) && EditAccess::dirty(editor),
-					L"a read-only source cannot be replaced by an in-place edit");
+				               L"a read-only source cannot be replaced by an in-place edit");
 				std::filesystem::permissions(source, std::filesystem::perms::owner_all,
-					std::filesystem::perm_options::replace, error);
+				                             std::filesystem::perm_options::replace, error);
 				EditAccess::prepare(editor, source, image);
 				reporter.check(EditAccess::write(editor, source, true),
-					L"a valid in-place edit writes with default backup protection");
+				               L"a valid in-place edit writes with default backup protection");
 				const auto original = files::load_image(root / L"source-original.png");
 				reporter.check(original.width == 20 && original.height == 12 && original.pixels == image.pixels,
-					L"the original backup contains the unchanged full-resolution source pixels");
+				               L"the original backup contains the unchanged full-resolution source pixels");
 
 				auto preview = image;
 				preview.width = preview.height = 2;
@@ -4338,24 +4461,25 @@ namespace iw::tests
 				EditAccess::prepare(editor, source, preview);
 				const auto destination = root / L"full-edit.png";
 				reporter.check(EditAccess::write(editor, destination, false),
-					L"Save as renders from the source file rather than the small preview");
+				               L"Save as renders from the source file rather than the small preview");
 				const auto full = files::load_image(destination);
 				reporter.check(full.width == 20 && full.height == 12,
-					L"saved output retains full resolution when the preview is only two pixels wide");
+				               L"saved output retains full resolution when the preview is only two pixels wide");
 
 				const auto invalid = root / L"invalid.png";
 				std::ofstream(invalid, std::ios::binary) << "not an image";
 				EditAccess::prepare(editor, invalid, preview);
 				reporter.check(!EditAccess::write(editor, root / L"invalid-edit.png", false) &&
-					EditAccess::dirty(editor) && !std::filesystem::exists(root / L"invalid-edit.png", error),
-					L"a failed full decode never saves the scaled preview or discards the draft");
+				                   EditAccess::dirty(editor) &&
+				                   !std::filesystem::exists(root / L"invalid-edit.png", error),
+				               L"a failed full decode never saves the scaled preview or discards the draft");
 				EditAccess::lose_decode(editor);
 				reporter.check(!EditAccess::next(editor) && EditAccess::dirty(editor) &&
-					paths::equal(EditAccess::path(editor), invalid),
-					L"Save and open next cannot advance when a dirty photo is not available to save");
+				                   paths::equal(EditAccess::path(editor), invalid),
+				               L"Save and open next cannot advance when a dirty photo is not available to save");
 				editor.set_photo(destination);
 				reporter.check(paths::equal(EditAccess::path(editor), destination),
-					L"a newly saved path cannot be replaced by the first old selector item");
+				               L"a newly saved path cannot be replaced by the first old selector item");
 			}
 			std::filesystem::remove_all(root, error);
 		}
@@ -4401,19 +4525,15 @@ namespace iw::tests
 
 			const Text* find_text(const std::wstring_view value) const
 			{
-				const auto found = std::ranges::find_if(texts, [value](const Text& entry)
-				{
-					return entry.value == value;
-				});
+				const auto found = std::ranges::find_if(texts,
+				                                        [value](const Text& entry) { return entry.value == value; });
 				return found == texts.end() ? nullptr : &*found;
 			}
 
 			std::optional<color> fill_of(const app::recti bounds) const
 			{
 				const auto found = std::ranges::find_if(fills, [bounds](const Fill& entry)
-				{
-					return rect_equals(entry.bounds, bounds);
-				});
+				{ return rect_equals(entry.bounds, bounds); });
 				return found == fills.end() ? std::nullopt : std::optional<color>(found->value);
 			}
 		};
@@ -4435,45 +4555,51 @@ namespace iw::tests
 			};
 			const auto browsing = paint();
 			reporter.check(browsing.find_text(L"Date modified") != nullptr,
-				L"the Details view draws its column header while browsing");
+			               L"the Details view draws its column header while browsing");
 			canvas.set_fullscreen(true);
 			const auto fullscreen = paint();
-			reporter.check(fullscreen.find_text(L"Images") && !fullscreen.find_text(L"Date modified"),
+			reporter.check(
+				fullscreen.find_text(L"Images") && !fullscreen.find_text(L"Date modified"),
 				L"full screen entered from the Details view draws its thumbnail strip without the Details header");
 			canvas.set_fullscreen(false);
 			reporter.check(paint().find_text(L"Date modified") != nullptr,
-				L"leaving full screen brings the Details header back");
+			               L"leaving full screen brings the Details header back");
 		}
 
 		void test_path_shortening(Reporter& reporter)
 		{
 			reporter.section(L"platform::path_ellipsis");
-			const auto measure = [](const std::wstring_view text) { return RecordingDraw::width(text); };
+			const auto measure = [](const std::wstring_view text)
+			{
+				return RecordingDraw::width(text);
+			};
 			const std::wstring longPath = L"C:\\Users\\zac\\Pictures\\Holiday\\IMG_0001.jpg";
 			reporter.check(platform::path_ellipsis(longPath, 420, measure) == longPath,
-				L"a path that fits is drawn whole");
+			               L"a path that fits is drawn whole");
 			reporter.check(platform::path_ellipsis(longPath, 300, measure) == L"C:\\Users\\zac\\P...\\IMG_0001.jpg",
-				L"a long path loses the end of its folders rather than its file name");
+			               L"a long path loses the end of its folders rather than its file name");
 			constexpr std::wstring_view kept = L"...\\IMG_0001.jpg";
 			bool namesKept = true;
 			for (int width = RecordingDraw::width(kept); width < RecordingDraw::width(longPath); width += 10)
 			{
 				const auto shown = platform::path_ellipsis(longPath, width, measure);
 				namesKept = namesKept && shown.ends_with(kept) && measure(shown) <= width &&
-					longPath.starts_with(std::wstring_view(shown).substr(0, shown.size() - kept.size()));
+				            longPath.starts_with(std::wstring_view(shown).substr(0, shown.size() - kept.size()));
 			}
-			reporter.check(namesKept,
+			reporter.check(
+				namesKept,
 				L"at every width that can hold it the whole file name stays, behind as much of the folder as fits");
 			reporter.check(platform::path_ellipsis(longPath, 150, measure) == L"IMG_0001.jpg",
-				L"a file name with no room for the ellipsis before it is shown alone");
+			               L"a file name with no room for the ellipsis before it is shown alone");
 			reporter.check(platform::path_ellipsis(longPath, 100, measure) == L"IMG_000...",
-				L"a file name wider than its cell is shortened at its end");
+			               L"a file name wider than its cell is shortened at its end");
 			reporter.check(platform::path_ellipsis(L"Holiday photo.jpg", 100, measure) == L"Holiday...",
-				L"text without a folder is shortened at its end");
+			               L"text without a folder is shortened at its end");
 			reporter.check(platform::path_ellipsis(L"C:\\Photos\\Converted\\", 160, measure) == L"C:...\\Converted\\",
-				L"a trailing separator still keeps the last folder name");
+			               L"a trailing separator still keeps the last folder name");
 			reporter.check(platform::path_ellipsis(L"C:\\\U0001F600\U0001F600\U0001F600\\a.jpg", 130, measure) ==
-				L"C:\\...\\a.jpg", L"shortening never separates the halves of a surrogate pair");
+			                   L"C:\\...\\a.jpg",
+			               L"shortening never separates the halves of a surrogate pair");
 
 			reporter.section(L"Read-only folder fields");
 			{
@@ -4496,14 +4622,15 @@ namespace iw::tests
 				fields.draw(renderer);
 				const auto faceColor = platform::system_color(platform::SystemColor::face);
 				const auto windowColor = platform::system_color(platform::SystemColor::window);
-				reporter.check(draw.fill_of(fields.text_bounds(1)) == faceColor &&
-					draw.fill_of(fields.text_bounds(2)) == windowColor,
+				reporter.check(
+					draw.fill_of(fields.text_bounds(1)) == faceColor &&
+						draw.fill_of(fields.text_bounds(2)) == windowColor,
 					L"a folder field, which only Browse... changes, is drawn read-only unlike an editable field");
 				const auto* folderText = draw.find_text(L"C:\\Users\\zac\\Pictures\\Converted for the web");
 				const auto* typedText = draw.find_text(L"1920");
-				reporter.check(folderText && (folderText->format & platform::TextFormat::pathEllipsis) &&
-					typedText && !(typedText->format & platform::TextFormat::pathEllipsis),
-					L"a long folder path keeps the chosen folder's own name in view");
+				reporter.check(folderText && (folderText->format & platform::TextFormat::pathEllipsis) && typedText &&
+				                   !(typedText->format & platform::TextFormat::pathEllipsis),
+				               L"a long folder path keeps the chosen folder's own name in view");
 			}
 
 			reporter.section(L"Convert review keeps file names visible");
@@ -4531,7 +4658,7 @@ namespace iw::tests
 			// None of these exist. Review still lists the paths it would read and write, and those
 			// paths are all this section draws.
 			const auto folder = std::filesystem::current_path() / L"iw30-review-paths" /
-				L"a folder whose name is far too long for the Source column";
+			                    L"a folder whose name is far too long for the Source column";
 			const std::vector<std::filesystem::path> sources{folder / L"first photo.jpg", folder / L"second photo.jpg"};
 			const auto destination = folder.parent_path() / L"a destination folder far too long for its column";
 			const auto parent = std::make_shared<RecordingFrame>();
@@ -4549,7 +4676,7 @@ namespace iw::tests
 			drain(uiQueue);
 			const auto& rows = view->plan().rows;
 			reporter.check(!view->busy() && rows.size() == sources.size(),
-				L"the review lists one row for each selected photo");
+			               L"the review lists one row for each selected photo");
 			RecordingDraw draw;
 			if (const auto frame = MainWindowAccess::record(view->frame()); frame && frame->reactor)
 				frame->reactor->paint(frame, draw);
@@ -4561,21 +4688,21 @@ namespace iw::tests
 				{
 					const auto* cell = draw.find_text(cellPath.wstring());
 					namesShown = namesShown && cell && (cell->format & platform::TextFormat::pathEllipsis) &&
-						RecordingDraw::width(cell->value) > cell->bounds.width &&
-						platform::path_ellipsis(cell->value, cell->bounds.width, RecordingDraw::width)
-						.ends_with(cellPath.filename().wstring());
+					             RecordingDraw::width(cell->value) > cell->bounds.width &&
+					             platform::path_ellipsis(cell->value, cell->bounds.width, RecordingDraw::width)
+					                 .ends_with(cellPath.filename().wstring());
 				}
 				const auto* changes = draw.find_text(row.change);
 				changesEnd = changesEnd && row.state == tasks::RowState::blocked && !row.change.empty() && changes &&
-					(changes->format & platform::TextFormat::endEllipsis) &&
-					!(changes->format & platform::TextFormat::pathEllipsis);
+				             (changes->format & platform::TextFormat::endEllipsis) &&
+				             !(changes->format & platform::TextFormat::pathEllipsis);
 			}
 			reporter.check(namesShown,
-				L"Source and Destination cells too narrow for their paths still show each whole file name");
+			               L"Source and Destination cells too narrow for their paths still show each whole file name");
 			reporter.check(changesEnd, L"the Changes column, which holds no path, keeps its end ellipsis");
 			const auto* field = draw.find_text(destination.wstring());
 			reporter.check(field && (field->format & platform::TextFormat::pathEllipsis),
-				L"the Destination folder field keeps the chosen folder's own name in view");
+			               L"the Destination folder field keeps the chosen folder's own name in view");
 
 			reporter.section(L"Sync review keeps file names visible");
 			const auto syncRoot = platform::unique_temp_folder(L"iw30-sync-review-paths");
@@ -4607,7 +4734,7 @@ namespace iw::tests
 			drain(uiQueue);
 			const auto& syncRows = syncView->plan().rows;
 			reporter.check(!syncView->busy() && syncRows.size() == 1 && syncRows.front().tag == sync::copyToRemote,
-				L"Sync reviews copying the one local photo the remote folder lacks");
+			               L"Sync reviews copying the one local photo the remote folder lacks");
 			RecordingDraw syncDraw;
 			if (const auto frame = MainWindowAccess::record(syncView->frame()); frame && frame->reactor)
 				frame->reactor->paint(frame, syncDraw);
@@ -4619,18 +4746,82 @@ namespace iw::tests
 				{
 					const auto* cell = syncDraw.find_text(cellPath.wstring());
 					syncNamesShown = syncNamesShown && cell && (cell->format & platform::TextFormat::pathEllipsis) &&
-						RecordingDraw::width(cell->value) > cell->bounds.width &&
-						platform::path_ellipsis(cell->value, cell->bounds.width, RecordingDraw::width)
-						.ends_with(cellPath.filename().wstring());
+					                 RecordingDraw::width(cell->value) > cell->bounds.width &&
+					                 platform::path_ellipsis(cell->value, cell->bounds.width, RecordingDraw::width)
+					                     .ends_with(cellPath.filename().wstring());
 				}
 				const auto* action = syncDraw.find_text(row.change);
 				actionsEnd = actionsEnd && !row.change.empty() && action &&
-					(action->format & platform::TextFormat::endEllipsis) &&
-					!(action->format & platform::TextFormat::pathEllipsis);
+				             (action->format & platform::TextFormat::endEllipsis) &&
+				             !(action->format & platform::TextFormat::pathEllipsis);
 			}
 			reporter.check(syncNamesShown,
-				L"Sync's Local and Remote cells too narrow for their paths still show each whole file name");
+			               L"Sync's Local and Remote cells too narrow for their paths still show each whole file name");
 			reporter.check(actionsEnd, L"Sync's Action column, which holds no path, keeps its end ellipsis");
+		}
+
+		void test_text_input(Reporter& reporter)
+		{
+			reporter.section(L"Drawn text field");
+			std::vector<std::wstring> changes;
+			int accepted = 0, escaped = 0, forwards = 0, backwards = 0;
+			platform::TextInputOptions options;
+			options.text = L"photo";
+			options.cueBanner = L"Name";
+			options.changed = [&changes](const std::wstring& text)
+			{
+				changes.push_back(text);
+			};
+			options.accepted = [&accepted]
+			{
+				++accepted;
+			};
+			options.escaped = [&escaped]
+			{
+				++escaped;
+			};
+			options.tabbed = [&forwards, &backwards](const bool back)
+			{
+				++(back ? backwards : forwards);
+			};
+			// With no window to draw in, the field is driven as a frame drives it.
+			auto input = platform::create_text_input({}, std::move(options));
+			const auto edit = input ? input->control() : ::ui::control_ptr{};
+			reporter.check(edit && input->text() == L"photo", L"a text field starts with the text it is given");
+			if (!edit) return;
+			input->set_text(L"name");
+			reporter.check(input->text() == L"name" && changes.empty(),
+			               L"text the owner sets is its own, not a change to report");
+
+			TestControlHost host;
+			host.tree->elements.push_back(edit);
+			const auto manager = std::make_shared<::ui::input_manager>(&host);
+			edit->layout(host.measureContext, {0, 0, 200, 24});
+			manager->layout();
+			manager->keyboard_focus(true);
+			input->set_focus();
+			reporter.check(input->has_focus() && manager->is_typing(), L"a text field takes the keyboard for typing");
+			manager->key_down(::platform::keys::END, {});
+			manager->text_input("s");
+			manager->key_down(::platform::keys::BACK, {});
+			reporter.check(changes == std::vector<std::wstring>{L"names", L"name"} && input->text() == L"name",
+			               L"typing and Backspace report each change");
+			manager->key_down(::platform::keys::RETURN, {});
+			manager->key_down(::platform::keys::ESCAPE, {});
+			manager->key_down(::platform::keys::TAB, {});
+			manager->key_down(::platform::keys::TAB, {.shift = true});
+			reporter.check(accepted == 1 && escaped == 1 && forwards == 1 && backwards == 1 && input->has_focus(),
+			               L"Return, Escape, Tab and Shift-Tab go to the field's owner, which keeps the keyboard");
+			input->show(false);
+			reporter.check(!input->has_focus(), L"a hidden text field lets go of the keyboard");
+
+			input.reset();
+			manager->focus(edit);
+			manager->key_down(::platform::keys::RETURN, {});
+			manager->text_input("x");
+			reporter.check(accepted == 1 && changes.size() == 2,
+			               L"a text field's callbacks cannot reach its owner once it has gone");
+			manager->detach();
 		}
 
 		void test_control_panel(Reporter& reporter)
@@ -4639,7 +4830,10 @@ namespace iw::tests
 			ui::ControlPanel panel;
 			panel.set_dpi(96);
 			int changes = 0;
-			const auto counted = [&changes] { ++changes; };
+			const auto counted = [&changes]
+			{
+				++changes;
+			};
 
 			ui::Control first;
 			first.id = 1;
@@ -4699,7 +4893,7 @@ namespace iw::tests
 					void blend_fill(app::recti, color) override {}
 					void text(std::wstring_view, app::recti, color, std::uint32_t, const platform::FontPtr&) override {}
 					app::sizei measure_text(const std::wstring_view value, std::uint32_t,
-					                   const platform::FontPtr&) override
+					                        const platform::FontPtr&) override
 					{
 						return {static_cast<int>(value.size()) * 10, 16};
 					}
@@ -4719,10 +4913,10 @@ namespace iw::tests
 				listing.layout({0, 0, 400, 400}, renderer);
 				const auto& lines = listing.find(1)->wrapped;
 				reporter.check(lines.size() == 3 && lines[1] == L"C:\\A \u2192 Remote\\A",
-					L"a label starts a new line at every explicit line break");
+				               L"a label starts a new line at every explicit line break");
 				listing.layout({0, 0, 60, 400}, renderer);
 				reporter.check(listing.find(1)->wrapped.size() > 3,
-					L"each explicit line still wraps at word boundaries when narrow");
+				               L"each explicit line still wraps at word boundaries when narrow");
 			}
 
 			// Hit testing needs laid-out bounds, which only a renderer can supply, so the
@@ -4747,22 +4941,21 @@ namespace iw::tests
 
 			panel.focus(0);
 			reporter.check(panel.focus_next() && panel.focused_id() == 1,
-				L"Tab focus begins with the first interactive control");
+			               L"Tab focus begins with the first interactive control");
 			panel.set_enabled(2, false);
-			reporter.check(panel.focus_next() && panel.focused_id() == 3,
-				L"Tab focus skips disabled controls");
+			reporter.check(panel.focus_next() && panel.focused_id() == 3, L"Tab focus skips disabled controls");
 			platform::KeyInput key;
 			key.key = platform::KeyCode::home;
 			panel.key(key);
 			key.key = platform::KeyCode::right;
 			panel.key(key);
 			reporter.check(panel.find(3)->value == 1,
-				L"a focused slider supports Home and precise arrow-key adjustment");
+			               L"a focused slider supports Home and precise arrow-key adjustment");
 			key.key = platform::KeyCode::end;
 			panel.key(key);
 			key.key = platform::KeyCode::right;
 			reporter.check(panel.key(key) && panel.find(3)->value == 100,
-				L"a slider consumes arrow keys at its bound instead of scrolling the review");
+			               L"a slider consumes arrow keys at its bound instead of scrolling the review");
 			panel.focus(1);
 			key.key = platform::KeyCode::space;
 			changes = 0;
@@ -4772,11 +4965,12 @@ namespace iw::tests
 			panel.focus(2);
 			panel.key(key);
 			reporter.check(panel.find(2)->checked && !panel.find(1)->checked && changes == 1,
-				L"keyboard activation selects a radio exclusively and notifies once");
+			               L"keyboard activation selects a radio exclusively and notifies once");
 			key.key = platform::KeyCode::left;
 			panel.key(key);
 			reporter.check(panel.focused_id() == 1 && panel.find(1)->checked && !panel.find(2)->checked &&
-				panel.find(4)->checked, L"radio arrow navigation stays inside its exclusive group");
+			                   panel.find(4)->checked,
+			               L"radio arrow navigation stays inside its exclusive group");
 
 			ui::Control choice;
 			choice.id = 5;
@@ -4792,15 +4986,15 @@ namespace iw::tests
 			panel.key(key);
 			reporter.check(panel.find(5)->value == 1, L"Up selects the preceding choice in display order");
 			reporter.check(!panel.focus_next() && panel.focused_id() == 0,
-				L"Tab past the final control releases focus to the review surface");
+			               L"Tab past the final control releases focus to the review surface");
 			reporter.check(panel.focus_next(true) && panel.focused_id() == 5,
-				L"Shift-Tab enters the controls at their last interactive row");
+			               L"Shift-Tab enters the controls at their last interactive row");
 
 			panel.mouse_down({50, 45});
 			panel.set_interactive(false);
 			changes = 0;
 			reporter.check(!panel.dragging() && !panel.mouse_down({50, 5}) && !panel.key(key) && changes == 0,
-				L"a running task disables keyboard and mouse changes and ends an active slider drag");
+			               L"a running task disables keyboard and mouse changes and ends an active slider drag");
 			panel.set_interactive(true);
 			panel.mouse_down({50, 45});
 			panel.set_enabled(3, false);
@@ -4811,7 +5005,7 @@ namespace iw::tests
 			panel.find(3)->maximum = 2000000000;
 			panel.mouse_down({95, 45});
 			reporter.check(panel.find(3)->value == 2000000000,
-				L"wide slider ranges do not overflow during pointer-value conversion");
+			               L"wide slider ranges do not overflow during pointer-value conversion");
 			panel.mouse_up({});
 
 			ui::Control rebuilding;
@@ -4830,8 +5024,8 @@ namespace iw::tests
 			panel.add(std::move(rebuilding));
 			changes = 0;
 			panel.mouse_down({20, 105});
-			reporter.check(changes == 1 && panel.find(7) && panel.focused_id() == 0 &&
-				panel.hot_id() == 0 && !panel.dragging(),
+			reporter.check(
+				changes == 1 && panel.find(7) && panel.focused_id() == 0 && panel.hot_id() == 0 && !panel.dragging(),
 				L"a change callback can rebuild the panel without destroying the executing callback or keeping stale focus");
 		}
 	}
@@ -4840,8 +5034,7 @@ namespace iw::tests
 	{
 		Reporter reporter;
 		emit(L"ImageWalker 3.0 self-tests\n");
-		if (skipClipboard)
-			emit(L"[ SKIP ] clipboard preferred file operation (manual validation requested)\n");
+		if (skipClipboard) emit(L"[ SKIP ] clipboard preferred file operation (manual validation requested)\n");
 
 		const auto root = files::unique_destination(std::filesystem::current_path() / L"iw30-suite-history");
 		std::error_code error;
@@ -4865,7 +5058,7 @@ namespace iw::tests
 			MainWindowAccess noFileHistory;
 			MainWindowAccess withFileHistory(&fixture);
 			reporter.check(!noFileHistory.can_undo() && withFileHistory.can_undo() == fixture.can_undo(),
-				L"file Undo is an explicit window dependency rather than an uninitialized global lookup");
+			               L"file Undo is an explicit window dependency rather than an uninitialized global lookup");
 
 			test_startup_dispatch(reporter);
 			if (!skipClipboard) test_clipboard_file_operation(reporter);
@@ -4877,6 +5070,7 @@ namespace iw::tests
 			test_color(reporter);
 			test_dpi_metrics(reporter);
 			test_toolbar_symbols(reporter);
+			test_toolbar_labels(reporter);
 			test_item_count(reporter);
 			test_supported_images(reporter);
 			test_selection_model(reporter);
@@ -4917,6 +5111,8 @@ namespace iw::tests
 			test_auto_adjustments(reporter);
 			test_edit_naming(reporter);
 			test_control_panel(reporter);
+			test_text_input(reporter);
+			test_folder_tree(reporter);
 			test_path_shortening(reporter);
 			test_fullscreen_strip(reporter);
 			test_sync_workflow(reporter);

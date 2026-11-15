@@ -8,7 +8,11 @@
 
 namespace iw
 {
-	namespace tests { struct EditAccess; struct PhotoGeometryAccess; }
+	namespace tests
+	{
+		struct EditAccess;
+		struct PhotoGeometryAccess;
+	}
 
 	// The name Save as proposes: "photo-edit.jpg", then "photo-edit 2.jpg", then the next free
 	// number. Never an existing file.
@@ -21,7 +25,9 @@ namespace iw
 		void set_photo(const std::filesystem::path& path);
 		bool request_close() override;
 		bool can_undo_draft() const override
-		{ return !loading_ && !saving_ && (content_dragging() || history_.can_undo()); }
+		{
+			return !loading_ && !saving_ && (content_dragging() || history_.can_undo());
+		}
 		bool undo_draft() override
 		{
 			if (!can_undo_draft()) return false;
@@ -46,7 +52,12 @@ namespace iw
 	private:
 		friend struct tests::EditAccess;
 		friend struct tests::PhotoGeometryAccess;
-		enum class Leaving { save, discard, cancel };
+		enum class Leaving
+		{
+			save,
+			discard,
+			cancel
+		};
 
 		void load_photo();
 		void rebuild_preview(app::sizei pane);

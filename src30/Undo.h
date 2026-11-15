@@ -28,7 +28,7 @@ namespace iw::undo
 	{
 	public:
 		// The root is application-owned, not a temporary folder. Existing history is never removed.
-		explicit History(std::filesystem::path root);
+		explicit History(const std::filesystem::path& root);
 		~History();
 		History(const History&) = delete;
 		History& operator=(const History&) = delete;
@@ -67,7 +67,7 @@ namespace iw::undo
 		// actually changed by THIS step. Untouched paths retain their last recorded state.
 		// Mutated paths are also included in the bundle and must have been protected.
 		bool completed(const std::vector<std::filesystem::path>& bundlePaths,
-			const std::vector<std::filesystem::path>& mutatedPaths, std::wstring& error);
+		               const std::vector<std::filesystem::path>& mutatedPaths, std::wstring& error);
 		// Called after cancellation/rollback/staging recovery. Failed/unreached bundles are omitted.
 		// A false result leaves recovery copies intact and gives an actionable error.
 		bool finish(std::wstring& error);
@@ -94,9 +94,9 @@ namespace iw::undo
 	// guarded step, so a committed destination remains undoable if deleting its source fails.
 	// An optional source-deletion guard requests the same two-step path on any volume.
 	TransferResult transfer_file(Batch& batch, const std::filesystem::path& source,
-		const std::filesystem::path& destination, bool move, bool overwrite,
-		const std::function<bool()>& beforeCommit = {},
-		const std::function<bool()>& beforeSourceDelete = {});
+	                             const std::filesystem::path& destination, bool move, bool overwrite,
+	                             const std::function<bool()>& beforeCommit = {},
+	                             const std::function<bool()>& beforeSourceDelete = {});
 
 	// Automatic Undo is deliberately current-session only. After restart/crash the flushed
 	// manifests and originals remain available for manual recovery; they are never replayed.

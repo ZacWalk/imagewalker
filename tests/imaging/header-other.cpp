@@ -13,7 +13,6 @@ bool check_other_translation_unit()
 {
 	const iw::imaging::PixelImage image{1, 2, {0xff112233, 0xff445566}, 1, 2};
 	const auto rotated = iw::imaging::rotate_quarters(image, 1);
-	return rotated.width == 2 && rotated.height == 1 &&
-		iw::edits::apply(image, {}).pixels == image.pixels &&
-		iw::imaging::native_supports_extension(L".png");
+	return rotated.width == 2 && rotated.height == 1 && iw::edits::apply(image, {}).pixels == image.pixels &&
+	       iw::imaging::native_supports_extension(L".png");
 }

@@ -34,8 +34,8 @@ namespace iw::ui
 		int id{};
 		ControlKind kind{ControlKind::label};
 		std::wstring label;
-		std::wstring text; // folder path, chosen choice, or edited text
-		std::wstring suffix; // slider value readout unit
+		std::wstring text;    // folder path, chosen choice, or edited text
+		std::wstring suffix;  // slider value readout unit
 		bool showValue{true}; // a slider whose label carries its own readout hides the raw value
 		bool checked{};
 		int value{};
@@ -47,8 +47,8 @@ namespace iw::ui
 		std::vector<std::wstring> choices;
 		std::function<void()> changed;
 
-		app::recti bounds; // whole row, filled by layout
-		app::recti hit; // the part that responds to the mouse
+		app::recti bounds;                 // whole row, filled by layout
+		app::recti hit;                    // the part that responds to the mouse
 		std::vector<std::wstring> wrapped; // label lines, filled by layout
 	};
 

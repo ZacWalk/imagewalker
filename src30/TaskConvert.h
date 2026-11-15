@@ -22,10 +22,9 @@ namespace iw
 
 		std::wstring settings_problem(const Settings& settings);
 		tasks::TaskPlan analyze(const std::vector<std::filesystem::path>& sources, const Settings& settings,
-		                       const std::stop_token& stop = {}, const tasks::ProgressFunction& progress = {});
+		                        const std::stop_token& stop = {}, const tasks::ProgressFunction& progress = {});
 		std::wstring describe_changes(const tasks::TaskRow& row, const Settings& settings);
-		tasks::RunOptions run_options(const Settings& settings,
-		                             const std::vector<std::filesystem::path>& originals);
+		tasks::RunOptions run_options(const Settings& settings, const std::vector<std::filesystem::path>& originals);
 	}
 
 	// Preserves aspect ratio and only ever scales down: a photo already inside the limit is

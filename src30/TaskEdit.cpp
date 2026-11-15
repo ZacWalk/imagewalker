@@ -74,11 +74,11 @@ namespace iw
 		bool valid_image(const files::DecodedImage& image)
 		{
 			return image.width > 0 && image.height > 0 &&
-				static_cast<std::uint64_t>(image.width) * image.height <= image.pixels.size();
+			       static_cast<std::uint64_t>(image.width) * image.height <= image.pixels.size();
 		}
 
-		void draw_edge(const ui::CanvasRenderer& renderer, app::pointi from, const app::pointi to,
-			const color value, const int thickness)
+		void draw_edge(const ui::CanvasRenderer& renderer, app::pointi from, const app::pointi to, const color value,
+		               const int thickness)
 		{
 			// The renderer facade exposes filled rectangles, not native line primitives.
 			// Coalesce Bresenham pixels into horizontal runs to avoid one draw per pixel.
@@ -91,17 +91,26 @@ namespace iw
 				const auto previous = from;
 				if (from == to)
 				{
-					renderer.fill({(std::min)(run.x, from.x), from.y,
-						std::abs(from.x - run.x) + thickness, thickness}, value);
+					renderer.fill({(std::min)(run.x, from.x), from.y, std::abs(from.x - run.x) + thickness, thickness},
+					              value);
 					break;
 				}
 				const int twice = error * 2;
-				if (twice >= dy) { error += dy; from.x += sx; }
-				if (twice <= dx) { error += dx; from.y += sy; }
+				if (twice >= dy)
+				{
+					error += dy;
+					from.x += sx;
+				}
+				if (twice <= dx)
+				{
+					error += dx;
+					from.y += sy;
+				}
 				if (from.y != previous.y)
 				{
-					renderer.fill({(std::min)(run.x, previous.x), previous.y,
-						std::abs(previous.x - run.x) + thickness, thickness}, value);
+					renderer.fill({(std::min)(run.x, previous.x), previous.y, std::abs(previous.x - run.x) + thickness,
+					               thickness},
+					              value);
 					run = from;
 				}
 			}
@@ -113,15 +122,15 @@ namespace iw
 	{
 		if (source.empty() || source.filename().empty()) return {};
 		const auto extension = source.extension().wstring();
-		const auto first = source.parent_path() / (source.stem().wstring() + L"-edit" + extension);
+		auto first = source.parent_path() / (source.stem().wstring() + L"-edit" + extension);
 		std::error_code error;
 		const bool exists = std::filesystem::exists(files::native_path(first), error);
 		if (error) return {};
 		if (!exists) return first;
 		for (int number = 2; number < 4096; ++number)
 		{
-			const auto candidate = source.parent_path() /
-				std::format(L"{}-edit {}{}", source.stem().wstring(), number, extension);
+			auto candidate = source.parent_path() /
+			                 std::format(L"{}-edit {}{}", source.stem().wstring(), number, extension);
 			error.clear();
 			const bool taken = std::filesystem::exists(files::native_path(candidate), error);
 			if (error) return {};
@@ -133,17 +142,15 @@ namespace iw
 	void TaskEdit::set_photo(const std::filesystem::path& path)
 	{
 		const auto found = std::ranges::find_if(targets_, [&path](const std::filesystem::path& value)
-		{
-			return paths::equal(value, path);
-		});
+		{ return paths::equal(value, path); });
 		index_ = found == targets_.end() ? 0 : static_cast<size_t>(found - targets_.begin());
 		path_ = path;
 	}
 
 	void TaskEdit::build_controls()
 	{
-		const auto slider = [this](const int id, const wchar_t* label, const int minimum,
-		                                    const int maximum, const int value)
+		const auto slider =
+			[this](const int id, const wchar_t* label, const int minimum, const int maximum, const int value)
 		{
 			ui::Control control;
 			control.id = id;
@@ -152,7 +159,11 @@ namespace iw
 			control.minimum = minimum;
 			control.maximum = maximum;
 			control.value = value;
-			control.changed = [this, id] { controlGroup_ = id; controls_changed(); };
+			control.changed = [this, id]
+			{
+				controlGroup_ = id;
+				controls_changed();
+			};
 			panel_.add(std::move(control));
 		};
 		const auto button = [this](const int id, const wchar_t* label)
@@ -175,9 +186,8 @@ namespace iw
 		ui::Control description;
 		description.id = idDescription;
 		description.kind = ui::ControlKind::label;
-		description.label =
-			L"Drag crop handles, adjust perspective corners, or detect a document. Preview shows "
-			L"the saved result. Nothing is written until you save.";
+		description.label = L"Drag crop handles, adjust perspective corners, or detect a document. Preview shows "
+							L"the saved result. Nothing is written until you save.";
 		panel_.add(std::move(description));
 
 		heading(idGeometryHeading, L"Geometry");
@@ -211,14 +221,20 @@ namespace iw
 		backup.label = L"When overwriting a photo with irreversible changes make an original backup copy";
 		backupOnOverwrite_ = platform::read_integer_setting(L"Edit", L"BackupOnOverwrite", 1) != 0;
 		backup.checked = backupOnOverwrite_;
-		backup.changed = [this] { persist_options(); };
+		backup.changed = [this]
+		{
+			persist_options();
+		};
 		panel_.add(std::move(backup));
 		jpegQuality_ = std::clamp(platform::read_integer_setting(L"Edit", L"JpegQuality", 90), 10, 100);
 		slider(idQuality, L"JPEG save quality", 10, 100, jpegQuality_);
 		if (auto* quality = panel_.find(idQuality))
 		{
 			quality->suffix = L"%";
-			quality->changed = [this] { persist_options(); };
+			quality->changed = [this]
+			{
+				persist_options();
+			};
 		}
 		if (format_keeps_edits(L"photo.webp"))
 		{
@@ -228,14 +244,20 @@ namespace iw
 			if (auto* quality = panel_.find(idWebpQuality))
 			{
 				quality->suffix = L"%";
-				quality->changed = [this] { persist_options(); };
+				quality->changed = [this]
+				{
+					persist_options();
+				};
 			}
 			ui::Control lossless;
 			lossless.id = idWebpLossless;
 			lossless.kind = ui::ControlKind::checkBox;
 			lossless.label = L"WebP lossless compression";
 			lossless.checked = webpLossless_;
-			lossless.changed = [this] { persist_options(); };
+			lossless.changed = [this]
+			{
+				persist_options();
+			};
 			panel_.add(std::move(lossless));
 			panel_.set_enabled(idWebpQuality, !webpLossless_);
 		}
@@ -279,7 +301,10 @@ namespace iw
 
 	tasks::TaskRunner::AnalyzeFunction TaskEdit::make_analyzer()
 	{
-		return [](const std::stop_token&, const tasks::ProgressFunction&) { return tasks::TaskPlan{}; };
+		return [](const std::stop_token&, const tasks::ProgressFunction&)
+		{
+			return tasks::TaskPlan{};
+		};
 	}
 
 	void TaskEdit::load_photo()
@@ -296,8 +321,9 @@ namespace iw
 		{
 			loading_ = false;
 			panel_.set_interactive(false);
-			set_status(path_.empty() ? L"No editable photo." :
-				L"This file is no longer an editable photo. It may be read-only, missing or unsupported.");
+			set_status(path_.empty()
+			               ? L"No editable photo."
+			               : L"This file is no longer an editable photo. It may be read-only, missing or unsupported.");
 			refresh_commands();
 			invalidate();
 			return;
@@ -319,7 +345,10 @@ namespace iw
 					decoded = files::load_image_for_area(path, previewLimit, previewLimit);
 				if (!snapshot || !files::matches_snapshot(path, *snapshot)) decoded = {};
 			}
-			catch (...) { decoded = {}; }
+			catch (...)
+			{
+				decoded = {};
+			}
 			platform::queue_ui([weak, path, generation, snapshot, decoded = std::move(decoded)]() mutable
 			{
 				const auto self = std::static_pointer_cast<TaskEdit>(weak.lock());
@@ -355,15 +384,14 @@ namespace iw
 			return;
 		}
 		const app::sizei original{source_.originalWidth > 0 ? source_.originalWidth : source_.width,
-			source_.originalHeight > 0 ? source_.originalHeight : source_.height};
+		                          source_.originalHeight > 0 ? source_.originalHeight : source_.height};
 		const app::sizei frame = edits::transformed_size(original, edits_);
 		const app::recti crop = edits::effective_crop(original, edits_);
 		set_status(source_.width > 0
-			           ? std::format(L"{} - {} of {} - {} x {}{}", path_.filename().wstring(), index_ + 1,
-			                         targets_.size(), crop.width ? crop.width : frame.width,
-			                         crop.height ? crop.height : frame.height,
-			                         dirty() ? L" - modified" : L"")
-			           : std::format(L"{} could not be decoded.", path_.filename().wstring()));
+		               ? std::format(L"{} - {} of {} - {} x {}{}", path_.filename().wstring(), index_ + 1,
+		                             targets_.size(), crop.width ? crop.width : frame.width,
+		                             crop.height ? crop.height : frame.height, dirty() ? L" - modified" : L"")
+		               : std::format(L"{} could not be decoded.", path_.filename().wstring()));
 	}
 
 	void TaskEdit::rebuild_preview(const app::sizei pane)
@@ -403,24 +431,25 @@ namespace iw
 		case idPerspective:
 			perspectiveHandles_ = true;
 			showResult_ = false;
-			set_status(L"Drag the four corners on the original photo, clockwise from top-left. Preview shows the corrected result.");
+			set_status(
+				L"Drag the four corners on the original photo, clockwise from top-left. Preview shows the corrected result.");
 			invalidate();
 			return;
 		case idCrop:
 			perspectiveHandles_ = false;
 			showResult_ = false;
-			set_status(L"Drag an edge or corner to crop; drag inside to move the crop. Preview shows the saved result.");
+			set_status(
+				L"Drag an edge or corner to crop; drag inside to move the crop. Preview shows the saved result.");
 			invalidate();
 			return;
-		case idResetCrop:
-			edits_.crop = {};
-			break;
+		case idResetCrop: edits_.crop = {}; break;
 		case idAutoDocument:
 			if (const auto corners = edits::detect_document(source_))
 			{
 				if (app::sizei{edits::perspective_size(original_size(), *corners)}.width < 2)
 				{
-					set_status(L"The detected perspective exceeds the supported image size. Adjust the corners manually.");
+					set_status(
+						L"The detected perspective exceeds the supported image size. Adjust the corners manually.");
 					return;
 				}
 				edits_.perspective = corners;
@@ -432,7 +461,8 @@ namespace iw
 			}
 			else
 			{
-				set_status(L"No document detected. A complete, contrasting four-sided page is required; adjust perspective corners manually.");
+				set_status(
+					L"No document detected. A complete, contrasting four-sided page is required; adjust perspective corners manually.");
 				return;
 			}
 			break;
@@ -448,7 +478,8 @@ namespace iw
 				const auto current = edits::apply(source_, geometry, false);
 				if (!valid_image(current))
 				{
-					set_status(L"The perspective could not be rendered within the image memory limits. The draft has been kept.");
+					set_status(
+						L"The perspective could not be rendered within the image memory limits. The draft has been kept.");
 					return;
 				}
 				auto candidate = edits_;
@@ -484,9 +515,7 @@ namespace iw
 			edits_.reset_color();
 			write_controls();
 			break;
-		default:
-			TaskView::control_activated(control);
-			return;
+		default: TaskView::control_activated(control); return;
 		}
 		history_.record(previous, edits_);
 		set_status_for_photo();
@@ -496,13 +525,15 @@ namespace iw
 
 	std::vector<platform::ToolbarItem> TaskEdit::toolbar_items()
 	{
-		const auto make = [](std::wstring name, std::function<void()> invoke,
-		                     std::function<bool()> enabled = {})
+		const auto make = [](std::wstring name, std::function<void()> invoke, std::function<bool()> enabled = {})
 		{
 			auto command = std::make_shared<platform::Command>();
 			command->name = std::move(name);
 			command->tooltip = command->name;
-			command->toolbarText = [text = command->name] { return text; };
+			command->toolbarText = [text = command->name]
+			{
+				return text;
+			};
 			command->invoke = std::move(invoke);
 			command->enabled = std::move(enabled);
 			return command;
@@ -514,27 +545,32 @@ namespace iw
 			showResult_ = !showResult_;
 			invalidate();
 		});
-		preview->checked = [this] { return showResult_; };
+		preview->checked = [this]
+		{
+			return showResult_;
+		};
 		auto previous = make(L"Save and open previous", [this] { step_photo(-1, true); },
 		                     [this] { return !saving_ && !loading_ && targets_.size() > 1; });
 		auto next = make(L"Save and open next", [this] { step_photo(1, true); },
 		                 [this] { return !saving_ && !loading_ && targets_.size() > 1; });
 		auto saveAs = make(L"Save as", [this] { save_as(); },
-			[this] { return !saving_ && !loading_ && valid_image(source_); });
+		                   [this] { return !saving_ && !loading_ && valid_image(source_); });
 		auto saveCommand = make(L"Save", [this] { save(); },
-			[this] { return !saving_ && !loading_ && dirty() && valid_image(source_); });
+		                        [this] { return !saving_ && !loading_ && dirty() && valid_image(source_); });
 		auto undoCommand = make(L"Undo", [this] { undo(false); },
-			[this] { return !saving_ && !loading_ && history_.can_undo(); });
+		                        [this] { return !saving_ && !loading_ && history_.can_undo(); });
 		auto redoCommand = make(L"Redo", [this] { undo(true); },
-			[this] { return !saving_ && !loading_ && history_.can_redo(); });
-		std::vector<platform::ToolbarItem> items{
-			platform::ToolbarItem::action(preview), platform::ToolbarItem::separator(),
-			platform::ToolbarItem::action(undoCommand), platform::ToolbarItem::action(redoCommand),
-			platform::ToolbarItem::separator(),
-			platform::ToolbarItem::action(previous), platform::ToolbarItem::action(next),
-			platform::ToolbarItem::action(saveAs), platform::ToolbarItem::action(saveCommand),
-			platform::ToolbarItem::separator()
-		};
+		                        [this] { return !saving_ && !loading_ && history_.can_redo(); });
+		std::vector<platform::ToolbarItem> items{platform::ToolbarItem::action(preview),
+		                                         platform::ToolbarItem::separator(),
+		                                         platform::ToolbarItem::action(undoCommand),
+		                                         platform::ToolbarItem::action(redoCommand),
+		                                         platform::ToolbarItem::separator(),
+		                                         platform::ToolbarItem::action(previous),
+		                                         platform::ToolbarItem::action(next),
+		                                         platform::ToolbarItem::action(saveAs),
+		                                         platform::ToolbarItem::action(saveCommand),
+		                                         platform::ToolbarItem::separator()};
 		append_window_commands(items);
 		return items;
 	}
@@ -548,9 +584,7 @@ namespace iw
 
 		const int stripHeight = targets_.size() > 1 ? (std::min)(metric(72), bounds.height) : 0;
 		photoBounds_ = {bounds.x, bounds.y, bounds.width, (std::max)(0, bounds.height - stripHeight)};
-		stripBounds_ = {
-			bounds.x, photoBounds_.bottom(), bounds.width, (std::max)(0, stripHeight - metric(4))
-		};
+		stripBounds_ = {bounds.x, photoBounds_.bottom(), bounds.width, (std::max)(0, stripHeight - metric(4))};
 		renderer.fill(photoBounds_, face);
 		renderer.outline(photoBounds_, shadow);
 
@@ -564,14 +598,13 @@ namespace iw
 			{
 				if (x + cell > stripBounds_.right()) break;
 				const app::recti tile{x, stripBounds_.y, cell, stripBounds_.height};
-				renderer.fill(tile, item == index_
-					? platform::system_color(platform::SystemColor::highlight) : face);
+				renderer.fill(tile, item == index_ ? platform::system_color(platform::SystemColor::highlight) : face);
 				renderer.outline(tile, shadow);
 				renderer.text(targets_[item].stem().wstring(), tile,
-					item == index_ ? platform::system_color(platform::SystemColor::highlightText)
-					               : platform::system_color(platform::SystemColor::windowText),
-					platform::TextFormat::center | platform::TextFormat::verticalCenter |
-						platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
+				              item == index_ ? platform::system_color(platform::SystemColor::highlightText)
+				                             : platform::system_color(platform::SystemColor::windowText),
+				              platform::TextFormat::center | platform::TextFormat::verticalCenter |
+				                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
 				x += cell + metric(4);
 			}
 		}
@@ -580,7 +613,7 @@ namespace iw
 		{
 			renderer.text(loading_ ? L"Loading..." : L"No photo to edit.", photoBounds_, gray,
 			              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-			              platform::TextFormat::singleLine);
+			                  platform::TextFormat::singleLine);
 			return;
 		}
 
@@ -589,29 +622,33 @@ namespace iw
 		if (preview.width <= 0) return;
 		// Preview off keeps the whole straightened frame so the emptied corners stay visible.
 		const auto previewEdits = edits::scaled_edits(edits_,
-			{source_.originalWidth > 0 ? source_.originalWidth : source_.width,
-			 source_.originalHeight > 0 ? source_.originalHeight : source_.height},
-			{preview.width, preview.height});
+		                                              {source_.originalWidth > 0 ? source_.originalWidth
+		                                                                         : source_.width,
+		                                               source_.originalHeight > 0 ? source_.originalHeight
+		                                                                          : source_.height},
+		                                              {preview.width, preview.height});
 		const bool selectingCorners = perspectiveHandles_ && !showResult_;
 		files::DecodedImage shown;
-		try { shown = selectingCorners ? preview : edits::apply(preview, previewEdits, showResult_); }
+		try
+		{
+			shown = selectingCorners ? preview : edits::apply(preview, previewEdits, showResult_);
+		}
 		catch (const std::bad_alloc&)
 		{
 			renderer.text(L"Not enough memory to render this draft.", photoBounds_, gray,
-				platform::TextFormat::center | platform::TextFormat::singleLine);
+			              platform::TextFormat::center | platform::TextFormat::singleLine);
 			return;
 		}
 		if (!valid_image(shown))
 		{
-			renderer.text(L"The perspective exceeds the supported image size or cannot be rendered.", photoBounds_, gray,
-				platform::TextFormat::center | platform::TextFormat::singleLine);
+			renderer.text(L"The perspective exceeds the supported image size or cannot be rendered.", photoBounds_,
+			              gray, platform::TextFormat::center | platform::TextFormat::singleLine);
 			return;
 		}
-		const app::recti fitted = ui::fit_centered({shown.width, shown.height}, {
-			                                      photoBounds_.x + metric(8), photoBounds_.y + metric(8),
-			                                      (std::max)(1, photoBounds_.width - metric(16)),
-			                                      (std::max)(1, photoBounds_.height - metric(16))
-		                                      });
+		const app::recti fitted = ui::fit_centered({shown.width, shown.height},
+		                                           {photoBounds_.x + metric(8), photoBounds_.y + metric(8),
+		                                            (std::max)(1, photoBounds_.width - metric(16)),
+		                                            (std::max)(1, photoBounds_.height - metric(16))});
 		renderer.image({shown.width, shown.height, shown.pixels, true, 0}, fitted);
 		renderer.outline(fitted, shadow);
 		imageBounds_ = fitted;
@@ -630,12 +667,12 @@ namespace iw
 			std::array<app::pointi, 4> points;
 			for (size_t i = 0; i < corners.size(); ++i)
 				points[i] = {fitted.x + static_cast<int>(std::lround(corners[i].x * (fitted.width - 1))),
-					fitted.y + static_cast<int>(std::lround(corners[i].y * (fitted.height - 1)))};
+				             fitted.y + static_cast<int>(std::lround(corners[i].y * (fitted.height - 1)))};
 			for (size_t i = 0; i < points.size(); ++i)
 				draw_edge(renderer, points[i], points[(i + 1) % 4], highlight, metric(2));
 			for (const auto p : points) handle(p);
 			renderer.text(L"Original photo - perspective corners", {fitted.x, photoBounds_.y, fitted.width, metric(22)},
-				gray, platform::TextFormat::center | platform::TextFormat::singleLine);
+			              gray, platform::TextFormat::center | platform::TextFormat::singleLine);
 		}
 		else
 		{
@@ -650,19 +687,22 @@ namespace iw
 	app::sizei TaskEdit::original_size() const
 	{
 		return {source_.originalWidth > 0 ? source_.originalWidth : source_.width,
-			source_.originalHeight > 0 ? source_.originalHeight : source_.height};
+		        source_.originalHeight > 0 ? source_.originalHeight : source_.height};
 	}
 
 	app::recti TaskEdit::displayed_crop() const
 	{
 		const app::sizei frame = edits::transformed_size(original_size(), edits_);
 		const app::recti crop = edits::effective_crop(original_size(), edits_);
-		if (frame.width <= 0 || frame.height <= 0 || imageBounds_.width <= 0 || imageBounds_.height <= 0)
-			return {};
+		if (frame.width <= 0 || frame.height <= 0 || imageBounds_.width <= 0 || imageBounds_.height <= 0) return {};
 		const auto x = [&](const int p)
-			{ return imageBounds_.x + static_cast<int>(static_cast<double>(p) * imageBounds_.width / frame.width); };
+		{
+			return imageBounds_.x + static_cast<int>(static_cast<double>(p) * imageBounds_.width / frame.width);
+		};
 		const auto y = [&](const int p)
-			{ return imageBounds_.y + static_cast<int>(static_cast<double>(p) * imageBounds_.height / frame.height); };
+		{
+			return imageBounds_.y + static_cast<int>(static_cast<double>(p) * imageBounds_.height / frame.height);
+		};
 		return {x(crop.x), y(crop.y), x(crop.right()) - x(crop.x), y(crop.bottom()) - y(crop.y)};
 	}
 
@@ -707,19 +747,28 @@ namespace iw
 				finish_drag();
 				return true;
 			}
-			if (message == platform::MouseMessage::leftButtonDown) { finish_drag(); }
+			if (message == platform::MouseMessage::leftButtonDown)
+			{
+				finish_drag();
+			}
 			else if (message == platform::MouseMessage::move)
 			{
-				if (!input.leftButton) { finish_drag(); return true; }
+				if (!input.leftButton)
+				{
+					finish_drag();
+					return true;
+				}
 				if (input.point == dragStart_) edits_ = beforeDrag_;
 				else if (cornerDrag_ >= 0 && imageBounds_.width > 1 && imageBounds_.height > 1)
 				{
 					auto corners = edits_.perspective.value_or(edits::whole_picture);
-					corners[static_cast<size_t>(cornerDrag_)] = {
-						std::clamp(static_cast<double>(input.point.x - imageBounds_.x) / (imageBounds_.width - 1), 0.0, 1.0),
-						std::clamp(static_cast<double>(input.point.y - imageBounds_.y) / (imageBounds_.height - 1), 0.0, 1.0)};
+					corners[static_cast<size_t>(cornerDrag_)] =
+						{std::clamp(static_cast<double>(input.point.x - imageBounds_.x) / (imageBounds_.width - 1), 0.0,
+					                1.0),
+					     std::clamp(static_cast<double>(input.point.y - imageBounds_.y) / (imageBounds_.height - 1),
+					                0.0, 1.0)};
 					if (edits::valid_quadrilateral(corners) &&
-						app::sizei{edits::perspective_size(original_size(), corners)}.width >= 2)
+					    app::sizei{edits::perspective_size(original_size(), corners)}.width >= 2)
 					{
 						edits_.perspective = corners;
 						edits_.crop = {};
@@ -728,11 +777,15 @@ namespace iw
 				else if (imageBounds_.width > 0 && imageBounds_.height > 0)
 				{
 					const app::sizei size = edits::transformed_size(original_size(), edits_);
-					const app::pointi delta{
-						static_cast<int>(std::lround(static_cast<double>(input.point.x - dragStart_.x) * size.width / imageBounds_.width)),
-						static_cast<int>(std::lround(static_cast<double>(input.point.y - dragStart_.y) * size.height / imageBounds_.height))};
+					const app::pointi delta{static_cast<int>(
+												std::lround(static_cast<double>(input.point.x - dragStart_.x) *
+					                                        size.width / imageBounds_.width)),
+					                        static_cast<int>(
+												std::lround(static_cast<double>(input.point.y - dragStart_.y) *
+					                                        size.height / imageBounds_.height))};
 					const auto moved = edits::drag_crop(dragCrop_,
-						app::recti{edits::crop_bounds(original_size(), edits_)}, cropDrag_, delta);
+					                                    app::recti{edits::crop_bounds(original_size(), edits_)},
+					                                    cropDrag_, delta);
 					if (moved == dragCrop_) edits_.crop = beforeDrag_.crop;
 					else edits_.crop = static_cast<::core::recti>(moved);
 				}
@@ -741,18 +794,23 @@ namespace iw
 				return true;
 			}
 		}
-		if (message == platform::MouseMessage::leftButtonDown && !loading_ && !saving_ &&
-			!showResult_ && imageBounds_.width > 1 && imageBounds_.height > 1 && valid_image(source_))
+		if (message == platform::MouseMessage::leftButtonDown && !loading_ && !saving_ && !showResult_ &&
+		    imageBounds_.width > 1 && imageBounds_.height > 1 && valid_image(source_))
 		{
 			if (perspectiveHandles_)
 			{
 				const auto corners = edits_.perspective.value_or(edits::whole_picture);
 				for (size_t i = 0; i < corners.size(); ++i)
 				{
-					const app::pointi p{imageBounds_.x + static_cast<int>(std::lround(corners[i].x * (imageBounds_.width - 1))),
-						imageBounds_.y + static_cast<int>(std::lround(corners[i].y * (imageBounds_.height - 1)))};
+					const app::pointi p{imageBounds_.x +
+					                        static_cast<int>(std::lround(corners[i].x * (imageBounds_.width - 1))),
+					                    imageBounds_.y +
+					                        static_cast<int>(std::lround(corners[i].y * (imageBounds_.height - 1)))};
 					if (std::abs(input.point.x - p.x) <= metric(9) && std::abs(input.point.y - p.y) <= metric(9))
-					{ cornerDrag_ = static_cast<int>(i); break; }
+					{
+						cornerDrag_ = static_cast<int>(i);
+						break;
+					}
 				}
 			}
 			else cropDrag_ = edits::crop_handle(displayed_crop(), input.point, metric(8));
@@ -765,8 +823,7 @@ namespace iw
 				return true;
 			}
 		}
-		if (message != platform::MouseMessage::leftButtonDown || !stripBounds_.contains(input.point))
-			return false;
+		if (message != platform::MouseMessage::leftButtonDown || !stripBounds_.contains(input.point)) return false;
 		if (loading_ || saving_) return true;
 		const int cell = (std::max)(metric(24), stripBounds_.height) + metric(4);
 		const auto visible = static_cast<size_t>((std::max)(1, stripBounds_.width / cell));
@@ -778,11 +835,13 @@ namespace iw
 
 	bool TaskEdit::content_key(const platform::KeyInput& input)
 	{
+		// clang-format off
 		if (input.key == platform::KeyCode::escape && content_dragging()) { finish_drag(true); return true; }
 		if (input.control && std::towupper(input.character) == L'Z') { undo(input.shift); return true; }
 		if (input.control && std::towupper(input.character) == L'Y') { undo(true); return true; }
 		if (input.key == platform::KeyCode::left) return step_photo(-1, false);
 		if (input.key == platform::KeyCode::right) return step_photo(1, false);
+		// clang-format on
 		return false;
 	}
 
@@ -804,10 +863,9 @@ namespace iw
 	{
 		if (const auto* backup = panel_.find(idBackup)) backupOnOverwrite_ = backup->checked;
 		if (const auto* quality = panel_.find(idQuality)) jpegQuality_ = std::clamp(quality->value, 10, 100);
-		std::vector<platform::IntegerSetting> settings{
-			platform::IntegerSetting{L"JpegQuality", jpegQuality_},
-			platform::IntegerSetting{L"BackupOnOverwrite", backupOnOverwrite_ ? 1 : 0}
-		};
+		std::vector<platform::IntegerSetting> settings{platform::IntegerSetting{L"JpegQuality", jpegQuality_},
+		                                               platform::IntegerSetting{L"BackupOnOverwrite",
+		                                                                        backupOnOverwrite_ ? 1 : 0}};
 		if (const auto* quality = panel_.find(idWebpQuality))
 		{
 			webpQuality_ = std::clamp(quality->value, 1, 100);
@@ -849,8 +907,8 @@ namespace iw
 		if (!inPlace)
 		{
 			if (paths::equal(path_, destination) ||
-				(exists && std::filesystem::equivalent(files::native_path(path_),
-					files::native_path(destination), error)))
+			    (exists &&
+			     std::filesystem::equivalent(files::native_path(path_), files::native_path(destination), error)))
 				return fail(L"Save as must use a different file so the original is left unchanged.");
 			if (error) return fail(L"The destination could not be checked. Nothing was saved.");
 		}
@@ -860,7 +918,8 @@ namespace iw
 				return fail(L"The destination is read-only or is not a regular file. Choose another filename.");
 		}
 		if (!sourceSnapshot_ || !files::matches_snapshot(path_, *sourceSnapshot_))
-			return fail(L"The source photo changed or is no longer available. Nothing was saved; the draft has been kept.");
+			return fail(
+				L"The source photo changed or is no longer available. Nothing was saved; the draft has been kept.");
 		if (!inPlace && exists)
 		{
 			platform::ChoiceDefinition definition;
@@ -896,66 +955,69 @@ namespace iw
 			options.carry = files::CarryMetadata::all;
 			const auto workerError = std::make_shared<std::wstring>();
 			const bool saved = platform::run_with_status(frame_, title(),
-				std::format(L"Saving {}...", destination.filename().wstring()),
-				[source = path_, sourceSnapshot = *sourceSnapshot_, destination,
-				 destinationSnapshot = *destinationSnapshot, value = edits_, backup, options,
-				 format = *format, workerError]
+			                                             std::format(L"Saving {}...", destination.filename().wstring()),
+			                                             [source = path_, sourceSnapshot = *sourceSnapshot_,
+			                                              destination, destinationSnapshot = *destinationSnapshot,
+			                                              value = edits_, backup, options, format = *format,
+			                                              workerError]
+			{
+				const auto unchanged = [&]
 				{
-					const auto unchanged = [&]
+					if (!files::matches_snapshot(source, sourceSnapshot))
 					{
-						if (!files::matches_snapshot(source, sourceSnapshot))
-						{
-							*workerError = L"The source photo changed while saving. Nothing was saved; the draft has been kept.";
-							return false;
-						}
-						if (!files::matches_snapshot(destination, destinationSnapshot))
-						{
-							*workerError = L"The destination changed while saving. Nothing was replaced.";
-							return false;
-						}
-						return true;
-					};
-					if (!unchanged()) return false;
-					// Never substitute the scaled preview when the full-resolution decode fails.
-					const auto full = files::load_image(source);
-					if (!valid_image(full))
-					{
-						*workerError = L"The full-resolution photo could not be decoded. Nothing was saved.";
+						*workerError =
+							L"The source photo changed while saving. Nothing was saved; the draft has been kept.";
 						return false;
 					}
-					const auto rendered = edits::apply(full, value);
-					if (!valid_image(rendered))
+					if (!files::matches_snapshot(destination, destinationSnapshot))
 					{
-						*workerError = L"These edits leave no usable image. Adjust or reset the geometry.";
+						*workerError = L"The destination changed while saving. Nothing was replaced.";
 						return false;
 					}
-					if (!unchanged()) return false;
-					auto journal = undo::history().begin(L"Photo Edit");
-					if (!journal->protect({destination}, *workerError)) return false;
-					const bool written = files::save_image(rendered, destination, format, options, destinationSnapshot.exists, [&]
+					return true;
+				};
+				if (!unchanged()) return false;
+				// Never substitute the scaled preview when the full-resolution decode fails.
+				const auto full = files::load_image(source);
+				if (!valid_image(full))
+				{
+					*workerError = L"The full-resolution photo could not be decoded. Nothing was saved.";
+					return false;
+				}
+				const auto rendered = edits::apply(full, value);
+				if (!valid_image(rendered))
+				{
+					*workerError = L"These edits leave no usable image. Adjust or reset the geometry.";
+					return false;
+				}
+				if (!unchanged()) return false;
+				auto journal = undo::history().begin(L"Photo Edit");
+				if (!journal->protect({destination}, *workerError)) return false;
+				const bool written = files::save_image(rendered, destination, format, options,
+				                                       destinationSnapshot.exists, [&]
+				{
+					if (!unchanged() || !journal->validate_before({destination}, *workerError)) return false;
+					if (backup && files::create_original_backup(destination).empty())
 					{
-						if (!unchanged() || !journal->validate_before({destination}, *workerError)) return false;
-						if (backup && files::create_original_backup(destination).empty())
-						{
-							*workerError = L"The original backup copy could not be written, so nothing was saved.";
-							return false;
-						}
-						return unchanged() && journal->validate_before({destination}, *workerError);
-					});
-					std::wstring recordError;
-					if (written && !journal->completed({destination}, recordError))
-						*workerError = L"The photo was saved, but Undo recording failed. " + recordError;
-					if (!journal->finish(recordError))
-					{
-						if (!workerError->empty()) *workerError += L" ";
-						*workerError += written ? L"The photo was saved. " : L"Nothing was saved. ";
-						*workerError += recordError;
+						*workerError = L"The original backup copy could not be written, so nothing was saved.";
+						return false;
 					}
-					return written;
+					return unchanged() && journal->validate_before({destination}, *workerError);
 				});
+				std::wstring recordError;
+				if (written && !journal->completed({destination}, recordError))
+					*workerError = L"The photo was saved, but Undo recording failed. " + recordError;
+				if (!journal->finish(recordError))
+				{
+					if (!workerError->empty()) *workerError += L" ";
+					*workerError += written ? L"The photo was saved. " : L"Nothing was saved. ";
+					*workerError += recordError;
+				}
+				return written;
+			});
 			if (!saved)
 				return fail(workerError->empty() ? L"The photo could not be saved. The draft has been kept."
-				                               : std::move(*workerError));
+				                                 : std::move(*workerError));
 			if (!workerError->empty()) platform::show_error(*workerError, L"Photo Edit recovery", frame_);
 			return saved;
 		}
@@ -1008,8 +1070,8 @@ namespace iw
 			platform::show_error(L"A free JPEG filename could not be found.", title(), frame_);
 			return false;
 		}
-		const auto chosen = platform::choose_save_file(frame_,
-			{L"JPEG image", L"*.jpg;*.jpeg", L".jpg", proposed.filename().wstring(), proposed.parent_path()});
+		const auto chosen = platform::choose_save_file(frame_, {L"JPEG image", L"*.jpg;*.jpeg", L".jpg",
+		                                                        proposed.filename().wstring(), proposed.parent_path()});
 		if (!chosen) return false;
 		if (format_for(*chosen) != files::ImageSaveFormat::jpeg)
 		{
@@ -1040,8 +1102,7 @@ namespace iw
 		edits_ = {};
 		write_controls();
 		persist_options();
-		if (host_.saved)
-			platform::queue_ui([saved = host_.saved, path = path_] { saved(path, false); });
+		if (host_.saved) platform::queue_ui([saved = host_.saved, path = path_] { saved(path, false); });
 		load_photo();
 		return true;
 	}
@@ -1058,12 +1119,8 @@ namespace iw
 		}
 		std::wstring filter = L"*.jpg;*.jpeg;*.png;*.bmp;*.tif;*.tiff";
 		if (format_keeps_edits(L"photo.webp")) filter += L";*.webp";
-		const auto chosen = platform::choose_save_file(frame_, {
-			                                               L"Image", filter,
-			                                               proposed.extension().wstring(),
-			                                               proposed.filename().wstring(),
-			                                               proposed.parent_path()
-		                                               });
+		const auto chosen = platform::choose_save_file(frame_, {L"Image", filter, proposed.extension().wstring(),
+		                                                        proposed.filename().wstring(), proposed.parent_path()});
 		if (!chosen) return false;
 		if (!save_to(*chosen, false))
 		{
@@ -1086,14 +1143,12 @@ namespace iw
 			{
 				if (!save()) return false;
 			}
-			else
-				switch (ask_about_draft())
+			else switch (ask_about_draft())
 				{
 				case Leaving::save:
 					if (!save()) return false;
 					break;
-				case Leaving::cancel:
-					return true;
+				case Leaving::cancel: return true;
 				default:
 					edits_ = {};
 					write_controls();

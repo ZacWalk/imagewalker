@@ -40,10 +40,8 @@ namespace iw
 		files::DecodedImage load_bitmap_resource(const platform::BitmapAsset resource, bool& hasAlpha)
 		{
 			const auto bitmap = platform::load_bitmap_resource(resource);
-			files::DecodedImage result{
-				bitmap.size.width, bitmap.size.height, bitmap.pixels,
-				bitmap.size.width, bitmap.size.height
-			};
+			files::DecodedImage result{bitmap.size.width, bitmap.size.height, bitmap.pixels, bitmap.size.width,
+			                           bitmap.size.height};
 			hasAlpha = bitmap.hasAlpha;
 			return result;
 		}
@@ -53,11 +51,9 @@ namespace iw
 
 	bool ImageCanvas::create(const platform::WindowFramePtr& parent)
 	{
-		constexpr std::array resources{
-			platform::BitmapAsset::fileFolder, platform::BitmapAsset::filePhoto,
-			platform::BitmapAsset::fileDocument, platform::BitmapAsset::fileVideo,
-			platform::BitmapAsset::fileAudio, platform::BitmapAsset::fileOther
-		};
+		constexpr std::array resources{platform::BitmapAsset::fileFolder,   platform::BitmapAsset::filePhoto,
+		                               platform::BitmapAsset::fileDocument, platform::BitmapAsset::fileVideo,
+		                               platform::BitmapAsset::fileAudio,    platform::BitmapAsset::fileOther};
 		for (size_t index = 0; index < resources.size(); ++index)
 		{
 			bool hasAlpha = false;
@@ -67,9 +63,7 @@ namespace iw
 			while (detailTypeIcons_[index].width > 32 || detailTypeIcons_[index].height > 32)
 				detailTypeIcons_[index] = files::downsample_bgra_2x(detailTypeIcons_[index]);
 		}
-		reactorBinding_ = std::shared_ptr<FrameReactor>(this, [](FrameReactor*)
-		{
-		});
+		reactorBinding_ = std::shared_ptr<FrameReactor>(this, [](FrameReactor*) {});
 		platform::WindowOptions options;
 		options.className = "ImageWalker30.Canvas";
 		options.child = true;
@@ -93,8 +87,7 @@ namespace iw
 		for (size_t index = 0; index < typeIcons_.size(); ++index)
 		{
 			detailTypeIcons_[index] = typeIcons_[index];
-			while (detailTypeIcons_[index].width / 2 >= detailSize &&
-				detailTypeIcons_[index].height / 2 >= detailSize)
+			while (detailTypeIcons_[index].width / 2 >= detailSize && detailTypeIcons_[index].height / 2 >= detailSize)
 				detailTypeIcons_[index] = files::downsample_bgra_2x(detailTypeIcons_[index]);
 		}
 
@@ -107,8 +100,8 @@ namespace iw
 	void ImageCanvas::reset_thumbnail_cache()
 	{
 		thumbnailsComplete_ = 0;
-		thumbnailTarget_ = static_cast<size_t>(std::ranges::count_if(items_,
-			[](const auto& item) { return has_thumbnail(item.kind); }));
+		thumbnailTarget_ = static_cast<size_t>(
+			std::ranges::count_if(items_, [](const auto& item) { return has_thumbnail(item.kind); }));
 		thumbnails_.assign(items_.size(), {});
 		thumbnailStates_.assign(items_.size(), ThumbnailState::none);
 		thumbnailResidency_.clear();
@@ -121,19 +114,13 @@ namespace iw
 	{
 		retain_displayed_image();
 		const auto item = std::ranges::find_if(items_, [&path](const files::FolderItem& value)
-		{
-			return paths::equal(value.path, path);
-		});
+		{ return paths::equal(value.path, path); });
 		displayedKind_ = item == items_.end()
-			                 ? files::classify(path, std::filesystem::is_directory(files::native_path(path)))
-			                 : item->kind;
+		                     ? files::classify(path, std::filesystem::is_directory(files::native_path(path)))
+		                     : item->kind;
 		const app::recti client = frame_ ? frame_->client_rect() : app::recti{};
-		const int width = primaryView_.bounds.width > 0
-			                  ? primaryView_.bounds.width
-			                  : (std::max)(1, client.width);
-		const int height = primaryView_.bounds.height > 0
-			                   ? primaryView_.bounds.height
-			                   : (std::max)(1, client.height);
+		const int width = primaryView_.bounds.width > 0 ? primaryView_.bounds.width : (std::max)(1, client.width);
+		const int height = primaryView_.bounds.height > 0 ? primaryView_.bounds.height : (std::max)(1, client.height);
 		initialImage_ = {};
 		fullImage_ = {};
 		halfImage_ = {};
@@ -145,8 +132,7 @@ namespace iw
 		path_ = path;
 		primaryView_.sourceWidth = item == items_.end() ? 0 : item->width;
 		primaryView_.sourceHeight = item == items_.end() ? 0 : item->height;
-		primaryView_.zoom.carry_to_source(
-			{primaryView_.sourceWidth, primaryView_.sourceHeight}, primaryView_.bounds);
+		primaryView_.zoom.carry_to_source({primaryView_.sourceWidth, primaryView_.sourceHeight}, primaryView_.bounds);
 		if (displayedKind_ != files::ItemKind::image)
 		{
 			++imageGeneration_;
@@ -158,8 +144,8 @@ namespace iw
 				if (index < thumbnails_.size() && !thumbnails_[index].pixels.empty())
 				{
 					const auto& thumbnail = thumbnails_[index];
-					initialImage_ = {thumbnail.width, thumbnail.height, thumbnail.pixels,
-						thumbnail.originalWidth, thumbnail.originalHeight};
+					initialImage_ = {thumbnail.width, thumbnail.height, thumbnail.pixels, thumbnail.originalWidth,
+					                 thumbnail.originalHeight};
 				}
 			}
 			primaryView_.sourceWidth = initialImage_.width;
@@ -176,18 +162,14 @@ namespace iw
 		primaryLoading_.cap_need_to_source(primaryView_.sourceWidth, primaryView_.sourceHeight);
 		const bool restored = restore_retained_image(path, requestGeneration);
 		const auto thumbnail = std::ranges::find_if(files_, [&path](const std::filesystem::path& value)
-		{
-			return paths::equal(value, path);
-		});
+		{ return paths::equal(value, path); });
 		if (!restored && thumbnail != files_.end())
 		{
 			const auto& cached = thumbnails_[static_cast<size_t>(thumbnail - files_.begin())];
 			if (!cached.pixels.empty())
 			{
-				initialImage_ = {
-					cached.width, cached.height, cached.pixels,
-					cached.originalWidth, cached.originalHeight
-				};
+				initialImage_ = {cached.width, cached.height, cached.pixels, cached.originalWidth,
+				                 cached.originalHeight};
 				primaryView_.sourceWidth = cached.originalWidth;
 				primaryView_.sourceHeight = cached.originalHeight;
 				primaryView_.zoom.set_source({primaryView_.sourceWidth, primaryView_.sourceHeight});
@@ -205,10 +187,7 @@ namespace iw
 	void ImageCanvas::invalidate_file(const std::filesystem::path& path)
 	{
 		if (path.empty()) return;
-		std::erase_if(retainedImages_, [&path](const RetainedImage& image)
-		{
-			return paths::equal(image.path, path);
-		});
+		std::erase_if(retainedImages_, [&path](const RetainedImage& image) { return paths::equal(image.path, path); });
 		if (!paths::equal(path_, path)) return;
 		const auto current = files::snapshot_file(path);
 		if (current && current->exists)
@@ -230,9 +209,7 @@ namespace iw
 	{
 		if (width <= 0 || height <= 0) return;
 		const auto found = std::ranges::find_if(items_, [&path](const files::FolderItem& item)
-		{
-			return paths::equal(item.path, path);
-		});
+		{ return paths::equal(item.path, path); });
 		if (found == items_.end() || (found->width == width && found->height == height)) return;
 		found->width = width;
 		found->height = height;
@@ -241,10 +218,7 @@ namespace iw
 
 	void ImageCanvas::clear_displayed_image()
 	{
-		std::erase_if(retainedImages_, [this](const RetainedImage& image)
-		{
-			return paths::equal(image.path, path_);
-		});
+		std::erase_if(retainedImages_, [this](const RetainedImage& image) { return paths::equal(image.path, path_); });
 		initialImage_ = {};
 		fullImage_ = {};
 		halfImage_ = {};
@@ -272,25 +246,20 @@ namespace iw
 	void ImageCanvas::retain_displayed_image()
 	{
 		if (path_.empty() || displayedKind_ != files::ItemKind::image ||
-			(initialImage_.pixels.empty() && fullImage_.pixels.empty()))
+		    (initialImage_.pixels.empty() && fullImage_.pixels.empty()))
 			return;
 		const auto existing = std::ranges::find_if(retainedImages_, [this](const RetainedImage& value)
-		{
-			return paths::equal(value.path, path_);
-		});
+		{ return paths::equal(value.path, path_); });
 		if (existing != retainedImages_.end()) retainedImages_.erase(existing);
-		retainedImages_.push_back({
-			path_, std::move(initialImage_), std::move(fullImage_), std::move(halfImage_), std::move(quarterImage_)
-		});
+		retainedImages_.push_back(
+			{path_, std::move(initialImage_), std::move(fullImage_), std::move(halfImage_), std::move(quarterImage_)});
 		trim_retained_images();
 	}
 
 	bool ImageCanvas::restore_retained_image(const std::filesystem::path& path, const std::uint64_t generation)
 	{
 		const auto found = std::ranges::find_if(retainedImages_, [&path](const RetainedImage& value)
-		{
-			return paths::equal(value.path, path);
-		});
+		{ return paths::equal(value.path, path); });
 		if (found == retainedImages_.end()) return false;
 		initialImage_ = std::move(found->initial);
 		fullImage_ = std::move(found->full);
@@ -354,7 +323,7 @@ namespace iw
 		const auto exceedsFit = [](const ImageView& value)
 		{
 			return !value.zoom.is_fit() &&
-				value.zoom.effective_scale(value.bounds) > value.zoom.fit_scale(value.bounds) + 1e-9;
+			       value.zoom.effective_scale(value.bounds) > value.zoom.fit_scale(value.bounds) + 1e-9;
 		};
 		return quickZoom_ || exceedsFit(primaryView_) || (fullscreen_ && exceedsFit(comparisonView_));
 	}
@@ -382,11 +351,11 @@ namespace iw
 		const double positionX = quickZoomX_;
 		const double positionY = quickZoomY_;
 		const int x = width > value.bounds.width
-			              ? value.bounds.x + static_cast<int>(positionX * (value.bounds.width - width))
-			              : value.bounds.x + (value.bounds.width - width) / 2;
+		                  ? value.bounds.x + static_cast<int>(positionX * (value.bounds.width - width))
+		                  : value.bounds.x + (value.bounds.width - width) / 2;
 		const int y = height > value.bounds.height
-			              ? value.bounds.y + static_cast<int>(positionY * (value.bounds.height - height))
-			              : value.bounds.y + (value.bounds.height - height) / 2;
+		                  ? value.bounds.y + static_cast<int>(positionY * (value.bounds.height - height))
+		                  : value.bounds.y + (value.bounds.height - height) / 2;
 		return {x, y, width, height};
 	}
 
@@ -401,7 +370,8 @@ namespace iw
 		rebuild_layout();
 		value.zoom.set_explicit_at_source(scale, value.bounds, focus, sourcePoint);
 		if (zoomModeHandler_) zoomModeHandler_(immersive_zoom());
-		if (frame_) frame_->set_cursor(immersive_zoom() ? platform::CursorShape::sizeAll : platform::CursorShape::arrow);
+		if (frame_)
+			frame_->set_cursor(immersive_zoom() ? platform::CursorShape::sizeAll : platform::CursorShape::arrow);
 		if (comparison) request_comparison_image(fullscreenSelection_.secondary());
 		else request_full_image();
 		invalidate();
@@ -416,7 +386,7 @@ namespace iw
 	{
 		const bool comparison = fullscreen_ && activeComparison_;
 		if ((comparison && comparisonImage_.pixels.empty()) ||
-			(!comparison && (collage_active() || !displayed_image())))
+		    (!comparison && (collage_active() || !displayed_image())))
 			return;
 		auto& value = view(comparison);
 		const auto sourcePoint = value.zoom.source_at(value.bounds, focus);
@@ -434,7 +404,8 @@ namespace iw
 			else request_full_image();
 		}
 		if (zoomModeHandler_) zoomModeHandler_(immersive_zoom());
-		if (frame_) frame_->set_cursor(immersive_zoom() ? platform::CursorShape::sizeAll : platform::CursorShape::arrow);
+		if (frame_)
+			frame_->set_cursor(immersive_zoom() ? platform::CursorShape::sizeAll : platform::CursorShape::arrow);
 		invalidate();
 	}
 
@@ -460,10 +431,10 @@ namespace iw
 		const app::recti fittedImage = image_destination(fit_scale(activeComparison_), activeComparison_);
 		if (!fittedImage.contains(point)) return;
 		quickZoomScale_ = 1.0;
-		quickZoomX_ = std::clamp(static_cast<double>(point.x - fittedImage.x) /
-		                         (std::max)(1, fittedImage.width), 0.0, 1.0);
-		quickZoomY_ = std::clamp(static_cast<double>(point.y - fittedImage.y) /
-		                         (std::max)(1, fittedImage.height), 0.0, 1.0);
+		quickZoomX_ = std::clamp(static_cast<double>(point.x - fittedImage.x) / (std::max)(1, fittedImage.width), 0.0,
+		                         1.0);
+		quickZoomY_ = std::clamp(static_cast<double>(point.y - fittedImage.y) / (std::max)(1, fittedImage.height), 0.0,
+		                         1.0);
 		quickZoom_ = true;
 		if (activeComparison_) request_comparison_image(fullscreenSelection_.secondary());
 		else request_full_image();
@@ -486,8 +457,7 @@ namespace iw
 		if (!quickZoom_) return;
 		auto& value = active_view();
 		const app::recti bounds = value.bounds;
-		value.zoom.set_explicit(quickZoomScale_, bounds,
-		                        {bounds.x + bounds.width / 2, bounds.y + bounds.height / 2});
+		value.zoom.set_explicit(quickZoomScale_, bounds, {bounds.x + bounds.width / 2, bounds.y + bounds.height / 2});
 		value.zoom.set_center(quickZoomX_, quickZoomY_);
 		quickZoom_ = false;
 		rebuild_layout();
@@ -500,10 +470,8 @@ namespace iw
 	{
 		if (!quickZoom_) return;
 		const app::recti bounds = active_view().bounds;
-		quickZoomX_ = std::clamp(static_cast<double>(point.x - bounds.x) /
-		                         (std::max)(1, bounds.width), 0.0, 1.0);
-		quickZoomY_ = std::clamp(static_cast<double>(point.y - bounds.y) /
-		                         (std::max)(1, bounds.height), 0.0, 1.0);
+		quickZoomX_ = std::clamp(static_cast<double>(point.x - bounds.x) / (std::max)(1, bounds.width), 0.0, 1.0);
+		quickZoomY_ = std::clamp(static_cast<double>(point.y - bounds.y) / (std::max)(1, bounds.height), 0.0, 1.0);
 		if (frame_) frame_->set_cursor(platform::CursorShape::zoom);
 		invalidate();
 	}
@@ -514,7 +482,8 @@ namespace iw
 		quickZoom_ = false;
 		rebuild_layout();
 		if (zoomModeHandler_) zoomModeHandler_(immersive_zoom());
-		if (frame_) frame_->set_cursor(immersive_zoom() ? platform::CursorShape::sizeAll : platform::CursorShape::arrow);
+		if (frame_)
+			frame_->set_cursor(immersive_zoom() ? platform::CursorShape::sizeAll : platform::CursorShape::arrow);
 		invalidate();
 	}
 
@@ -555,9 +524,7 @@ namespace iw
 		const auto index_of = [this](const std::filesystem::path& value)
 		{
 			const auto found = std::ranges::find_if(files_, [&value](const std::filesystem::path& candidate)
-			{
-				return paths::equal(candidate, value);
-			});
+			{ return paths::equal(candidate, value); });
 			return found == files_.end() ? -1 : static_cast<int>(found - files_.begin());
 		};
 		std::vector<int> selectedIndices;
@@ -624,9 +591,7 @@ namespace iw
 			fullscreenSelection_.reset(static_cast<int>(files_.size()));
 			int primary = -1;
 			const auto displayed = std::ranges::find_if(files_, [this](const std::filesystem::path& value)
-			{
-				return paths::equal(value, path_);
-			});
+			{ return paths::equal(value, path_); });
 			if (displayed != files_.end() && items_[displayed - files_.begin()].kind == files::ItemKind::image)
 				primary = static_cast<int>(displayed - files_.begin());
 			if (primary < 0)
@@ -676,25 +641,21 @@ namespace iw
 
 	void ImageCanvas::request_comparison_image(const int index)
 	{
-		if (index < 0 || index >= static_cast<int>(items_.size()) ||
-			items_[index].kind != files::ItemKind::image)
+		if (index < 0 || index >= static_cast<int>(items_.size()) || items_[index].kind != files::ItemKind::image)
 			return;
 		const auto requestedPath = files_[index];
 		const bool needsFullSize = !comparisonView_.zoom.is_fit() || (quickZoom_ && activeComparison_);
 		if (paths::equal(requestedPath, comparisonPath_) && !comparisonImage_.pixels.empty() &&
-			(!needsFullSize || (comparisonImage_.width == comparisonImage_.originalWidth &&
-				comparisonImage_.height == comparisonImage_.originalHeight)))
+		    (!needsFullSize || (comparisonImage_.width == comparisonImage_.originalWidth &&
+		                        comparisonImage_.height == comparisonImage_.originalHeight)))
 			return;
 		comparisonPath_ = requestedPath;
 		const std::uint64_t requestGeneration = ++comparisonGeneration_;
 		comparisonLoading_.begin(requestGeneration, (std::max)(1, comparisonView_.bounds.width),
 		                         (std::max)(1, comparisonView_.bounds.height),
 		                         comparisonView_.sourceWidth > 0 && comparisonView_.sourceHeight > 0);
-		request_image({
-			comparisonPath_, requestGeneration,
-			(std::max)(1, comparisonView_.bounds.width), (std::max)(1, comparisonView_.bounds.height),
-			needsFullSize, true
-		});
+		request_image({comparisonPath_, requestGeneration, (std::max)(1, comparisonView_.bounds.width),
+		               (std::max)(1, comparisonView_.bounds.height), needsFullSize, true});
 	}
 
 	void ImageCanvas::select_fullscreen_item(const int index, const bool secondary)
@@ -768,7 +729,7 @@ namespace iw
 				if (thumbnailStates_[index] != ThumbnailState::resident) continue;
 				const auto& thumbnail = thumbnails_[index];
 				if (thumbnail.width < target && thumbnail.height < target &&
-					(thumbnail.originalWidth > thumbnail.width || thumbnail.originalHeight > thumbnail.height))
+				    (thumbnail.originalWidth > thumbnail.width || thumbnail.originalHeight > thumbnail.height))
 					thumbnailStates_[index] = ThumbnailState::evicted;
 			}
 		}
@@ -835,7 +796,10 @@ namespace iw
 				{
 					if (exiting.stop_requested()) return;
 					ThumbnailResult result;
-					try { result = decode_thumbnail(request); }
+					try
+					{
+						result = decode_thumbnail(request);
+					}
 					catch (...)
 					{
 						result = {};
@@ -884,9 +848,7 @@ namespace iw
 		// invalidate the decodes already in flight for it. Re-sorting keeps the indices and
 		// changes what they mean, so identity is the path, not the index.
 		if (std::ranges::equal(wanted, collage_, [this](const int index, const CollageCell& cell)
-		{
-			return index == cell.index && paths::equal(files_[index], cell.path);
-		}))
+		{ return index == cell.index && paths::equal(files_[index], cell.path); }))
 			return;
 
 		auto previous = std::move(collage_);
@@ -901,9 +863,7 @@ namespace iw
 		for (const int index : wanted)
 		{
 			const auto carried = std::ranges::find_if(previous, [this, index](const CollageCell& cell)
-			{
-				return cell.state == ThumbnailState::resident && paths::equal(cell.path, files_[index]);
-			});
+			{ return cell.state == ThumbnailState::resident && paths::equal(cell.path, files_[index]); });
 			if (carried != previous.end())
 			{
 				CollageCell cell = std::move(*carried);
@@ -927,10 +887,8 @@ namespace iw
 			{
 				// The cached thumbnail stands in until the cell-sized decode lands.
 				const auto& thumbnail = thumbnails_[index];
-				cell.image = {
-					thumbnail.width, thumbnail.height, thumbnail.pixels,
-					thumbnail.originalWidth, thumbnail.originalHeight
-				};
+				cell.image = {thumbnail.width, thumbnail.height, thumbnail.pixels, thumbnail.originalWidth,
+				              thumbnail.originalHeight};
 				if (cell.source.width <= 0 || cell.source.height <= 0)
 					cell.source = {thumbnail.originalWidth, thumbnail.originalHeight};
 			}
@@ -972,8 +930,7 @@ namespace iw
 			collageDecodeSize_ = decodeSize;
 			for (auto& cell : collage_)
 				if (cell.state == ThumbnailState::resident &&
-					(cell.image.originalWidth > cell.image.width ||
-						cell.image.originalHeight > cell.image.height))
+				    (cell.image.originalWidth > cell.image.width || cell.image.originalHeight > cell.image.height))
 					cell.state = ThumbnailState::none;
 		}
 		std::vector<std::pair<size_t, std::filesystem::path>> batch;
@@ -989,28 +946,33 @@ namespace iw
 		const int requestSize = collageDecodeSize_;
 		platform::queue_work(platform::WorkQueue::thumbnail,
 		                     [this, alive = std::weak_ptr(alive_), generation, requestSize, batch = std::move(batch)]
-		                     {
-			                     const auto exiting = platform::exit_token();
-			                     for (const auto& [cell, path] : batch)
-			                     {
-				                     if (exiting.stop_requested()) return;
-				                     files::DecodedImage image;
-				                     try { image = files::load_thumbnail(path, requestSize, requestSize); }
-				                     catch (...) { image = {}; }
-				                     platform::queue_ui(
-					                     [this, alive, generation, cell, image = std::move(image)]() mutable
-					                     {
-						                     if (!alive.expired()) apply_collage(generation, cell, std::move(image));
-					                     });
-			                     }
-			                     platform::queue_ui([this, alive]
-			                     {
-				                     if (alive.expired()) return;
-				                     collageInFlight_ = false;
-				                     rebuild_layout();
-				                     invalidate();
-			                     });
-		                     });
+		{
+			const auto exiting = platform::exit_token();
+			for (const auto& [cell, path] : batch)
+			{
+				if (exiting.stop_requested()) return;
+				files::DecodedImage image;
+				try
+				{
+					image = files::load_thumbnail(path, requestSize, requestSize);
+				}
+				catch (...)
+				{
+					image = {};
+				}
+				platform::queue_ui([this, alive, generation, cell, image = std::move(image)]() mutable
+				{
+					if (!alive.expired()) apply_collage(generation, cell, std::move(image));
+				});
+			}
+			platform::queue_ui([this, alive]
+			{
+				if (alive.expired()) return;
+				collageInFlight_ = false;
+				rebuild_layout();
+				invalidate();
+			});
+		});
 	}
 
 	void ImageCanvas::apply_collage(const std::uint64_t generation, const size_t cell, files::DecodedImage image)
@@ -1027,9 +989,8 @@ namespace iw
 			items_[target.index].width = image.originalWidth;
 			items_[target.index].height = image.originalHeight;
 		}
-		target.source = image.originalWidth > 0
-			                ? app::sizei{image.originalWidth, image.originalHeight}
-			                : app::sizei{image.width, image.height};
+		target.source = image.originalWidth > 0 ? app::sizei{image.originalWidth, image.originalHeight}
+		                                        : app::sizei{image.width, image.height};
 		target.image = std::move(image);
 		target.state = ThumbnailState::resident;
 		invalidate_image_pane();
@@ -1040,10 +1001,8 @@ namespace iw
 		const int gap = metric(4);
 		for (const auto& cell : collage_)
 		{
-			const app::recti frame{
-				cell.bounds.x + gap / 2, cell.bounds.y + gap / 2,
-				cell.bounds.width - gap, cell.bounds.height - gap
-			};
+			const app::recti frame{cell.bounds.x + gap / 2, cell.bounds.y + gap / 2, cell.bounds.width - gap,
+			                       cell.bounds.height - gap};
 			if (frame.is_empty()) continue;
 			if (cell.image.pixels.empty())
 			{
@@ -1052,7 +1011,7 @@ namespace iw
 			else
 			{
 				const bool alpha = cell.kind != files::ItemKind::image &&
-					typeIconAlpha_[static_cast<size_t>(cell.kind)];
+				                   typeIconAlpha_[static_cast<size_t>(cell.kind)];
 				renderer.image({cell.image.width, cell.image.height, cell.image.pixels, alpha},
 				               ui::fit_centered({cell.image.width, cell.image.height}, frame));
 			}
@@ -1075,20 +1034,19 @@ namespace iw
 		else if (pendingComparison_) request = std::exchange(pendingComparison_, std::nullopt);
 		else return;
 		imageInFlight_ = true;
-		platform::queue_work(platform::WorkQueue::image, [this, alive = std::weak_ptr(alive_), request = std::move(*request)]
+		platform::queue_work(platform::WorkQueue::image,
+		                     [this, alive = std::weak_ptr(alive_), request = std::move(*request)]
 		{
 			ImageResult result;
 			static_cast<ImageRequest&>(result) = request;
 			try
 			{
-				result.image = result.fullSize
-					               ? files::load_image(result.path)
-					               : files::load_image_for_area(result.path, result.width, result.height);
+				result.image = result.fullSize ? files::load_image(result.path)
+				                               : files::load_image_for_area(result.path, result.width, result.height);
 				if (result.fullSize && !result.comparison && !result.image.pixels.empty())
 				{
-					const double fitScale = (std::min)(
-						static_cast<double>(result.width) / result.image.width,
-						static_cast<double>(result.height) / result.image.height);
+					const double fitScale = (std::min)(static_cast<double>(result.width) / result.image.width,
+					                                   static_cast<double>(result.height) / result.image.height);
 					if (fitScale <= 0.25)
 					{
 						auto half = files::downsample_bgra_2x(result.image);
@@ -1121,7 +1079,8 @@ namespace iw
 			invalidate();
 			return;
 		}
-		platform::queue_work(platform::WorkQueue::metadata, [this, alive = std::weak_ptr(alive_), job = std::move(job)]() mutable
+		platform::queue_work(platform::WorkQueue::metadata,
+		                     [this, alive = std::weak_ptr(alive_), job = std::move(job)]() mutable
 		{
 			constexpr size_t chunk = 8;
 			const size_t end = (std::min)(job.offset + chunk, job.paths.size());
@@ -1133,7 +1092,9 @@ namespace iw
 					value = files::read_metadata(job.paths[job.offset]);
 					value.colourProfile = files::read_colour_profile(job.paths[job.offset]);
 				}
-				catch (...) {}
+				catch (...)
+				{
+				}
 				job.values.push_back(std::move(value));
 			}
 			platform::queue_ui([this, alive, job = std::move(job)]() mutable
@@ -1164,20 +1125,18 @@ namespace iw
 			items_[result.index].width = result.originalWidth;
 			items_[result.index].height = result.originalHeight;
 		}
-		thumbnails_[result.index] = {
-			result.width, result.height, std::move(result.pixels),
-			result.originalWidth, result.originalHeight
-		};
+		thumbnails_[result.index] = {result.width, result.height, std::move(result.pixels), result.originalWidth,
+		                             result.originalHeight};
 		if (thumbnailStates_[result.index] != ThumbnailState::resident)
 			thumbnailsComplete_ = (std::min)(thumbnailsComplete_ + 1, thumbnailTarget_);
 		thumbnailStates_[result.index] = ThumbnailState::resident;
 		thumbnailResidency_.push_back(result.index);
 		if (displayedKind_ == files::ItemKind::video && paths::equal(path_, result.path) &&
-			!thumbnails_[result.index].pixels.empty())
+		    !thumbnails_[result.index].pixels.empty())
 		{
 			const auto& thumbnail = thumbnails_[result.index];
-			initialImage_ = {thumbnail.width, thumbnail.height, thumbnail.pixels,
-				thumbnail.originalWidth, thumbnail.originalHeight};
+			initialImage_ = {thumbnail.width, thumbnail.height, thumbnail.pixels, thumbnail.originalWidth,
+			                 thumbnail.originalHeight};
 			primaryView_.sourceWidth = thumbnail.width;
 			primaryView_.sourceHeight = thumbnail.height;
 			primaryView_.zoom.set_source({thumbnail.width, thumbnail.height});
@@ -1208,10 +1167,10 @@ namespace iw
 			else
 			{
 				const bool decodedFullSize = result.image.width == result.image.originalWidth &&
-					result.image.height == result.image.originalHeight;
+				                             result.image.height == result.image.originalHeight;
 				primaryLoading_.cap_need_to_source(result.image.originalWidth, result.image.originalHeight);
-				if (!primaryLoading_.apply(result.generation, ui::LoadingModel::Phase::source,
-				                           result.image.width, result.image.height))
+				if (!primaryLoading_.apply(result.generation, ui::LoadingModel::Phase::source, result.image.width,
+				                           result.image.height))
 				{
 					pump_image();
 					return;
@@ -1231,9 +1190,7 @@ namespace iw
 				primaryView_.zoom.set_source({primaryView_.sourceWidth, primaryView_.sourceHeight});
 				path_ = result.path;
 				const auto item = std::ranges::find_if(files_, [this](const std::filesystem::path& value)
-				{
-					return paths::equal(value, path_);
-				});
+				{ return paths::equal(value, path_); });
 				if (item != files_.end())
 				{
 					const auto index = static_cast<size_t>(item - files_.begin());
@@ -1252,16 +1209,14 @@ namespace iw
 			else
 			{
 				comparisonLoading_.cap_need_to_source(result.image.originalWidth, result.image.originalHeight);
-				if (comparisonLoading_.apply(result.generation, ui::LoadingModel::Phase::source,
-			                                  result.image.width, result.image.height))
+				if (comparisonLoading_.apply(result.generation, ui::LoadingModel::Phase::source, result.image.width,
+				                             result.image.height))
 				{
 					comparisonImage_ = std::move(result.image);
-					comparisonView_.sourceWidth = comparisonImage_.originalWidth
-					                                  ? comparisonImage_.originalWidth
-					                                  : comparisonImage_.width;
-					comparisonView_.sourceHeight = comparisonImage_.originalHeight
-					                                   ? comparisonImage_.originalHeight
-					                                   : comparisonImage_.height;
+					comparisonView_.sourceWidth = comparisonImage_.originalWidth ? comparisonImage_.originalWidth
+					                                                             : comparisonImage_.width;
+					comparisonView_.sourceHeight = comparisonImage_.originalHeight ? comparisonImage_.originalHeight
+					                                                               : comparisonImage_.height;
 					comparisonView_.zoom.set_source({comparisonView_.sourceWidth, comparisonView_.sourceHeight});
 					changed = true;
 				}
@@ -1288,9 +1243,10 @@ namespace iw
 			value.zoom.set_fit();
 			imageScroll_.offset = 0;
 		}
-		else value.zoom.set_explicit(1.0, value.bounds,
-		                             {value.bounds.x + value.bounds.width / 2,
-		                              value.bounds.y + value.bounds.height / 2});
+		else
+			value.zoom.set_explicit(1.0, value.bounds,
+			                        {value.bounds.x + value.bounds.width / 2,
+			                         value.bounds.y + value.bounds.height / 2});
 		if (!fit)
 		{
 			if (fullscreen_ && activeComparison_) request_comparison_image(fullscreenSelection_.secondary());
@@ -1307,10 +1263,8 @@ namespace iw
 		if (path_.empty() || !fullImage_.pixels.empty() || fullSizePending_) return;
 		primaryLoading_.require(primaryView_.sourceWidth, primaryView_.sourceHeight);
 		fullSizePending_ = true;
-		request_image({
-			path_, imageGeneration_, (std::max)(1, primaryView_.bounds.width),
-			(std::max)(1, primaryView_.bounds.height), true, false
-		});
+		request_image({path_, imageGeneration_, (std::max)(1, primaryView_.bounds.width),
+		               (std::max)(1, primaryView_.bounds.height), true, false});
 	}
 
 	const files::DecodedImage* ImageCanvas::displayed_image() const
@@ -1325,9 +1279,8 @@ namespace iw
 				return candidate;
 		const files::DecodedImage* largest = nullptr;
 		for (const auto* candidate : {&initialImage_, &quarterImage_, &halfImage_, &fullImage_})
-			if (!candidate->pixels.empty() && (!largest ||
-				static_cast<size_t>(candidate->width) * candidate->height >
-				static_cast<size_t>(largest->width) * largest->height))
+			if (!candidate->pixels.empty() && (!largest || static_cast<size_t>(candidate->width) * candidate->height >
+			                                                   static_cast<size_t>(largest->width) * largest->height))
 				largest = candidate;
 		return largest;
 	}
@@ -1365,8 +1318,7 @@ namespace iw
 			frame->close();
 			return 0;
 		}
-		if (message == platform::WindowMessage::captureLost)
-			return handle_input(InputEvent::captureLost);
+		if (message == platform::WindowMessage::captureLost) return handle_input(InputEvent::captureLost);
 		return 0;
 	}
 
@@ -1379,37 +1331,26 @@ namespace iw
 	}
 
 	platform::MessageResult ImageCanvas::mouse(const platform::WindowFramePtr& frame,
-	                                           const platform::MouseMessage message,
-	                                           const platform::MouseInput& input)
+	                                           const platform::MouseMessage message, const platform::MouseInput& input)
 	{
 		frame_ = frame;
 		InputEvent event{};
 		switch (message)
 		{
-		case platform::MouseMessage::leftButtonDown: event = InputEvent::leftButtonDown;
-			break;
-		case platform::MouseMessage::leftButtonDoubleClick: event = InputEvent::leftButtonDoubleClick;
-			break;
-		case platform::MouseMessage::rightButtonDown: event = InputEvent::rightButtonDown;
-			break;
-		case platform::MouseMessage::rightButtonUp: event = InputEvent::rightButtonUp;
-			break;
-		case platform::MouseMessage::leftButtonUp: event = InputEvent::leftButtonUp;
-			break;
-		case platform::MouseMessage::move: event = InputEvent::move;
-			break;
-		case platform::MouseMessage::wheel: event = InputEvent::wheel;
-			break;
-		case platform::MouseMessage::leave: event = InputEvent::leave;
-			break;
-		case platform::MouseMessage::contextMenu: event = InputEvent::contextMenu;
-			break;
+		case platform::MouseMessage::leftButtonDown: event = InputEvent::leftButtonDown; break;
+		case platform::MouseMessage::leftButtonDoubleClick: event = InputEvent::leftButtonDoubleClick; break;
+		case platform::MouseMessage::rightButtonDown: event = InputEvent::rightButtonDown; break;
+		case platform::MouseMessage::rightButtonUp: event = InputEvent::rightButtonUp; break;
+		case platform::MouseMessage::leftButtonUp: event = InputEvent::leftButtonUp; break;
+		case platform::MouseMessage::move: event = InputEvent::move; break;
+		case platform::MouseMessage::wheel: event = InputEvent::wheel; break;
+		case platform::MouseMessage::leave: event = InputEvent::leave; break;
+		case platform::MouseMessage::contextMenu: event = InputEvent::contextMenu; break;
 		}
 		return handle_input(event, input);
 	}
 
-	platform::MessageResult ImageCanvas::key(const platform::WindowFramePtr& frame,
-	                                         const platform::KeyMessage message,
+	platform::MessageResult ImageCanvas::key(const platform::WindowFramePtr& frame, const platform::KeyMessage message,
 	                                         const platform::KeyInput& input)
 	{
 		frame_ = frame;
@@ -1441,8 +1382,7 @@ namespace iw
 		return 0;
 	}
 
-	void ImageCanvas::size(const platform::WindowFramePtr& frame, const app::sizei extent,
-	                       platform::MeasureContext&)
+	void ImageCanvas::size(const platform::WindowFramePtr& frame, const app::sizei extent, platform::MeasureContext&)
 	{
 		frame_ = frame;
 		if (splitterPosition_ < 0) splitterPosition_ = ui::unscale_metric(extent.width * 3 / 5, dpi_);
@@ -1451,301 +1391,290 @@ namespace iw
 		frame->invalidate();
 	}
 
-	platform::MessageResult ImageCanvas::handle_input(const InputEvent event,
-	                                                  const platform::MouseInput& mouse,
+	platform::MessageResult ImageCanvas::handle_input(const InputEvent event, const platform::MouseInput& mouse,
 	                                                  const platform::KeyInput& key)
 	{
 		switch (event)
 		{
 		case InputEvent::leftButtonDown:
+		{
+			if (frame_) frame_->set_focus();
+			const app::pointi point = mouse.point;
+			const bool control = mouse.control;
+			const bool shift = mouse.shift;
+			if (stripHeaderBounds_.contains(point))
 			{
-				if (frame_) frame_->set_focus();
-				const app::pointi point = mouse.point;
-				const bool control = mouse.control;
-				const bool shift = mouse.shift;
-				if (stripHeaderBounds_.contains(point))
+				if (commandHandlers_.toggleThumbnails) commandHandlers_.toggleThumbnails();
+				else set_thumbnail_selector_visible(!thumbnailsExpanded_);
+				return 0;
+			}
+			if (propertyHeaderBounds_.contains(point))
+			{
+				if (fullscreen_)
 				{
-					if (commandHandlers_.toggleThumbnails) commandHandlers_.toggleThumbnails();
-					else set_thumbnail_selector_visible(!thumbnailsExpanded_);
-					return 0;
-				}
-				if (propertyHeaderBounds_.contains(point))
-				{
-					if (fullscreen_)
-					{
-						propertiesExpanded_ = !propertiesExpanded_;
-						rebuild_layout();
-						invalidate();
-					}
-					else if (commandHandlers_.toggleProperties) commandHandlers_.toggleProperties();
-					else set_file_properties_visible(!file_properties_visible());
-					return 0;
-				}
-				if (comparisonPropertyHeaderBounds_.contains(point))
-				{
-					comparisonPropertiesExpanded_ = !comparisonPropertiesExpanded_;
+					propertiesExpanded_ = !propertiesExpanded_;
 					rebuild_layout();
 					invalidate();
-					return 0;
 				}
-				if (fullscreen_ && thumbnailScroll_.visible() && thumbnailScroll_.track.contains(point))
+				else if (commandHandlers_.toggleProperties) commandHandlers_.toggleProperties();
+				else set_file_properties_visible(!file_properties_visible());
+				return 0;
+			}
+			if (comparisonPropertyHeaderBounds_.contains(point))
+			{
+				comparisonPropertiesExpanded_ = !comparisonPropertiesExpanded_;
+				rebuild_layout();
+				invalidate();
+				return 0;
+			}
+			if (fullscreen_ && thumbnailScroll_.visible() && thumbnailScroll_.track.contains(point))
+			{
+				if (thumbnailScroll_.thumb.contains(point))
 				{
-					if (thumbnailScroll_.thumb.contains(point))
-					{
-						scrollDrag_ = ScrollDrag::thumbnails;
-						scrollDragOffset_ = point.x - thumbnailScroll_.thumb.x;
-						if (frame_) frame_->set_capture();
-					}
-					else
-					{
-						stripOffset_ = std::clamp(stripOffset_ +
-						                          (point.x < thumbnailScroll_.thumb.x
-							                           ? -itemsViewport_.width
-							                           : itemsViewport_.width),
-						                          0, thumbnailScroll_.maximum());
-						rebuild_layout();
-						invalidate();
-					}
-					return 0;
-				}
-				if (fullscreen_ && !immersive_zoom())
-				{
-					const int fullscreenItem = hit_test_item(point);
-					if (fullscreenItem >= 0)
-					{
-						select_fullscreen_item(fullscreenItem, control);
-						return 0;
-					}
-				}
-				if (files_.empty() && totalItemCount_ > 0 && itemsViewport_.contains(point) && clearFilterHandler_)
-				{
-					clearFilterHandler_();
-					return 0;
-				}
-				if (image_hit(point) || comparison_hit(point))
-				{
-					activeComparison_ = comparison_hit(point);
-					if (control)
-					{
-						selectingZoom_ = true;
-						zoomSelectionStart_ = zoomSelectionCurrent_ = point;
-						if (frame_) frame_->set_capture();
-					}
-					else if (shift)
-						step_zoom(1, point);
-					else if (!active_view().zoom.is_fit())
-					{
-						panningImage_ = true;
-						imageDragOrigin_ = point;
-						imageDragPoint_ = {};
-						if (frame_) frame_->set_capture();
-						if (frame_) frame_->set_cursor(platform::CursorShape::sizeAll);
-					}
-					else begin_inspect_candidate(point);
-					return 0;
-				}
-				const auto beginScroll = [this, point](ui::VerticalScroll& scroll, const ScrollDrag target)
-				{
-					if (!scroll.visible() || !scroll.track.contains(point)) return false;
-					if (scroll.thumb.contains(point))
-					{
-						scrollDrag_ = target;
-						scrollDragOffset_ = point.y - scroll.thumb.y;
-						if (frame_) frame_->set_capture();
-					}
-					else
-					{
-						scroll.scroll_by(point.y < scroll.thumb.y ? -scroll.viewportExtent : scroll.viewportExtent);
-						rebuild_layout();
-						queue_thumbnails();
-						invalidate();
-					}
-					return true;
-				};
-				if (beginScroll(imageScroll_, ScrollDrag::image) || beginScroll(itemsScroll_, ScrollDrag::items))
-					return
-						0;
-				if (mode_ != ItemMode::single && splitterBounds_.contains(point))
-				{
-					draggingSplitter_ = true;
-					if (frame_) frame_->set_capture();
-					return 0;
-				}
-				if (mode_ == ItemMode::details && detailsHeaderBounds_.contains(point))
-				{
-					const auto columns = media_detail_columns(detailsHeaderBounds_);
-					constexpr std::array fields{
-						files::SortField::name, files::SortField::modified, files::SortField::type,
-						files::SortField::size, files::SortField::dimensions, files::SortField::duration
-					};
-					for (size_t index = 0; index < columns.size(); ++index)
-						if (columns[index].contains(point) && sortHandler_)
-						{
-							sortHandler_(fields[index], sortField_ == fields[index] ? !sortAscending_ : true);
-							break;
-						}
-					return 0;
-				}
-				const int index = hit_test_item(point);
-				pressedIndex_ = index;
-				if (index >= 0)
-				{
-					fileDragStart_ = point;
-					deferSingleSelection_ = !control && !shift && active_selection().contains(index) &&
-						active_selection().size() > 1;
-					if (!deferSingleSelection_) active_selection().click(index, control, shift);
-					notify_selection();
-					if (items_[index].kind != files::ItemKind::folder &&
-						!media::is_media(items_[index].kind) && activationHandler_)
-						activationHandler_(files_[index]);
-					else load(files_[index]);
+					scrollDrag_ = ScrollDrag::thumbnails;
+					scrollDragOffset_ = point.x - thumbnailScroll_.thumb.x;
 					if (frame_) frame_->set_capture();
 				}
 				else
 				{
-					draggingMarquee_ = true;
-					marqueeStart_ = marqueeCurrent_ = point;
-					active_selection().begin_marquee(control || shift);
-					active_selection().marquee(itemFlow_.children, {point.x, point.y, 0, 0});
-					notify_selection();
+					stripOffset_ = std::clamp(stripOffset_ + (point.x < thumbnailScroll_.thumb.x
+					                                              ? -itemsViewport_.width
+					                                              : itemsViewport_.width),
+					                          0, thumbnailScroll_.maximum());
+					rebuild_layout();
+					invalidate();
+				}
+				return 0;
+			}
+			if (fullscreen_ && !immersive_zoom())
+			{
+				const int fullscreenItem = hit_test_item(point);
+				if (fullscreenItem >= 0)
+				{
+					select_fullscreen_item(fullscreenItem, control);
+					return 0;
+				}
+			}
+			if (files_.empty() && totalItemCount_ > 0 && itemsViewport_.contains(point) && clearFilterHandler_)
+			{
+				clearFilterHandler_();
+				return 0;
+			}
+			if (image_hit(point) || comparison_hit(point))
+			{
+				activeComparison_ = comparison_hit(point);
+				if (control)
+				{
+					selectingZoom_ = true;
+					zoomSelectionStart_ = zoomSelectionCurrent_ = point;
 					if (frame_) frame_->set_capture();
 				}
+				else if (shift) step_zoom(1, point);
+				else if (!active_view().zoom.is_fit())
+				{
+					panningImage_ = true;
+					imageDragOrigin_ = point;
+					imageDragPoint_ = {};
+					if (frame_) frame_->set_capture();
+					if (frame_) frame_->set_cursor(platform::CursorShape::sizeAll);
+				}
+				else begin_inspect_candidate(point);
+				return 0;
+			}
+			const auto beginScroll = [this, point](ui::VerticalScroll& scroll, const ScrollDrag target)
+			{
+				if (!scroll.visible() || !scroll.track.contains(point)) return false;
+				if (scroll.thumb.contains(point))
+				{
+					scrollDrag_ = target;
+					scrollDragOffset_ = point.y - scroll.thumb.y;
+					if (frame_) frame_->set_capture();
+				}
+				else
+				{
+					scroll.scroll_by(point.y < scroll.thumb.y ? -scroll.viewportExtent : scroll.viewportExtent);
+					rebuild_layout();
+					queue_thumbnails();
+					invalidate();
+				}
+				return true;
+			};
+			if (beginScroll(imageScroll_, ScrollDrag::image) || beginScroll(itemsScroll_, ScrollDrag::items)) return 0;
+			if (mode_ != ItemMode::single && splitterBounds_.contains(point))
+			{
+				draggingSplitter_ = true;
+				if (frame_) frame_->set_capture();
+				return 0;
+			}
+			if (mode_ == ItemMode::details && detailsHeaderBounds_.contains(point))
+			{
+				const auto columns = media_detail_columns(detailsHeaderBounds_);
+				constexpr std::array fields{files::SortField::name,       files::SortField::modified,
+				                            files::SortField::type,       files::SortField::size,
+				                            files::SortField::dimensions, files::SortField::duration};
+				for (size_t index = 0; index < columns.size(); ++index)
+					if (columns[index].contains(point) && sortHandler_)
+					{
+						sortHandler_(fields[index], sortField_ == fields[index] ? !sortAscending_ : true);
+						break;
+					}
+				return 0;
+			}
+			const int index = hit_test_item(point);
+			pressedIndex_ = index;
+			if (index >= 0)
+			{
+				fileDragStart_ = point;
+				deferSingleSelection_ = !control && !shift && active_selection().contains(index) &&
+				                        active_selection().size() > 1;
+				if (!deferSingleSelection_) active_selection().click(index, control, shift);
+				notify_selection();
+				if (items_[index].kind != files::ItemKind::folder && !media::is_media(items_[index].kind) &&
+				    activationHandler_)
+					activationHandler_(files_[index]);
+				else load(files_[index]);
+				if (frame_) frame_->set_capture();
+			}
+			else
+			{
+				draggingMarquee_ = true;
+				marqueeStart_ = marqueeCurrent_ = point;
+				active_selection().begin_marquee(control || shift);
+				active_selection().marquee(itemFlow_.children, {point.x, point.y, 0, 0});
+				notify_selection();
+				if (frame_) frame_->set_capture();
+			}
+			invalidate();
+			return 0;
+		}
+		case InputEvent::leftButtonDoubleClick:
+		{
+			const int index = hit_test_item(mouse.point);
+			if (index >= 0 && activationHandler_) activationHandler_(files_[index]);
+			return 0;
+		}
+		case InputEvent::rightButtonDown:
+		{
+			const app::pointi point = mouse.point;
+			if (mouse.shift && (image_hit(point) || comparison_hit(point)))
+			{
+				activeComparison_ = comparison_hit(point);
+				suppressContextMenu_ = true;
+				step_zoom(-1, point);
+				return 0;
+			}
+			const int index = hit_test_item(point);
+			if (index >= 0 && !active_selection().contains(index))
+			{
+				active_selection().click(index, false, false);
+				notify_selection();
+				// The context menu acts on this item, so it is the one on show, as after a left click.
+				if (items_[index].kind != files::ItemKind::folder && !media::is_media(items_[index].kind) &&
+				    activationHandler_)
+					activationHandler_(files_[index]);
+				else load(files_[index]);
+				invalidate();
+			}
+			return 0;
+		}
+		case InputEvent::rightButtonUp: return 0;
+		case InputEvent::move:
+		{
+			const int x = mouse.point.x;
+			const int y = mouse.point.y;
+			if (frame_) frame_->track_mouse_leave();
+			if (quickZoom_)
+			{
+				update_quick_zoom({x, y});
+				return 0;
+			}
+			if (panningImage_)
+			{
+				const int ramp = metric(120);
+				const app::pointi offset{ui::ZoomModel::accelerated_pan_offset(x - imageDragOrigin_.x, ramp),
+				                         ui::ZoomModel::accelerated_pan_offset(y - imageDragOrigin_.y, ramp)};
+				pan_by(offset.x - imageDragPoint_.x, offset.y - imageDragPoint_.y);
+				imageDragPoint_ = offset;
+				if (frame_) frame_->set_cursor(platform::CursorShape::sizeAll);
+				return 0;
+			}
+			if (selectingZoom_)
+			{
+				zoomSelectionCurrent_ = {x, y};
 				invalidate();
 				return 0;
 			}
-		case InputEvent::leftButtonDoubleClick:
+			if (pressedIndex_ >= 0 && mouse.leftButton)
 			{
-				const int index = hit_test_item(mouse.point);
-				if (index >= 0 && activationHandler_) activationHandler_(files_[index]);
-				return 0;
+				const auto threshold = platform::drag_threshold();
+				if (std::abs(x - fileDragStart_.x) >= threshold.width ||
+				    std::abs(y - fileDragStart_.y) >= threshold.height)
+					draggingFiles_ = true;
+				if (draggingFiles_)
+				{
+					auto paths = selected_paths();
+					draggingFiles_ = false;
+					deferSingleSelection_ = false;
+					pressedIndex_ = -1;
+					if (frame_) frame_->release_capture();
+					if (fileDragHandler_ && !paths.empty()) fileDragHandler_(std::move(paths));
+					return 0;
+				}
 			}
-		case InputEvent::rightButtonDown:
+			if (scrollDrag_ != ScrollDrag::none)
 			{
-				const app::pointi point = mouse.point;
-				if (mouse.shift && (image_hit(point) || comparison_hit(point)))
+				if (scrollDrag_ == ScrollDrag::thumbnails)
 				{
-					activeComparison_ = comparison_hit(point);
-					suppressContextMenu_ = true;
-					step_zoom(-1, point);
-					return 0;
-				}
-				const int index = hit_test_item(point);
-				if (index >= 0 && !active_selection().contains(index))
-				{
-					active_selection().click(index, false, false);
-					notify_selection();
-					// The context menu acts on this item, so it is the one on show, as after a left click.
-					if (items_[index].kind != files::ItemKind::folder &&
-						!media::is_media(items_[index].kind) && activationHandler_)
-						activationHandler_(files_[index]);
-					else load(files_[index]);
-					invalidate();
-				}
-				return 0;
-			}
-		case InputEvent::rightButtonUp:
-			return 0;
-		case InputEvent::move:
-			{
-				const int x = mouse.point.x;
-				const int y = mouse.point.y;
-				if (frame_) frame_->track_mouse_leave();
-				if (quickZoom_)
-				{
-					update_quick_zoom({x, y});
-					return 0;
-				}
-				if (panningImage_)
-				{
-					const int ramp = metric(120);
-					const app::pointi offset{
-						ui::ZoomModel::accelerated_pan_offset(x - imageDragOrigin_.x, ramp),
-						ui::ZoomModel::accelerated_pan_offset(y - imageDragOrigin_.y, ramp)
-					};
-					pan_by(offset.x - imageDragPoint_.x, offset.y - imageDragPoint_.y);
-					imageDragPoint_ = offset;
-					if (frame_) frame_->set_cursor(platform::CursorShape::sizeAll);
-					return 0;
-				}
-				if (selectingZoom_)
-				{
-					zoomSelectionCurrent_ = {x, y};
-					invalidate();
-					return 0;
-				}
-				if (pressedIndex_ >= 0 && mouse.leftButton)
-				{
-					const auto threshold = platform::drag_threshold();
-					if (std::abs(x - fileDragStart_.x) >= threshold.width ||
-						std::abs(y - fileDragStart_.y) >= threshold.height)
-						draggingFiles_ = true;
-					if (draggingFiles_)
-					{
-						auto paths = selected_paths();
-						draggingFiles_ = false;
-						deferSingleSelection_ = false;
-						pressedIndex_ = -1;
-						if (frame_) frame_->release_capture();
-						if (fileDragHandler_ && !paths.empty()) fileDragHandler_(std::move(paths));
-						return 0;
-					}
-				}
-				if (scrollDrag_ != ScrollDrag::none)
-				{
-					if (scrollDrag_ == ScrollDrag::thumbnails)
-					{
-						thumbnailScroll_.set_thumb_position(x - scrollDragOffset_);
-						stripOffset_ = thumbnailScroll_.offset;
-						rebuild_layout();
-						queue_thumbnails();
-						invalidate();
-						return 0;
-					}
-					auto& scroll = scrollDrag_ == ScrollDrag::image ? imageScroll_ : itemsScroll_;
-					scroll.set_thumb_position(y - scrollDragOffset_);
+					thumbnailScroll_.set_thumb_position(x - scrollDragOffset_);
+					stripOffset_ = thumbnailScroll_.offset;
 					rebuild_layout();
 					queue_thumbnails();
 					invalidate();
 					return 0;
 				}
-				if (draggingSplitter_)
-				{
-					const app::recti client = frame_ ? frame_->client_rect() : app::recti{};
-					const int minimumPane = metric(180);
-					const int physicalPosition = std::clamp(
-						x, minimumPane, (std::max)(minimumPane, client.width - minimumPane));
-					splitterPosition_ = ui::unscale_metric(physicalPosition, dpi_);
-					rebuild_layout();
-					invalidate();
-					return 0;
-				}
-				if (draggingMarquee_)
-				{
-					marqueeCurrent_ = {x, y};
-					const app::recti area{
-						(std::min)(marqueeStart_.x, marqueeCurrent_.x),
-						(std::min)(marqueeStart_.y, marqueeCurrent_.y), std::abs(marqueeCurrent_.x - marqueeStart_.x),
-						std::abs(marqueeCurrent_.y - marqueeStart_.y)
-					};
-					active_selection().marquee(itemFlow_.children, area);
-					notify_selection();
-					invalidate();
-					return 0;
-				}
-				hoverIndex_ = hit_test_item({x, y});
-				const bool splitterHover = mode_ != ItemMode::single && splitterBounds_.contains({x, y});
-				if (hoveringSplitter_ != splitterHover)
-					hoveringSplitter_ = splitterHover;
-				if (frame_)
-				{
-					if (splitterHover) frame_->set_cursor(platform::CursorShape::sizeHorizontal);
-					else if (immersive_zoom()) frame_->set_cursor(platform::CursorShape::sizeAll);
-					else if (inspect_hit({x, y})) frame_->set_cursor(platform::CursorShape::zoom);
-					else frame_->set_cursor(platform::CursorShape::arrow);
-				}
+				auto& scroll = scrollDrag_ == ScrollDrag::image ? imageScroll_ : itemsScroll_;
+				scroll.set_thumb_position(y - scrollDragOffset_);
+				rebuild_layout();
+				queue_thumbnails();
 				invalidate();
 				return 0;
 			}
+			if (draggingSplitter_)
+			{
+				const app::recti client = frame_ ? frame_->client_rect() : app::recti{};
+				const int minimumPane = metric(180);
+				const int physicalPosition = std::clamp(x, minimumPane,
+				                                        (std::max)(minimumPane, client.width - minimumPane));
+				splitterPosition_ = ui::unscale_metric(physicalPosition, dpi_);
+				rebuild_layout();
+				invalidate();
+				return 0;
+			}
+			if (draggingMarquee_)
+			{
+				marqueeCurrent_ = {x, y};
+				const app::recti area{(std::min)(marqueeStart_.x, marqueeCurrent_.x),
+				                      (std::min)(marqueeStart_.y, marqueeCurrent_.y),
+				                      std::abs(marqueeCurrent_.x - marqueeStart_.x),
+				                      std::abs(marqueeCurrent_.y - marqueeStart_.y)};
+				active_selection().marquee(itemFlow_.children, area);
+				notify_selection();
+				invalidate();
+				return 0;
+			}
+			hoverIndex_ = hit_test_item({x, y});
+			const bool splitterHover = mode_ != ItemMode::single && splitterBounds_.contains({x, y});
+			if (hoveringSplitter_ != splitterHover) hoveringSplitter_ = splitterHover;
+			if (frame_)
+			{
+				if (splitterHover) frame_->set_cursor(platform::CursorShape::sizeHorizontal);
+				else if (immersive_zoom()) frame_->set_cursor(platform::CursorShape::sizeAll);
+				else if (inspect_hit({x, y})) frame_->set_cursor(platform::CursorShape::zoom);
+				else frame_->set_cursor(platform::CursorShape::arrow);
+			}
+			invalidate();
+			return 0;
+		}
 		case InputEvent::leave:
 			hoverIndex_ = -1;
 			hoveringSplitter_ = false;
@@ -1767,20 +1696,18 @@ namespace iw
 			{
 				selectingZoom_ = false;
 				if (frame_) frame_->release_capture();
-				const app::recti selection{
-					(std::min)(zoomSelectionStart_.x, zoomSelectionCurrent_.x),
-					(std::min)(zoomSelectionStart_.y, zoomSelectionCurrent_.y),
-					std::abs(zoomSelectionCurrent_.x - zoomSelectionStart_.x),
-					std::abs(zoomSelectionCurrent_.y - zoomSelectionStart_.y)
-				};
+				const app::recti selection{(std::min)(zoomSelectionStart_.x, zoomSelectionCurrent_.x),
+				                           (std::min)(zoomSelectionStart_.y, zoomSelectionCurrent_.y),
+				                           std::abs(zoomSelectionCurrent_.x - zoomSelectionStart_.x),
+				                           std::abs(zoomSelectionCurrent_.y - zoomSelectionStart_.y)};
 				if (selection.width >= metric(8) && selection.height >= metric(8))
 				{
 					const app::pointi center{selection.x + selection.width / 2, selection.y + selection.height / 2};
 					const auto& active = active_view();
 					const app::recti bounds = active.bounds;
 					const double scale = active.zoom.effective_scale(active.bounds) *
-						(std::min)(static_cast<double>(bounds.width) / selection.width,
-						           static_cast<double>(bounds.height) / selection.height);
+					                     (std::min)(static_cast<double>(bounds.width) / selection.width,
+					                                static_cast<double>(bounds.height) / selection.height);
 					set_zoom(scale, center);
 					pan_by(bounds.x + bounds.width / 2 - center.x, bounds.y + bounds.height / 2 - center.y);
 				}
@@ -1822,181 +1749,170 @@ namespace iw
 			scrollDrag_ = ScrollDrag::none;
 			return 0;
 		case InputEvent::wheel:
+		{
+			const app::pointi point = mouse.point;
+			if (fullscreen_ && !immersive_zoom() && itemsViewport_.contains({point.x, point.y}))
 			{
-				const app::pointi point = mouse.point;
-				if (fullscreen_ && !immersive_zoom() && itemsViewport_.contains({point.x, point.y}))
-				{
-					stripOffset_ = std::clamp(stripOffset_ - mouse.wheelDelta / 120 * 96,
-					                          0, thumbnailScroll_.maximum());
-					rebuild_layout();
-					queue_thumbnails();
-					invalidate();
-					return 0;
-				}
-				if (quickZoom_)
-				{
-					quickZoomScale_ = std::clamp(quickZoomScale_ *
-					                             (mouse.wheelDelta > 0 ? 1.25 : 0.8), 0.05, 16.0);
-					update_quick_zoom({point.x, point.y});
-					return 0;
-				}
-				if (mouse.control)
-				{
-					activeComparison_ = comparison_hit({point.x, point.y});
-					step_zoom(mouse.wheelDelta > 0 ? 1 : -1, {point.x, point.y});
-					return 0;
-				}
-				if (immersive_zoom())
-				{
-					step_focus(mouse.wheelDelta > 0 ? -1 : 1);
-					return 0;
-				}
-				if (image_hit({point.x, point.y}))
-				{
-					step_focus(mouse.wheelDelta > 0 ? -1 : 1);
-					return 0;
-				}
-				auto& scroll = point.x < splitter_x() || mode_ == ItemMode::single ? imageScroll_ : itemsScroll_;
-				if (scroll.scroll_by(-mouse.wheelDelta / 120 * 72))
-				{
-					rebuild_layout();
-					queue_thumbnails();
-					invalidate();
-				}
+				stripOffset_ = std::clamp(stripOffset_ - mouse.wheelDelta / 120 * 96, 0, thumbnailScroll_.maximum());
+				rebuild_layout();
+				queue_thumbnails();
+				invalidate();
 				return 0;
 			}
-		case InputEvent::keyDown:
+			if (quickZoom_)
 			{
-				const bool control = key.control;
-				const bool shift = key.shift;
-				const bool activeFit = active_view().zoom.is_effectively_fit(active_view().bounds);
-				const app::recti activeBounds = active_view().bounds;
-				if (quickZoom_ && key.key == platform::KeyCode::space)
-				{
-					commit_quick_zoom();
-					if (frame_) frame_->release_capture();
-					return 0;
-				}
-				if (fullscreen_ && (control || activeFit) &&
-					(key.key == platform::KeyCode::left || key.key == platform::KeyCode::right))
-				{
-					step_fullscreen_selection(key.key == platform::KeyCode::left ? -1 : 1, control);
-					return 0;
-				}
-				if (control && key.character == L'1')
-				{
-					const app::pointi center{
-						activeBounds.x + activeBounds.width / 2,
-						activeBounds.y + activeBounds.height / 2
-					};
-					set_zoom(1.0, center);
-					active_view().zoom.set_center(0.5, 0.5);
-					invalidate();
-					return 0;
-				}
-				if (control && key.character == L'0')
-				{
-					if (active_view().zoom.is_fit())
-						set_zoom(active_view().zoom.explicit_scale(),
-						         {activeBounds.x + activeBounds.width / 2,
-						          activeBounds.y + activeBounds.height / 2});
-					else set_fit(true);
-					return 0;
-				}
-				if (control && (key.key == platform::KeyCode::add || key.key == platform::KeyCode::subtract))
-				{
-					zoom(key.key == platform::KeyCode::add ? 1.25 : 0.8);
-					return 0;
-				}
-				if (!activeFit && (key.key == platform::KeyCode::left || key.key == platform::KeyCode::right ||
-					key.key == platform::KeyCode::up || key.key == platform::KeyCode::down))
-				{
-					pan_by(key.key == platform::KeyCode::left
-						       ? metric(48)
-						       : key.key == platform::KeyCode::right
-						       ? -metric(48)
-						       : 0,
-					       key.key == platform::KeyCode::up
-						       ? metric(48)
-						       : key.key == platform::KeyCode::down
-						       ? -metric(48)
-						       : 0);
-					return 0;
-				}
-				if (!activeFit && (key.key == platform::KeyCode::pageUp || key.key == platform::KeyCode::pageDown))
-				{
-					pan_by(0, key.key == platform::KeyCode::pageUp ? activeBounds.height : -activeBounds.height);
-					return 0;
-				}
-				if (!activeFit && (key.key == platform::KeyCode::home || key.key == platform::KeyCode::end))
-				{
-					const double edge = key.key == platform::KeyCode::home ? 0.0 : 1.0;
-					active_view().zoom.set_center(edge, edge);
-					invalidate();
-					return 0;
-				}
-				if (control && key.key == platform::KeyCode::space && active_selection().focus() >= 0)
-				{
-					active_selection().click(active_selection().focus(), true, false);
-					notify_selection();
-					invalidate();
-					return 0;
-				}
-				const int focused = active_selection().focus();
-				if (!control && key.key == platform::KeyCode::enter && focused >= 0 &&
-					static_cast<size_t>(focused) < items_.size() && media::is_media(items_[focused].kind) &&
-					activationHandler_)
-				{
-					activationHandler_(files_[focused]);
-					return 0;
-				}
-				if (key.key == platform::KeyCode::enter && commandHandlers_.enterFullscreen)
-				{
-					commandHandlers_.enterFullscreen();
-					return 0;
-				}
-				if (key.key == platform::KeyCode::escape)
-				{
-					if (cancel_transient_state()) return 0;
-					if (!active_view().zoom.is_fit()) set_fit(true);
-					else if (commandHandlers_.leaveFullscreen) commandHandlers_.leaveFullscreen();
-					return 0;
-				}
-				int next = -1;
-				if (key.key == platform::KeyCode::left) next = spatial_neighbor(active_selection().focus(), -1, 0);
-				if (key.key == platform::KeyCode::right) next = spatial_neighbor(active_selection().focus(), 1, 0);
-				if (key.key == platform::KeyCode::up) next = spatial_neighbor(active_selection().focus(), 0, -1);
-				if (key.key == platform::KeyCode::down) next = spatial_neighbor(active_selection().focus(), 0, 1);
-				if (key.key == platform::KeyCode::home && !files_.empty()) next = 0;
-				if (key.key == platform::KeyCode::end && !files_.empty()) next = static_cast<int>(files_.size()) - 1;
-				if (key.key == platform::KeyCode::pageUp) next = spatial_neighbor(active_selection().focus(), 0, -2);
-				if (key.key == platform::KeyCode::pageDown) next = spatial_neighbor(active_selection().focus(), 0, 2);
-				if (key.key == platform::KeyCode::space)
-					next = active_selection().focus() + 1 < static_cast<int>(files_.size())
-						       ? active_selection().focus() + 1
-						       : (files_.empty() ? -1 : 0);
-				if (next >= 0)
-				{
-					active_selection().navigate(next, control, shift);
-					ensure_visible(next);
-					notify_selection();
-					if (items_[next].kind != files::ItemKind::folder &&
-						!media::is_media(items_[next].kind) && activationHandler_)
-						activationHandler_(files_[next]);
-					else load(files_[next]);
-					invalidate();
-					return 0;
-				}
-				break;
+				quickZoomScale_ = std::clamp(quickZoomScale_ * (mouse.wheelDelta > 0 ? 1.25 : 0.8), 0.05, 16.0);
+				update_quick_zoom({point.x, point.y});
+				return 0;
 			}
+			if (mouse.control)
+			{
+				activeComparison_ = comparison_hit({point.x, point.y});
+				step_zoom(mouse.wheelDelta > 0 ? 1 : -1, {point.x, point.y});
+				return 0;
+			}
+			if (immersive_zoom())
+			{
+				step_focus(mouse.wheelDelta > 0 ? -1 : 1);
+				return 0;
+			}
+			if (image_hit({point.x, point.y}))
+			{
+				step_focus(mouse.wheelDelta > 0 ? -1 : 1);
+				return 0;
+			}
+			auto& scroll = point.x < splitter_x() || mode_ == ItemMode::single ? imageScroll_ : itemsScroll_;
+			if (scroll.scroll_by(-mouse.wheelDelta / 120 * 72))
+			{
+				rebuild_layout();
+				queue_thumbnails();
+				invalidate();
+			}
+			return 0;
+		}
+		case InputEvent::keyDown:
+		{
+			const bool control = key.control;
+			const bool shift = key.shift;
+			const bool activeFit = active_view().zoom.is_effectively_fit(active_view().bounds);
+			const app::recti activeBounds = active_view().bounds;
+			if (quickZoom_ && key.key == platform::KeyCode::space)
+			{
+				commit_quick_zoom();
+				if (frame_) frame_->release_capture();
+				return 0;
+			}
+			if (fullscreen_ && (control || activeFit) &&
+			    (key.key == platform::KeyCode::left || key.key == platform::KeyCode::right))
+			{
+				step_fullscreen_selection(key.key == platform::KeyCode::left ? -1 : 1, control);
+				return 0;
+			}
+			if (control && key.character == L'1')
+			{
+				const app::pointi center{activeBounds.x + activeBounds.width / 2,
+				                         activeBounds.y + activeBounds.height / 2};
+				set_zoom(1.0, center);
+				active_view().zoom.set_center(0.5, 0.5);
+				invalidate();
+				return 0;
+			}
+			if (control && key.character == L'0')
+			{
+				if (active_view().zoom.is_fit())
+					set_zoom(active_view().zoom.explicit_scale(),
+					         {activeBounds.x + activeBounds.width / 2, activeBounds.y + activeBounds.height / 2});
+				else set_fit(true);
+				return 0;
+			}
+			if (control && (key.key == platform::KeyCode::add || key.key == platform::KeyCode::subtract))
+			{
+				zoom(key.key == platform::KeyCode::add ? 1.25 : 0.8);
+				return 0;
+			}
+			if (!activeFit && (key.key == platform::KeyCode::left || key.key == platform::KeyCode::right ||
+			                   key.key == platform::KeyCode::up || key.key == platform::KeyCode::down))
+			{
+				pan_by(key.key == platform::KeyCode::left    ? metric(48)
+				       : key.key == platform::KeyCode::right ? -metric(48)
+				                                             : 0,
+				       key.key == platform::KeyCode::up     ? metric(48)
+				       : key.key == platform::KeyCode::down ? -metric(48)
+				                                            : 0);
+				return 0;
+			}
+			if (!activeFit && (key.key == platform::KeyCode::pageUp || key.key == platform::KeyCode::pageDown))
+			{
+				pan_by(0, key.key == platform::KeyCode::pageUp ? activeBounds.height : -activeBounds.height);
+				return 0;
+			}
+			if (!activeFit && (key.key == platform::KeyCode::home || key.key == platform::KeyCode::end))
+			{
+				const double edge = key.key == platform::KeyCode::home ? 0.0 : 1.0;
+				active_view().zoom.set_center(edge, edge);
+				invalidate();
+				return 0;
+			}
+			if (control && key.key == platform::KeyCode::space && active_selection().focus() >= 0)
+			{
+				active_selection().click(active_selection().focus(), true, false);
+				notify_selection();
+				invalidate();
+				return 0;
+			}
+			const int focused = active_selection().focus();
+			if (!control && key.key == platform::KeyCode::enter && focused >= 0 &&
+			    static_cast<size_t>(focused) < items_.size() && media::is_media(items_[focused].kind) &&
+			    activationHandler_)
+			{
+				activationHandler_(files_[focused]);
+				return 0;
+			}
+			if (key.key == platform::KeyCode::enter && commandHandlers_.enterFullscreen)
+			{
+				commandHandlers_.enterFullscreen();
+				return 0;
+			}
+			if (key.key == platform::KeyCode::escape)
+			{
+				if (cancel_transient_state()) return 0;
+				if (!active_view().zoom.is_fit()) set_fit(true);
+				else if (commandHandlers_.leaveFullscreen) commandHandlers_.leaveFullscreen();
+				return 0;
+			}
+			int next = -1;
+			if (key.key == platform::KeyCode::left) next = spatial_neighbor(active_selection().focus(), -1, 0);
+			if (key.key == platform::KeyCode::right) next = spatial_neighbor(active_selection().focus(), 1, 0);
+			if (key.key == platform::KeyCode::up) next = spatial_neighbor(active_selection().focus(), 0, -1);
+			if (key.key == platform::KeyCode::down) next = spatial_neighbor(active_selection().focus(), 0, 1);
+			if (key.key == platform::KeyCode::home && !files_.empty()) next = 0;
+			if (key.key == platform::KeyCode::end && !files_.empty()) next = static_cast<int>(files_.size()) - 1;
+			if (key.key == platform::KeyCode::pageUp) next = spatial_neighbor(active_selection().focus(), 0, -2);
+			if (key.key == platform::KeyCode::pageDown) next = spatial_neighbor(active_selection().focus(), 0, 2);
+			if (key.key == platform::KeyCode::space)
+				next = active_selection().focus() + 1 < static_cast<int>(files_.size()) ? active_selection().focus() + 1
+				                                                                        : (files_.empty() ? -1 : 0);
+			if (next >= 0)
+			{
+				active_selection().navigate(next, control, shift);
+				ensure_visible(next);
+				notify_selection();
+				if (items_[next].kind != files::ItemKind::folder && !media::is_media(items_[next].kind) &&
+				    activationHandler_)
+					activationHandler_(files_[next]);
+				else load(files_[next]);
+				invalidate();
+				return 0;
+			}
+			break;
+		}
 		case InputEvent::contextMenu:
 			if (suppressContextMenu_)
 			{
 				suppressContextMenu_ = false;
 				return 0;
 			}
-			if (contextMenuHandler_)
-				contextMenuHandler_(mouse.screenPoint);
+			if (contextMenuHandler_) contextMenuHandler_(mouse.screenPoint);
 			return 0;
 		}
 		return 0;
@@ -2019,14 +1935,12 @@ namespace iw
 		else if (showPrimary && displayed_image())
 		{
 			const auto* image = displayed_image();
-			double scale = quickZoom_ && !activeComparison_
-				               ? quickZoomScale_
-				               : primaryView_.zoom.effective_scale(primaryView_.bounds);
-			if (primaryView_.zoom.is_fit() && !(quickZoom_ && !activeComparison_))
-				scale = fit_scale();
+			double scale = quickZoom_ && !activeComparison_ ? quickZoomScale_
+			                                                : primaryView_.zoom.effective_scale(primaryView_.bounds);
+			if (primaryView_.zoom.is_fit() && !(quickZoom_ && !activeComparison_)) scale = fit_scale();
 			const app::recti destination = image_destination(scale, false);
 			const bool alpha = displayedKind_ != files::ItemKind::image &&
-				typeIconAlpha_[static_cast<size_t>(displayedKind_)];
+			                   typeIconAlpha_[static_cast<size_t>(displayedKind_)];
 			renderer.image({image->width, image->height, image->pixels, alpha, imageGeneration_}, destination);
 		}
 		else if (showPrimary)
@@ -2038,95 +1952,88 @@ namespace iw
 				renderer.outline(placeholder, platform::system_color(platform::SystemColor::shadow));
 			}
 			const std::wstring_view message = primaryLoading_.failure() == ui::LoadingModel::Failure::unreadable
-				                                  ? L"This image could not be read"
-				                                  : path_.empty() ? L"Select an image to view" : L"Loading image...";
-			renderer.text(message, primaryView_.bounds,
-			              platform::system_color(platform::SystemColor::windowText),
+			                                      ? L"This image could not be read"
+			                                  : path_.empty() ? L"Select an image to view"
+			                                                  : L"Loading image...";
+			renderer.text(message, primaryView_.bounds, platform::system_color(platform::SystemColor::windowText),
 			              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-			              platform::TextFormat::singleLine);
+			                  platform::TextFormat::singleLine);
 		}
 		const bool showComparison = fullscreen_ && (!immersive_zoom() || activeComparison_);
 		if (showComparison && !comparisonImage_.pixels.empty())
 		{
 			double scale = quickZoom_ && activeComparison_
-				               ? quickZoomScale_
-				               : comparisonView_.zoom.effective_scale(comparisonView_.bounds);
+			                   ? quickZoomScale_
+			                   : comparisonView_.zoom.effective_scale(comparisonView_.bounds);
 			if (comparisonView_.zoom.is_fit() && !(quickZoom_ && activeComparison_)) scale = fit_scale(true);
 			const app::recti destination = image_destination(scale, true);
-			renderer.image({comparisonImage_.width, comparisonImage_.height, comparisonImage_.pixels,
-			                false, comparisonGeneration_},
+			renderer.image({comparisonImage_.width, comparisonImage_.height, comparisonImage_.pixels, false,
+			                comparisonGeneration_},
 			               destination);
 		}
 		else if (showComparison && comparisonLoading_.failure() == ui::LoadingModel::Failure::unreadable)
 			renderer.text(L"This image could not be read", comparisonView_.bounds,
 			              platform::system_color(platform::SystemColor::windowText),
 			              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-			              platform::TextFormat::singleLine);
+			                  platform::TextFormat::singleLine);
 		if (fullscreen_) renderer.reset_clip();
 		if (!immersive_zoom()) paint_properties(renderer);
 		if (!fullscreen_) renderer.reset_clip();
 		if (!immersive_zoom()) renderer.scrollbar(imageScroll_);
 		if (!immersive_zoom() && (fullscreen_ || mode_ != ItemMode::single))
 		{
-			renderer.fill(splitterBounds_, platform::calc_hande_color(
-				hoveringSplitter_, draggingSplitter_, false));
+			renderer.fill(splitterBounds_, platform::calc_hande_color(hoveringSplitter_, draggingSplitter_, false));
 			paint_items(renderer);
 			if (fullscreen_) renderer.scrollbar(thumbnailScroll_);
 			else renderer.scrollbar(itemsScroll_);
 			if (draggingMarquee_)
 			{
-				renderer.outline({
-					                 (std::min)(marqueeStart_.x, marqueeCurrent_.x),
-					                 (std::min)(marqueeStart_.y, marqueeCurrent_.y),
-					                 std::abs(marqueeCurrent_.x - marqueeStart_.x),
-					                 std::abs(marqueeCurrent_.y - marqueeStart_.y)
-				                 }, platform::system_color(platform::SystemColor::highlight));
+				renderer.outline({(std::min)(marqueeStart_.x, marqueeCurrent_.x),
+				                  (std::min)(marqueeStart_.y, marqueeCurrent_.y),
+				                  std::abs(marqueeCurrent_.x - marqueeStart_.x),
+				                  std::abs(marqueeCurrent_.y - marqueeStart_.y)},
+				                 platform::system_color(platform::SystemColor::highlight));
 			}
 		}
 		if (selectingZoom_)
-			renderer.outline({
-				                 (std::min)(zoomSelectionStart_.x, zoomSelectionCurrent_.x),
-				                 (std::min)(zoomSelectionStart_.y, zoomSelectionCurrent_.y),
-				                 std::abs(zoomSelectionCurrent_.x - zoomSelectionStart_.x),
-				                 std::abs(zoomSelectionCurrent_.y - zoomSelectionStart_.y)
-			                 }, platform::system_color(platform::SystemColor::highlight));
+			renderer.outline({(std::min)(zoomSelectionStart_.x, zoomSelectionCurrent_.x),
+			                  (std::min)(zoomSelectionStart_.y, zoomSelectionCurrent_.y),
+			                  std::abs(zoomSelectionCurrent_.x - zoomSelectionStart_.x),
+			                  std::abs(zoomSelectionCurrent_.y - zoomSelectionStart_.y)},
+			                 platform::system_color(platform::SystemColor::highlight));
 
 		const auto& feedbackView = active_view();
 		if (showCollage || feedbackView.bounds.is_empty() || feedbackView.sourceWidth <= 0 ||
-			feedbackView.sourceHeight <= 0)
+		    feedbackView.sourceHeight <= 0)
 			return;
 		const bool temporary = quickZoom_;
 		const double feedbackScale = effective_scale(activeComparison_);
-		const std::wstring zoomText = !temporary && feedbackView.zoom.is_fit()
-			                              ? L"Fit"
-			                              : std::abs(feedbackScale - 1.0) < 0.0005
-			                              ? L"100% (1:1)"
-			                              : std::format(L"{}%", static_cast<int>(std::lround(feedbackScale * 100.0)));
+		const std::wstring zoomText = !temporary && feedbackView.zoom.is_fit() ? L"Fit"
+		                              : std::abs(feedbackScale - 1.0) < 0.0005
+		                                  ? L"100% (1:1)"
+		                                  : std::format(L"{}%", static_cast<int>(std::lround(feedbackScale * 100.0)));
 		const app::sizei zoomTextSize = renderer.measure_text(zoomText);
 		const int feedbackPadding = metric(7);
-		app::recti zoomBadge{
-			feedbackView.bounds.right() - zoomTextSize.width - feedbackPadding * 2 - metric(8),
-			feedbackView.bounds.y + metric(8), zoomTextSize.width + feedbackPadding * 2,
-			(std::max)(metric(24), zoomTextSize.height + feedbackPadding)
-		};
+		app::recti zoomBadge{feedbackView.bounds.right() - zoomTextSize.width - feedbackPadding * 2 - metric(8),
+		                     feedbackView.bounds.y + metric(8), zoomTextSize.width + feedbackPadding * 2,
+		                     (std::max)(metric(24), zoomTextSize.height + feedbackPadding)};
 		renderer.blend_fill(zoomBadge, temporary ? color{255, 244, 190, 220} : color{245, 245, 245, 220});
 		renderer.outline(zoomBadge, platform::system_color(platform::SystemColor::shadow));
 		renderer.text(zoomText, zoomBadge, colors::black,
 		              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-		              platform::TextFormat::singleLine);
+		                  platform::TextFormat::singleLine);
 		const bool provisional = activeComparison_ ? comparisonLoading_.provisional() : primaryLoading_.provisional();
 		if (provisional)
 		{
 			constexpr std::wstring_view improvingText = L"Improving...";
 			const int qualityWidth = (std::max)(zoomBadge.width,
 			                                    renderer.measure_text(improvingText).width + feedbackPadding * 2);
-			const app::recti qualityBadge{
-				zoomBadge.right() - qualityWidth, zoomBadge.bottom() + metric(4), qualityWidth, metric(22)
-			};
+			const app::recti qualityBadge{zoomBadge.right() - qualityWidth, zoomBadge.bottom() + metric(4),
+			                              qualityWidth, metric(22)};
 			renderer.blend_fill(qualityBadge, color{245, 245, 245, 220});
 			renderer.text(improvingText, qualityBadge, colors::black,
 			              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-			              platform::TextFormat::singleLine);
+			                  platform::TextFormat::singleLine);
 		}
 	}
 
@@ -2231,21 +2138,15 @@ namespace iw
 			imageScroll_.layout(imagePane_, imagePane_.height, 0, metric(12), metric(28));
 			const bool comparing = fullscreenSelection_.secondary() >= 0;
 			const int halfWidth = comparing ? imagePane_.width / 2 : imagePane_.width;
-			primaryView_.bounds = {
-				imagePane_.x, imagePane_.y, halfWidth, (std::max)(0, imagePane_.height - metric(8))
-			};
-			comparisonView_.bounds = comparing
-				                         ? app::recti{
-					                         imagePane_.x + halfWidth, imagePane_.y,
-					                         (std::max)(0, imagePane_.width - halfWidth),
-					                         (std::max)(0, imagePane_.height - metric(8))
-				                         }
-				                         : app::recti{};
+			primaryView_.bounds = {imagePane_.x, imagePane_.y, halfWidth, (std::max)(0, imagePane_.height - metric(8))};
+			comparisonView_.bounds = comparing ? app::recti{imagePane_.x + halfWidth, imagePane_.y,
+			                                                (std::max)(0, imagePane_.width - halfWidth),
+			                                                (std::max)(0, imagePane_.height - metric(8))}
+			                                   : app::recti{};
 			propertyFlow_ = {};
 			stripHeaderBounds_ = {itemsViewport_.x, itemsViewport_.y, itemsViewport_.width, metric(32)};
-			stripToggleBounds_ = {
-				stripHeaderBounds_.right() - metric(32), stripHeaderBounds_.y, metric(32), metric(32)
-			};
+			stripToggleBounds_ = {stripHeaderBounds_.right() - metric(32), stripHeaderBounds_.y, metric(32),
+			                      metric(32)};
 			if (!thumbnailsExpanded_)
 			{
 				itemsViewport_ = {};
@@ -2259,8 +2160,8 @@ namespace iw
 			itemFlow_.bounds = itemsViewport_;
 			const int tileWidth = metric(thumbnailSize_ + 16);
 			const int tileHeight = metric(thumbnailSize_ + 38);
-			const int imageCount = static_cast<int>(std::ranges::count(items_, files::ItemKind::image,
-			                                                           &files::FolderItem::kind));
+			const int imageCount = static_cast<int>(
+				std::ranges::count(items_, files::ItemKind::image, &files::FolderItem::kind));
 			stripContentWidth_ = metric(8) + imageCount * (tileWidth + metric(8));
 			thumbnailScroll_.layout(itemsViewport_, stripContentWidth_, stripOffset_, metric(12), metric(28));
 			stripOffset_ = thumbnailScroll_.offset;
@@ -2282,30 +2183,25 @@ namespace iw
 		const int propertyColumns = (std::max)(1, imagePane_.width / metric(260));
 		const int propertyRows = (static_cast<int>(properties_.size()) + propertyColumns - 1) / propertyColumns;
 		const int propertyListHeight = properties_.empty() || !propertiesExpanded_
-			                               ? 0
-			                               : metric(8) + propertyRows * metric(26) +
-			                               (std::max)(0, propertyRows - 1) * metric(2);
+		                                   ? 0
+		                                   : metric(8) + propertyRows * metric(26) +
+		                                         (std::max)(0, propertyRows - 1) * metric(2);
 		const int propertiesHeight = properties_.empty() ? 0 : metric(34) + propertyListHeight;
-		const app::recti proposedFitBounds{
-			imagePane_.x + metric(12), imagePane_.y + metric(12),
-			(std::max)(0, imagePane_.width - metric(24)),
-			(std::max)(0, imagePane_.height - propertiesHeight - metric(24))
-		};
+		const app::recti proposedFitBounds{imagePane_.x + metric(12), imagePane_.y + metric(12),
+		                                   (std::max)(0, imagePane_.width - metric(24)),
+		                                   (std::max)(0, imagePane_.height - propertiesHeight - metric(24))};
 		const int imageSectionHeight = primaryView_.zoom.is_effectively_fit(proposedFitBounds)
-			                               ? (std::max)(metric(220), imagePane_.height - propertiesHeight)
-			                               : (std::max)(metric(220),
-		                                            static_cast<int>(primaryView_.sourceHeight *
-		                                                                 primaryView_.zoom.effective_scale(
-			                                                                 primaryView_.bounds))
-			                                            +
-			                                            metric(32));
+		                                   ? (std::max)(metric(220), imagePane_.height - propertiesHeight)
+		                                   : (std::max)(metric(220), static_cast<int>(primaryView_.sourceHeight *
+		                                                                              primaryView_.zoom.effective_scale(
+																						  primaryView_.bounds)) +
+		                                                                 metric(32));
 		imageContentHeight_ = imageSectionHeight + propertiesHeight;
 		imageScroll_.layout(imagePane_, imageContentHeight_, imageScroll_.offset, metric(12), metric(28));
 		const app::recti imageViewport = imageScroll_.viewport(imagePane_);
-		primaryView_.bounds = {
-			imageViewport.x + metric(12), imagePane_.y - imageScroll_.offset + metric(12),
-			(std::max)(0, imageViewport.width - metric(24)), (std::max)(0, imageSectionHeight - metric(24))
-		};
+		primaryView_.bounds = {imageViewport.x + metric(12), imagePane_.y - imageScroll_.offset + metric(12),
+		                       (std::max)(0, imageViewport.width - metric(24)),
+		                       (std::max)(0, imageSectionHeight - metric(24))};
 		arrange_collage();
 		propertyFlow_ = {};
 		propertyFlow_.style.padding = metric(12);
@@ -2317,15 +2213,12 @@ namespace iw
 			propertyFlow_.children.push_back(std::move(row));
 		}
 		ui::FlexBox::arrange_list(propertyFlow_,
-		                          {
-			                          imageViewport.x,
-			                          imagePane_.y - imageScroll_.offset + imageSectionHeight + metric(34),
-			                          imageViewport.width, propertyListHeight
-		                          }, metric(26));
-		propertyToggleBounds_ = {
-			imageViewport.right() - metric(34),
-			imagePane_.y - imageScroll_.offset + imageSectionHeight, metric(34), metric(34)
-		};
+		                          {imageViewport.x,
+		                           imagePane_.y - imageScroll_.offset + imageSectionHeight + metric(34),
+		                           imageViewport.width, propertyListHeight},
+		                          metric(26));
+		propertyToggleBounds_ = {imageViewport.right() - metric(34),
+		                         imagePane_.y - imageScroll_.offset + imageSectionHeight, metric(34), metric(34)};
 
 		if (mode_ == ItemMode::single) return;
 
@@ -2354,9 +2247,8 @@ namespace iw
 			{
 				const int imageHeight = metric(thumbnailSize_);
 				const auto& thumbnail = thumbnails_[index];
-				const double ratio = thumbnail.height > 0
-					                     ? static_cast<double>(thumbnail.width) / thumbnail.height
-					                     : 4.0 / 3.0;
+				const double ratio = thumbnail.height > 0 ? static_cast<double>(thumbnail.width) / thumbnail.height
+				                                          : 4.0 / 3.0;
 				const int imageWidth = std::clamp(static_cast<int>(imageHeight * ratio), metric(64),
 				                                  metric(thumbnailSize_));
 				item.style.basis = imageWidth + metric(16);
@@ -2378,14 +2270,12 @@ namespace iw
 				const int innerWidth = (std::max)(1, viewport.width - itemFlow_.style.padding * 2);
 				const int desiredWidth = metric(thumbnailSize_ + 16);
 				const int columns = (std::max)(1, (innerWidth + itemFlow_.style.gap) /
-				                               (desiredWidth + itemFlow_.style.gap));
+				                                      (desiredWidth + itemFlow_.style.gap));
 				const int cellWidth = (std::max)(1, (innerWidth - (columns - 1) * itemFlow_.style.gap) / columns);
 				for (auto& item : itemFlow_.children) item.style.basis = cellWidth;
 			}
-			const auto size = ui::FlexBox::arrange(itemFlow_, {
-				                                       viewport.x, viewport.y - itemsScroll_.offset,
-				                                       viewport.width, viewport.height + itemsScroll_.offset
-			                                       });
+			const auto size = ui::FlexBox::arrange(itemFlow_, {viewport.x, viewport.y - itemsScroll_.offset,
+			                                                   viewport.width, viewport.height + itemsScroll_.offset});
 			if (mode_ == ItemMode::thumbnails)
 			{
 				const int left = viewport.x + itemFlow_.style.padding;
@@ -2395,7 +2285,7 @@ namespace iw
 					size_t last = first + 1;
 					int itemWidths = itemFlow_.children[first].bounds.width;
 					while (last < itemFlow_.children.size() &&
-						itemFlow_.children[last].bounds.y == itemFlow_.children[first].bounds.y)
+					       itemFlow_.children[last].bounds.y == itemFlow_.children[first].bounds.y)
 						itemWidths += itemFlow_.children[last++].bounds.width;
 					const int spacing = (std::max)(0, innerWidth - itemWidths) / static_cast<int>(last - first + 1);
 					int x = left + spacing;
@@ -2414,15 +2304,16 @@ namespace iw
 		itemsViewport_ = itemsScroll_.viewport(itemsViewport_);
 		if (mode_ == ItemMode::details) detailsHeaderBounds_.width = itemsViewport_.width;
 		contentHeight_ = arrangeItems(itemsViewport_).height;
-		itemsScroll_.layout({
-			                    itemsViewport_.x, itemsViewport_.y,
-			                    itemsViewport_.width + (itemsScroll_.visible() ? itemsScroll_.track.width : 0),
-			                    itemsViewport_.height
-		                    },
+		itemsScroll_.layout({itemsViewport_.x, itemsViewport_.y,
+		                     itemsViewport_.width + (itemsScroll_.visible() ? itemsScroll_.track.width : 0),
+		                     itemsViewport_.height},
 		                    contentHeight_, itemsScroll_.offset);
 	}
 
-	int ImageCanvas::splitter_x() const { return splitterBounds_.x + splitterBounds_.width / 2; }
+	int ImageCanvas::splitter_x() const
+	{
+		return splitterBounds_.x + splitterBounds_.width / 2;
+	}
 
 	app::recti ImageCanvas::item_rect(const int index) const
 	{
@@ -2431,9 +2322,8 @@ namespace iw
 			const auto item = std::ranges::find(itemFlow_.children, index, &ui::Element::id);
 			return item == itemFlow_.children.end() ? app::recti{} : item->bounds;
 		}
-		return index >= 0 && index < static_cast<int>(itemFlow_.children.size())
-			       ? itemFlow_.children[index].bounds
-			       : app::recti{};
+		return index >= 0 && index < static_cast<int>(itemFlow_.children.size()) ? itemFlow_.children[index].bounds
+		                                                                         : app::recti{};
 	}
 
 	void ImageCanvas::invalidate_item(const int index) const
@@ -2512,8 +2402,7 @@ namespace iw
 		const int index = active_selection().move_focus(direction);
 		ensure_visible(index);
 		notify_selection();
-		if (items_[index].kind != files::ItemKind::folder &&
-			!media::is_media(items_[index].kind) && activationHandler_)
+		if (items_[index].kind != files::ItemKind::folder && !media::is_media(items_[index].kind) && activationHandler_)
 			activationHandler_(files_[index]);
 		else load(files_[index]);
 	}
@@ -2616,20 +2505,15 @@ namespace iw
 				if (!typeSummary.empty()) typeSummary += L", ";
 				typeSummary += std::format(L"{} {}", count, type);
 			}
-			const bool imagesOnly = std::ranges::all_of(selected.selected(), [this](const int index)
-			{
+			const bool imagesOnly = std::ranges::all_of(selected.selected(), [this](const int index) {
 				return index >= 0 && index < static_cast<int>(items_.size()) &&
-					items_[index].kind == files::ItemKind::image;
+				       items_[index].kind == files::ItemKind::image;
 			});
-			properties_.push_back({
-				L"Selected", std::format(L"{} {}", selected.size(),
-				                         imagesOnly ? L"images" : L"items")
-			});
+			properties_.push_back(
+				{L"Selected", std::format(L"{} {}", selected.size(), imagesOnly ? L"images" : L"items")});
 			properties_.push_back({L"Formats", std::move(typeSummary)});
-			properties_.push_back({
-				metadataPaths.size() < selected.size() ? L"Sample size" : L"Total size",
-				L"Loading..."
-			});
+			properties_.push_back(
+				{metadataPaths.size() < selected.size() ? L"Sample size" : L"Total size", L"Loading..."});
 			if (!imagesOnly)
 				properties_.push_back({L"Folder", files_.empty() ? L"" : files_.front().parent_path().wstring()});
 			if (selected.focus() >= 0 && selected.focus() < static_cast<int>(files_.size()))
@@ -2644,21 +2528,15 @@ namespace iw
 		}
 		const auto item = std::ranges::find(items_, path_, &files::FolderItem::path);
 		const files::ItemKind kind = item == items_.end() ? displayedKind_ : item->kind;
-		properties_.push_back({
-			L"Type", item == items_.end() ? format::file_type(path_) : format::item_type(*item)
-		});
+		properties_.push_back({L"Type", item == items_.end() ? format::file_type(path_) : format::item_type(*item)});
 		if (displayedKind_ == files::ItemKind::image)
-			properties_.push_back({
-				L"Dimensions",
-				std::format(L"{} x {} pixels", primaryView_.sourceWidth, primaryView_.sourceHeight)
-			});
+			properties_.push_back(
+				{L"Dimensions", std::format(L"{} x {} pixels", primaryView_.sourceWidth, primaryView_.sourceHeight)});
 		if (kind != files::ItemKind::folder) properties_.push_back({L"File size", L"Loading..."});
 		properties_.push_back({L"Modified", L"Loading..."});
 		if (kind != files::ItemKind::image)
-			properties_.push_back({
-				kind == files::ItemKind::folder ? L"Location" : L"Folder",
-				path_.parent_path().wstring()
-			});
+			properties_.push_back(
+				{kind == files::ItemKind::folder ? L"Location" : L"Folder", path_.parent_path().wstring()});
 		queue_metadata({path_}, false, 1);
 	}
 
@@ -2689,9 +2567,9 @@ namespace iw
 				if (property.name == L"Sample size" || property.name == L"Total size")
 				{
 					property.value = result.paths.size() < result.selectionCount
-						                 ? std::format(L"{} across first {} files", format::size(totalBytes),
-						                               result.paths.size())
-						                 : format::size(totalBytes);
+					                     ? std::format(L"{} across first {} files", format::size(totalBytes),
+					                                   result.paths.size())
+					                     : format::size(totalBytes);
 					break;
 				}
 			return;
@@ -2701,9 +2579,7 @@ namespace iw
 		for (auto& property : properties_)
 		{
 			if (property.name == L"File size")
-				property.value = metadata.hasSize
-					                 ? format::size(metadata.size)
-					                 : L"Unavailable";
+				property.value = metadata.hasSize ? format::size(metadata.size) : L"Unavailable";
 			else if (property.name == L"Modified")
 				property.value = metadata.hasModified ? format::modified(metadata.modified) : L"Unknown";
 		}
@@ -2739,8 +2615,8 @@ namespace iw
 		};
 		const auto paintPanel = [&](const std::wstring& title, const std::vector<Property>& rows,
 		                            const app::recti available, const bool rightAligned, const bool expanded,
-			                            app::recti& toggle, app::recti& header, const std::uint8_t opacity,
-			                            const bool fullWidth = false)
+		                            app::recti& toggle, app::recti& header, const std::uint8_t opacity,
+		                            const bool fullWidth = false)
 		{
 			const int headerHeight = metric(34);
 			const int rowHeight = metric(24);
@@ -2748,12 +2624,13 @@ namespace iw
 			for (const auto& row : rows)
 			{
 				const int width = renderer.measure_text(row.name).width + renderer.measure_text(row.value).width +
-					metric(64);
+				                  metric(64);
 				contentWidth = (std::max)(contentWidth, width);
 			}
 			const int minimumWidth = metric(150);
-			const int panelWidth = fullWidth ? available.width :
-				std::clamp(contentWidth, minimumWidth, (std::max)(minimumWidth, available.width));
+			const int panelWidth = fullWidth ? available.width
+			                                 : std::clamp(contentWidth, minimumWidth,
+			                                              (std::max)(minimumWidth, available.width));
 			const int columns = fullWidth ? (std::max)(1, panelWidth / metric(260)) : 1;
 			const int rowCount = (static_cast<int>(rows.size()) + columns - 1) / columns;
 			const int panelHeight = headerHeight + (expanded ? rowCount * rowHeight + metric(6) : 0);
@@ -2765,10 +2642,10 @@ namespace iw
 			renderer.text(title, {panel.x + metric(12), panel.y + metric(4), panel.width - metric(52), metric(26)},
 			              colors::black,
 			              platform::TextFormat::left | platform::TextFormat::verticalCenter |
-			              platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
+			                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
 			renderer.text(expanded ? L"\x25BC" : L"\x25B2", toggle, colors::black,
 			              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-			              platform::TextFormat::singleLine);
+			                  platform::TextFormat::singleLine);
 			if (!expanded) return;
 			const int cellWidth = panel.width / columns;
 			for (size_t index = 0; index < rows.size(); ++index)
@@ -2781,15 +2658,15 @@ namespace iw
 				const int labelWidth = renderer.measure_text(row.name).width;
 				renderer.text(glyph(row.name), {cellX + metric(8), y, metric(22), rowHeight}, colors::black,
 				              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-				              platform::TextFormat::singleLine);
+				                  platform::TextFormat::singleLine);
 				renderer.text(row.name, {cellX + metric(36), y, labelWidth, rowHeight}, colors::black,
 				              platform::TextFormat::left | platform::TextFormat::verticalCenter |
-				              platform::TextFormat::singleLine);
+				                  platform::TextFormat::singleLine);
 				renderer.text(row.value,
 				              {cellX + metric(44) + labelWidth, y, cellWidth - labelWidth - metric(52), rowHeight},
 				              colors::black,
 				              platform::TextFormat::left | platform::TextFormat::verticalCenter |
-				              platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
+				                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
 			}
 		};
 		if (fullscreen_)
@@ -2810,29 +2687,27 @@ namespace iw
 					if (!metadata->second.dateTaken.empty()) rows.push_back({L"Captured", metadata->second.dateTaken});
 					if (!metadata->second.camera.empty()) rows.push_back({L"Camera", metadata->second.camera});
 					std::wstring exposure;
-					for (const auto& value : {
-						     metadata->second.exposure, metadata->second.aperture,
-						     metadata->second.iso, metadata->second.focalLength
-					     })
+					for (const auto& value : {metadata->second.exposure, metadata->second.aperture,
+					                          metadata->second.iso, metadata->second.focalLength})
 						if (!value.empty()) exposure += (exposure.empty() ? L"" : L"  ") + value;
 					if (!exposure.empty()) rows.push_back({L"Exposure", std::move(exposure)});
 					if (!metadata->second.colourProfile.empty())
 						rows.push_back({L"Colour profile", metadata->second.colourProfile});
 				}
 				if (item.kind != files::ItemKind::image)
-					rows.push_back({
-						item.kind == files::ItemKind::folder ? L"Location" : L"Folder",
-						item.path.parent_path().wstring()
-					});
+					rows.push_back({item.kind == files::ItemKind::folder ? L"Location" : L"Folder",
+					                item.path.parent_path().wstring()});
 				const bool primary = index == fullscreenSelection_.focus();
 				const bool expanded = primary ? propertiesExpanded_ : comparisonPropertiesExpanded_;
 				app::recti& toggle = primary ? propertyToggleBounds_ : comparisonPropertyToggleBounds_;
 				app::recti& header = primary ? propertyHeaderBounds_ : comparisonPropertyHeaderBounds_;
 				const app::recti client = frame_ ? frame_->client_rect() : app::recti{};
 				const app::recti available = !thumbnailsExpanded_
-					? app::recti{primary ? 0 : client.width / 2, 0,
-					        fullscreenSelection_.secondary() >= 0 ? client.width / 2 : client.width, client.height}
-					: app::recti{bounds.x, bounds.y, bounds.width, bounds.height};
+				                                 ? app::recti{primary ? 0 : client.width / 2, 0,
+				                                              fullscreenSelection_.secondary() >= 0 ? client.width / 2
+				                                                                                    : client.width,
+				                                              client.height}
+				                                 : app::recti{bounds.x, bounds.y, bounds.width, bounds.height};
 				paintPanel(item.path.filename().wstring(), rows, available, !primary, expanded, toggle, header, 210);
 				if (!thumbnailsExpanded_)
 				{
@@ -2844,11 +2719,10 @@ namespace iw
 						stripHeaderBounds_.x = left;
 					}
 					else
-						stripHeaderBounds_.width = (std::max)(0,
-							(std::max)(stripHeaderBounds_.x, header.x - padding) - stripHeaderBounds_.x);
-					stripToggleBounds_ = {
-						stripHeaderBounds_.right() - metric(32), stripHeaderBounds_.y, metric(32), metric(32)
-					};
+						stripHeaderBounds_.width = (std::max)(0, (std::max)(stripHeaderBounds_.x, header.x - padding) -
+						                                             stripHeaderBounds_.x);
+					stripToggleBounds_ = {stripHeaderBounds_.right() - metric(32), stripHeaderBounds_.y, metric(32),
+					                      metric(32)};
 				}
 			};
 			paintSummary(fullscreenSelection_.focus(), primaryView_.bounds);
@@ -2857,15 +2731,11 @@ namespace iw
 			return;
 		}
 		const auto selectedCount = active_selection().size();
-		const std::wstring title = selectedCount > 1
-			                           ? std::format(L"{} items selected", selectedCount)
-			                           : path_.empty()
-			                           ? L"Properties"
-			                           : path_.filename().wstring();
-		const app::recti available{
-			propertyFlow_.bounds.x, propertyFlow_.bounds.y - metric(34),
-			propertyFlow_.bounds.width, propertyFlow_.bounds.height + metric(34)
-		};
+		const std::wstring title = selectedCount > 1 ? std::format(L"{} items selected", selectedCount)
+		                           : path_.empty()   ? L"Properties"
+		                                             : path_.filename().wstring();
+		const app::recti available{propertyFlow_.bounds.x, propertyFlow_.bounds.y - metric(34),
+		                           propertyFlow_.bounds.width, propertyFlow_.bounds.height + metric(34)};
 		paintPanel(title, properties_, available, false, propertiesExpanded_, propertyToggleBounds_,
 		           propertyHeaderBounds_, 220, true);
 	}
@@ -2875,15 +2745,15 @@ namespace iw
 		if (fullscreen_)
 		{
 			renderer.blend_fill(stripHeaderBounds_, colors::light_gray.with_alpha(225));
-			renderer.text(L"Images", {
-				              stripHeaderBounds_.x + metric(12), stripHeaderBounds_.y,
-				              stripHeaderBounds_.width - metric(52), stripHeaderBounds_.height
-			              }, colors::black,
+			renderer.text(L"Images",
+			              {stripHeaderBounds_.x + metric(12), stripHeaderBounds_.y,
+			               stripHeaderBounds_.width - metric(52), stripHeaderBounds_.height},
+			              colors::black,
 			              platform::TextFormat::left | platform::TextFormat::verticalCenter |
-			              platform::TextFormat::singleLine);
+			                  platform::TextFormat::singleLine);
 			renderer.text(thumbnailsExpanded_ ? L"\x25BC" : L"\x25B2", stripToggleBounds_, colors::black,
 			              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-			              platform::TextFormat::singleLine);
+			                  platform::TextFormat::singleLine);
 			if (!thumbnailsExpanded_) return;
 		}
 		const bool details = mode_ == ItemMode::details && !fullscreen_;
@@ -2893,11 +2763,11 @@ namespace iw
 		if (files_.empty())
 		{
 			const std::wstring message = totalItemCount_ == 0
-				                             ? L"empty folder"
-				                             : std::format(L"Click to show {} filtered out items.", totalItemCount_);
+			                                 ? L"empty folder"
+			                                 : std::format(L"Click to show {} filtered out items.", totalItemCount_);
 			renderer.text(message, itemsViewport_, platform::system_color(platform::SystemColor::grayText),
 			              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-			              platform::TextFormat::singleLine);
+			                  platform::TextFormat::singleLine);
 		}
 		else details ? paint_details(renderer) : paint_tiles(renderer);
 		renderer.reset_clip();
@@ -2908,21 +2778,18 @@ namespace iw
 		renderer.fill(detailsHeaderBounds_, platform::system_color(platform::SystemColor::face));
 		const auto columns = media_detail_columns(detailsHeaderBounds_);
 		constexpr std::array labels{L"Name", L"Date modified", L"Type", L"Size", L"Dimensions", L"Duration"};
-		constexpr std::array fields{
-			files::SortField::name, files::SortField::modified, files::SortField::type,
-			files::SortField::size, files::SortField::dimensions, files::SortField::duration
-		};
+		constexpr std::array fields{files::SortField::name, files::SortField::modified,   files::SortField::type,
+		                            files::SortField::size, files::SortField::dimensions, files::SortField::duration};
 		for (size_t index = 0; index < columns.size(); ++index)
 		{
-			const std::wstring label = fields[index] == sortField_
-				                           ? std::wstring(labels[index]) + L" ^"
-				                           : labels[index];
+			const std::wstring label = fields[index] == sortField_ ? std::wstring(labels[index]) + L" ^"
+			                                                       : labels[index];
 			app::recti text = columns[index];
 			text.x += index == 0 ? metric(8) : metric(6);
 			text.width = (std::max)(0, text.width - metric(12));
 			renderer.text(label, text, platform::system_color(platform::SystemColor::buttonText),
 			              platform::TextFormat::left | platform::TextFormat::verticalCenter |
-			              platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
+			                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
 			if (index)
 				renderer.outline({columns[index].x, columns[index].y, 1, columns[index].height},
 				                 platform::system_color(platform::SystemColor::shadow));
@@ -2937,31 +2804,28 @@ namespace iw
 			const app::recti row = item_rect(index);
 			if (!row.intersects(itemsViewport_)) continue;
 			const bool selected = active_selection().contains(index);
-			renderer.fill(row, platform::system_color(selected
-				                                          ? platform::SystemColor::highlight
-				                                          : index == hoverIndex_
-				                                          ? platform::SystemColor::face
-				                                          : platform::SystemColor::window));
+			renderer.fill(row, platform::system_color(selected               ? platform::SystemColor::highlight
+			                                          : index == hoverIndex_ ? platform::SystemColor::face
+			                                                                 : platform::SystemColor::window));
 			const auto columns = media_detail_columns(row);
 			const auto& item = items_[index];
 			const auto& icon = detailTypeIcons_[static_cast<size_t>(item.kind)];
 			if (!icon.pixels.empty())
-				renderer.image({icon.width, icon.height, icon.pixels,
-				                typeIconAlpha_[static_cast<size_t>(item.kind)]},
+				renderer.image({icon.width, icon.height, icon.pixels, typeIconAlpha_[static_cast<size_t>(item.kind)]},
 				               {columns[0].x + metric(4), row.y + metric(4), metric(32), metric(32)});
-			const color textColor = platform::system_color(
-				selected ? platform::SystemColor::highlightText : platform::SystemColor::windowText);
+			const color textColor = platform::system_color(selected ? platform::SystemColor::highlightText
+			                                                        : platform::SystemColor::windowText);
 			app::recti name = columns[0];
 			name.x += metric(42);
 			name.width = (std::max)(0, name.width - metric(48));
 			renderer.text(item.path.filename().wstring(), name, textColor,
 			              platform::TextFormat::left | platform::TextFormat::verticalCenter |
-			              platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
+			                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
 			const std::wstring modified = item.hasModified ? format::modified(item.modified) : L"";
 			const std::wstring size = item.hasSize ? format::size(item.size) : L"";
 			const std::wstring dimensions = format::dimensions(item.width, item.height);
 			const std::array values{modified, format::item_type(item), size, dimensions,
-				item.hasDuration ? media::duration_text(item.duration) : std::wstring{}};
+			                        item.hasDuration ? media::duration_text(item.duration) : std::wstring{}};
 			for (size_t column = 1; column < columns.size(); ++column)
 			{
 				app::recti text = columns[column];
@@ -2969,7 +2833,7 @@ namespace iw
 				text.width = (std::max)(0, text.width - metric(12));
 				renderer.text(values[column - 1], text, textColor,
 				              platform::TextFormat::left | platform::TextFormat::verticalCenter |
-				              platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
+				                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
 			}
 			if (index == active_selection().focus()) renderer.focus(row);
 		}
@@ -2982,18 +2846,13 @@ namespace iw
 			const app::recti tile = item_rect(index);
 			if (!tile.intersects(itemsViewport_)) continue;
 			const bool selected = active_selection().contains(index);
-			renderer.fill(tile, platform::system_color(selected
-				                                           ? platform::SystemColor::highlight
-				                                           : index == hoverIndex_
-				                                           ? platform::SystemColor::face
-				                                           : platform::SystemColor::window));
-			const app::recti imageArea{
-				tile.x + metric(8), tile.y + metric(8), tile.width - metric(16), tile.height - metric(39)
-			};
+			renderer.fill(tile, platform::system_color(selected               ? platform::SystemColor::highlight
+			                                           : index == hoverIndex_ ? platform::SystemColor::face
+			                                                                  : platform::SystemColor::window));
+			const app::recti imageArea{tile.x + metric(8), tile.y + metric(8), tile.width - metric(16),
+			                           tile.height - metric(39)};
 			const auto& thumb = thumbnails_[index];
-			const auto* icon = thumb.pixels.empty()
-				                   ? &typeIcons_[static_cast<size_t>(items_[index].kind)]
-				                   : nullptr;
+			const auto* icon = thumb.pixels.empty() ? &typeIcons_[static_cast<size_t>(items_[index].kind)] : nullptr;
 			const int visualWidth = icon ? icon->width : thumb.width;
 			const int visualHeight = icon ? icon->height : thumb.height;
 			const std::span<const std::uint32_t> visualPixels = icon ? icon->pixels : thumb.pixels;
@@ -3005,23 +2864,20 @@ namespace iw
 				const int height = (std::max)(1, static_cast<int>(std::lround(visualHeight * scale)));
 				renderer.image({visualWidth, visualHeight, visualPixels,
 				                icon && typeIconAlpha_[static_cast<size_t>(items_[index].kind)]},
-				               {
-					               imageArea.x + (imageArea.width - width) / 2,
-					               imageArea.y + (imageArea.height - height) / 2, width, height
-				               });
+				               {imageArea.x + (imageArea.width - width) / 2,
+				                imageArea.y + (imageArea.height - height) / 2, width, height});
 			}
 			else
 			{
 				renderer.fill(imageArea, platform::system_color(platform::SystemColor::face));
 			}
-			const app::recti text{
-				tile.x + metric(5), tile.bottom() - metric(27), tile.width - metric(10), metric(23)
-			};
+			const app::recti text{tile.x + metric(5), tile.bottom() - metric(27), tile.width - metric(10), metric(23)};
 			const auto name = files_[index].filename().wstring();
-			renderer.text(name, text, platform::system_color(
-				              selected ? platform::SystemColor::highlightText : platform::SystemColor::windowText),
+			renderer.text(name, text,
+			              platform::system_color(selected ? platform::SystemColor::highlightText
+			                                              : platform::SystemColor::windowText),
 			              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-			              platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
+			                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
 			if (index == active_selection().focus()) renderer.focus(tile);
 		}
 	}

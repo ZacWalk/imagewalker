@@ -24,13 +24,22 @@
 
 namespace iw
 {
-	namespace tests { class ImageCanvasAccess; }
+	namespace tests
+	{
+		class ImageCanvasAccess;
+	}
 
 	class ImageCanvas final : public platform::FrameReactor
 	{
 		friend class tests::ImageCanvasAccess;
 	public:
-		enum class ItemMode { details, thumbnails, matrix, single };
+		enum class ItemMode
+		{
+			details,
+			thumbnails,
+			matrix,
+			single
+		};
 
 		ImageCanvas();
 		~ImageCanvas() override = default;
@@ -206,7 +215,13 @@ namespace iw
 			int sourceHeight{};
 		};
 
-		enum class ScrollDrag { none, image, items, thumbnails };
+		enum class ScrollDrag
+		{
+			none,
+			image,
+			items,
+			thumbnails
+		};
 
 		enum class InputEvent
 		{
@@ -223,7 +238,14 @@ namespace iw
 			captureLost
 		};
 
-		enum class ThumbnailState : std::uint8_t { none, queued, resident, skipped, evicted };
+		enum class ThumbnailState : std::uint8_t
+		{
+			none,
+			queued,
+			resident,
+			skipped,
+			evicted
+		};
 
 		// One tile of the multi-selection collage. Each cell decodes at its own size rather than
 		// borrowing the thumbnail cache, which is capped far below the size a collage cell reaches.
@@ -249,8 +271,7 @@ namespace iw
 		platform::MessageResult gesture(const platform::WindowFramePtr& frame,
 		                                const platform::GestureInput& input) override;
 		void paint(const platform::WindowFramePtr& frame, platform::DrawContext& draw) override;
-		void size(const platform::WindowFramePtr& frame, app::sizei extent,
-		          platform::MeasureContext& measure) override;
+		void size(const platform::WindowFramePtr& frame, app::sizei extent, platform::MeasureContext& measure) override;
 		platform::MessageResult handle_input(InputEvent event, const platform::MouseInput& mouse = {},
 		                                     const platform::KeyInput& key = {});
 		void paint_items(const ui::CanvasRenderer& renderer);
@@ -268,16 +289,22 @@ namespace iw
 		void queue_collage();
 		void apply_collage(std::uint64_t generation, size_t cell, files::DecodedImage image);
 		void rebuild_layout();
-		void invalidate() const { if (frame_) frame_->invalidate(); }
+		void invalidate() const
+		{
+			if (frame_) frame_->invalidate();
+		}
 		void mark_layout_dirty() { layoutDirty_ = true; }
-		void ensure_layout() { if (layoutDirty_) rebuild_layout(); }
+		void ensure_layout()
+		{
+			if (layoutDirty_) rebuild_layout();
+		}
 		int metric(const int logicalValue) const { return ui::scale_metric(logicalValue, dpi_); }
 		std::array<app::recti, 5> details_columns(app::recti row) const;
 		void rebuild_properties();
 		void measure_properties();
 		void measure_property_panels();
 		app::recti measure_property_panel(const std::wstring& title, const std::vector<Property>& rows,
-		                             app::recti available, bool rightAligned, bool expanded) const;
+		                                  app::recti available, bool rightAligned, bool expanded) const;
 		const files::Metadata* cached_metadata(const std::filesystem::path& path) const;
 		std::vector<Property> summary_properties(int index, std::vector<std::filesystem::path>& pending) const;
 		void queue_metadata(std::vector<std::filesystem::path> paths, bool aggregate, size_t selectionCount);

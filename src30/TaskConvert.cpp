@@ -62,10 +62,8 @@ namespace iw
 		// Only ever smaller: a photo already inside the limit is left alone.
 		if (longest <= limit) return {width, height};
 		const auto scale = static_cast<double>(limit) / longest;
-		return {
-			(std::max)(1, static_cast<int>(width * scale + 0.5)),
-			(std::max)(1, static_cast<int>(height * scale + 0.5))
-		};
+		return {(std::max)(1, static_cast<int>(width * scale + 0.5)),
+		        (std::max)(1, static_cast<int>(height * scale + 0.5))};
 	}
 
 	void TaskConvert::set_initial_destination(std::filesystem::path folder)
@@ -78,14 +76,21 @@ namespace iw
 		formats_ = files::writable_image_formats();
 		std::erase(formats_, files::ImageSaveFormat::bmp);
 
-		const auto changed = [this] { refresh_changes(); controls_changed(); };
-		const auto redraw = [this] { refresh_changes(); };
+		const auto changed = [this]
+		{
+			refresh_changes();
+			controls_changed();
+		};
+		const auto redraw = [this]
+		{
+			refresh_changes();
+		};
 
 		ui::Control description;
 		description.id = idDescription;
 		description.kind = ui::ControlKind::label;
-		description.label =
-			L"Your original photos are kept. A new file is written to the destination folder for each one.";
+		description
+			.label = L"Your original photos are kept. A new file is written to the destination folder for each one.";
 		panel_.add(std::move(description));
 
 		ui::Control destinationHeading;
@@ -240,6 +245,7 @@ namespace iw
 			platform::TextInputOptions options;
 			options.text = L"1920";
 			options.cueBanner = L"Maximum dimension in pixels";
+			options.font = platform::create_message_font(dpi_);
 			options.changed = [this](const std::wstring& text)
 			{
 				if (auto* control = panel_.find(idLimitValue)) control->text = text;
@@ -247,7 +253,6 @@ namespace iw
 			};
 			bind_text_input(idLimitValue, options);
 			limitInput_ = platform::create_text_input(frame_, std::move(options));
-			if (limitInput_) limitInput_->set_font(platform::create_message_font(dpi_));
 		}
 	}
 
@@ -288,7 +293,7 @@ namespace iw
 				for (const auto digit : text)
 				{
 					if (digit < L'0' || digit > L'9' ||
-						settings.maximumDimension > ((std::numeric_limits<int>::max)() - (digit - L'0')) / 10)
+					    settings.maximumDimension > ((std::numeric_limits<int>::max)() - (digit - L'0')) / 10)
 					{
 						settings.maximumDimension = -1;
 						break;
@@ -297,8 +302,7 @@ namespace iw
 				}
 			}
 		}
-		if (const auto* collision = panel_.find(idCollision))
-			settings.policy = policy_from_choice(collision->value);
+		if (const auto* collision = panel_.find(idCollision)) settings.policy = policy_from_choice(collision->value);
 		return settings;
 	}
 
@@ -328,8 +332,9 @@ namespace iw
 	{
 		if (column == 0) return row.source.wstring();
 		if (column == 1) return row.destination.wstring();
-		if (column == 2 && !finished_ && (row.state == tasks::RowState::ready ||
-			row.state == tasks::RowState::blocked || row.state == tasks::RowState::skipped))
+		if (column == 2 && !finished_ &&
+		    (row.state == tasks::RowState::ready || row.state == tasks::RowState::blocked ||
+		     row.state == tasks::RowState::skipped))
 			return convert::describe_changes(row, read_settings());
 		return TaskView::review_cell(row, column);
 	}
@@ -354,7 +359,8 @@ namespace iw
 	{
 		if (!limitInput_) return;
 		const auto bounds = panel_.text_bounds(idLimitValue);
-		const bool visible = bounds.width > 0 && bounds.height > 0 && panel_.interactive() && read_settings().limitEnabled;
+		const bool visible = bounds.width > 0 && bounds.height > 0 && panel_.interactive() &&
+		                     read_settings().limitEnabled;
 		limitInput_->show(visible);
 		if (visible) limitInput_->set_bounds(bounds);
 	}
@@ -408,8 +414,7 @@ namespace iw::convert
 			return result;
 		}
 
-		bool is_original(const std::filesystem::path& destination,
-		                 const std::vector<std::filesystem::path>& originals)
+		bool is_original(const std::filesystem::path& destination, const std::vector<std::filesystem::path>& originals)
 		{
 			const auto normalized = resolved_path(destination);
 			for (const auto& source : originals)
@@ -433,19 +438,17 @@ namespace iw::convert
 
 	std::wstring describe_changes(const tasks::TaskRow& row, const Settings& settings)
 	{
-		if (row.state == tasks::RowState::blocked || row.state == tasks::RowState::skipped)
-			return row.change;
+		if (row.state == tasks::RowState::blocked || row.state == tasks::RowState::skipped) return row.change;
 		const auto reviewed = std::static_pointer_cast<const Reviewed>(row.context);
 		const auto extension = files::image_save_extension(settings.format);
 		auto result = std::format(L"Converted to {}", extension);
 		if (reviewed && reviewed->width > 0 && reviewed->height > 0)
 		{
 			const auto size = limited_output_size(reviewed->width, reviewed->height,
-			                                     settings.limitEnabled ? settings.maximumDimension : 0);
+			                                      settings.limitEnabled ? settings.maximumDimension : 0);
 			result = std::format(L"{} x {} {}", size.width, size.height, extension);
 		}
-		if (settings.format == files::ImageSaveFormat::jpeg)
-			result += std::format(L", quality {}%", settings.quality);
+		if (settings.format == files::ImageSaveFormat::jpeg) result += std::format(L", quality {}%", settings.quality);
 		if (is_webp(settings.format))
 			result += settings.lossless ? L", lossless" : std::format(L", quality {}%", settings.quality);
 		if (row.replace) result += L" - Replace";
@@ -454,7 +457,7 @@ namespace iw::convert
 	}
 
 	tasks::TaskPlan analyze(const std::vector<std::filesystem::path>& sources, const Settings& settings,
-	                       const std::stop_token& stop, const tasks::ProgressFunction& progress)
+	                        const std::stop_token& stop, const tasks::ProgressFunction& progress)
 	{
 		tasks::TaskPlan plan;
 		if (settings.destination.empty())
@@ -482,9 +485,11 @@ namespace iw::convert
 			if (stop.stop_requested()) break;
 			tasks::TaskRow row;
 			row.source = source;
-			row.destination = settings.destination / (source.stem().wstring() + files::image_save_extension(settings.format));
+			row.destination = settings.destination /
+			                  (source.stem().wstring() + files::image_save_extension(settings.format));
 			error.clear();
-			if (!files::is_supported_image(source) || !std::filesystem::is_regular_file(files::native_path(source), error))
+			if (!files::is_supported_image(source) ||
+			    !std::filesystem::is_regular_file(files::native_path(source), error))
 			{
 				row.state = tasks::RowState::blocked;
 				row.change = L"Select only local photo files that can be read.";
@@ -507,17 +512,14 @@ namespace iw::convert
 			plan.rows.push_back(std::move(row));
 			if (progress) progress(plan.rows.size(), sources.size());
 		}
-		tasks::resolve_collisions(plan, settings.policy,
-			[](const std::filesystem::path& path)
-			{
-				std::error_code ec;
-				const auto status = std::filesystem::symlink_status(files::native_path(path), ec);
-				return (ec && ec != std::errc::no_such_file_or_directory) || std::filesystem::exists(status);
-			},
-			[](const std::filesystem::path& proposed, const tasks::ExistsFunction& taken)
-			{
-				return files::unique_destination(proposed, taken);
-			});
+		tasks::resolve_collisions(plan, settings.policy, [](const std::filesystem::path& path)
+		{
+			std::error_code ec;
+			const auto status = std::filesystem::symlink_status(files::native_path(path), ec);
+			return (ec && ec != std::errc::no_such_file_or_directory) || std::filesystem::exists(status);
+		}, [](const std::filesystem::path& proposed, const tasks::ExistsFunction& taken) {
+			return files::unique_destination(proposed, taken);
+		});
 		for (auto& row : plan.rows)
 		{
 			if (row.state != tasks::RowState::ready) continue;
@@ -527,7 +529,8 @@ namespace iw::convert
 			if (!reviewed->destination || reviewed->destination->exists != row.replace)
 			{
 				row.state = tasks::RowState::blocked;
-				row.change = L"The destination changed during analysis or cannot be accessed. Refresh to review it again.";
+				row.change =
+					L"The destination changed during analysis or cannot be accessed. Refresh to review it again.";
 				plan.blockReason = row.change;
 				continue;
 			}
@@ -541,7 +544,7 @@ namespace iw::convert
 			{
 				const auto destination = files::snapshot_file(row.destination);
 				if (!destination || !destination->exists || destination->directory || destination->readOnly ||
-					destination->reparse)
+				    destination->reparse)
 				{
 					row.state = tasks::RowState::blocked;
 					row.change = L"The replacement destination is not a writable regular file.";
@@ -552,13 +555,14 @@ namespace iw::convert
 		return plan;
 	}
 
-	tasks::RunOptions run_options(const Settings& settings,
-	                             const std::vector<std::filesystem::path>& originals)
+	tasks::RunOptions run_options(const Settings& settings, const std::vector<std::filesystem::path>& originals)
 	{
 		tasks::RunOptions options;
 		options.undoLabel = L"Convert or Resize";
 		options.undoPaths = [](const tasks::TaskRow& row)
-		{ return std::vector<std::filesystem::path>{row.destination}; };
+		{
+			return std::vector<std::filesystem::path>{row.destination};
+		};
 		options.revalidate = [settings, originals](tasks::TaskRow& row)
 		{
 			if (const auto reason = settings_problem(settings); !reason.empty())
@@ -578,7 +582,7 @@ namespace iw::convert
 				return false;
 			}
 			if (row.replace && (!reviewed || !reviewed->destination ||
-				!files::matches_snapshot(row.destination, *reviewed->destination)))
+			                    !files::matches_snapshot(row.destination, *reviewed->destination)))
 			{
 				row.detail = L"The approved replacement changed after Review. Analyze again.";
 				return false;
@@ -616,35 +620,38 @@ namespace iw::convert
 			if (reviewed && !unchanged_source(row.source, *reviewed))
 				throw std::runtime_error("The source photo changed while it was being decoded. Analyze again.");
 			const auto size = limited_output_size(image.width, image.height,
-			                                     settings.limitEnabled ? settings.maximumDimension : 0);
+			                                      settings.limitEnabled ? settings.maximumDimension : 0);
 			if (size.width != image.width || size.height != image.height)
 			{
 				auto scaled = ui::resample_bgra(image.pixels, {image.width, image.height},
 				                                {0.0, 0.0, static_cast<double>(image.width),
-				                                 static_cast<double>(image.height)}, size);
+				                                 static_cast<double>(image.height)},
+				                                size);
 				if (scaled.empty()) throw std::runtime_error("The photo could not be resized.");
 				image.pixels = std::move(scaled);
 				image.width = size.width;
 				image.height = size.height;
 			}
 			if (is_original(row.destination, originals) ||
-				(reviewed && !paths::equal(resolved_path(row.destination.parent_path()), reviewed->parent)))
+			    (reviewed && !paths::equal(resolved_path(row.destination.parent_path()), reviewed->parent)))
 				throw std::runtime_error("The destination changed while preparing the output. Analyze again.");
 			// Upright pixels and the colour profile keep the photo's appearance; descriptive
 			// metadata such as GPS is deliberately not copied into converted output.
 			if (!files::save_image(image, row.destination, settings.format,
 			                       {settings.quality, settings.lossless, row.source, files::CarryMetadata::profile},
 			                       row.replace, [&]
-			                       {
-				                       if (is_original(row.destination, originals) ||
-					                       (reviewed && (!unchanged_source(row.source, *reviewed) ||
-						                       !paths::equal(resolved_path(row.destination.parent_path()), reviewed->parent))))
-					                       throw std::runtime_error("The source or destination changed before the output was committed. Analyze again.");
-				                       if (row.replace && (!reviewed || !reviewed->destination ||
-					                       !files::matches_snapshot(row.destination, *reviewed->destination)))
-					                       throw std::runtime_error("The approved replacement changed before the output was committed. Analyze again.");
-				                       return true;
-			                       }))
+			{
+				if (is_original(row.destination, originals) ||
+				    (reviewed && (!unchanged_source(row.source, *reviewed) ||
+				                  !paths::equal(resolved_path(row.destination.parent_path()), reviewed->parent))))
+					throw std::runtime_error(
+						"The source or destination changed before the output was committed. Analyze again.");
+				if (row.replace && (!reviewed || !reviewed->destination ||
+				                    !files::matches_snapshot(row.destination, *reviewed->destination)))
+					throw std::runtime_error(
+						"The approved replacement changed before the output was committed. Analyze again.");
+				return true;
+			}))
 			{
 				error.clear();
 				if (!row.replace && std::filesystem::exists(files::native_path(row.destination), error))

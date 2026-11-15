@@ -9,7 +9,14 @@
 
 namespace iw::sync
 {
-	enum Action { ignore, copyToRemote, copyToLocal, deleteLocal, deleteRemote };
+	enum Action
+	{
+		ignore,
+		copyToRemote,
+		copyToLocal,
+		deleteLocal,
+		deleteRemote
+	};
 
 	struct Options
 	{
@@ -51,11 +58,11 @@ namespace iw::sync
 	std::wstring configuration_error(const Options& options);
 	Review analyze(const Options& options, const std::stop_token& stop = {},
 	               const tasks::ProgressFunction& progress = {});
-	tasks::RunOptions run_options(std::shared_ptr<const Review> review);
+	tasks::RunOptions run_options(const std::shared_ptr<const Review>& review);
 	std::wstring summarize(const tasks::TaskPlan& plan);
 	platform::ChoiceDefinition deletion_confirmation(const tasks::TaskPlan& plan);
 	bool confirm_deletions(const tasks::TaskPlan& plan,
-	                      const std::function<int(const platform::ChoiceDefinition&)>& confirm);
+	                       const std::function<int(const platform::ChoiceDefinition&)>& confirm);
 	std::vector<std::filesystem::path> affected_folders(const tasks::TaskPlan& plan);
 }
 
@@ -64,8 +71,7 @@ namespace iw
 	class TaskSync final : public TaskView
 	{
 	public:
-		explicit TaskSync(std::wstring settingsSection = L"Synchronize",
-		                  tasks::TaskRunner::Dispatcher dispatcher = {});
+		explicit TaskSync(std::wstring settingsSection = L"Synchronize", tasks::TaskRunner::Dispatcher dispatcher = {});
 		std::wstring title() const override { return L"Synchronize"; }
 		void set_local_folder(std::filesystem::path folder);
 		void set_collection_folders(std::vector<std::filesystem::path> folders);

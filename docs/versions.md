@@ -1,20 +1,14 @@
 # Versions
 
-The historical versions are updated to build on modern 64-bit Windows.
-Follow a release link for its feature highlights, or read
-[history.md](history.md) for the story behind the series.
+The [README](../README.md) lists the five releases with their directories and
+years, and [features.md](features.md) what each offers.
 
-| Application | Release year | Directory |
-|---|---:|---|
-| [ImageWalker 1.0](features.md#imagewalker-10) | 1998 | `src10` |
-| [ImageWalker 2.0](features.md#imagewalker-20) | 2001 | `src20` |
-| [ImageWalker 2.2](features.md#imagewalker-22) | 2003 | `src22` |
-| [ImageWalker 2.3](features.md#imagewalker-23) | 2006 | `src23` |
-| [ImageWalker 3.0](features.md#imagewalker-30) | 2026 | `src30` |
+## About boxes
 
-## Theme songs
-
-Each About box names the application, its release year and its theme song.
+Each About box names the application, its release year and its theme song,
+with a link to the song. The 1.0 and 2.x About boxes describe the release as
+first published, not the x64 build, so they can name features that build
+lacks; [known-issues.md](known-issues.md) lists those.
 
 | Application | Theme song |
 |---|---|
@@ -28,4 +22,4 @@ Each About box names the application, its release year and its theme song.
 
 In ImageWalker 2.x, Delete sends files to the Recycle Bin, F2 opens Rename and
 F7 opens the Move To menu. ImageWalker 3.0 uses F7 for Batch Rename; its other
-task shortcuts are described in [workflows-3.0.md](workflows-3.0.md).
+task shortcuts are in [workflows-3.0.md](workflows-3.0.md).

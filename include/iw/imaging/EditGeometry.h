@@ -36,8 +36,7 @@ namespace iw::edits
 	// Refuse more than 128M output pixels or fourfold source-area amplification.
 	// Rendering returns an empty image on invalid geometry or allocation failure.
 	sizei perspective_size(sizei source, const Quadrilateral& corners);
-	imaging::PixelImage correct_perspective(const imaging::PixelImage& source,
-		const Quadrilateral& corners);
+	imaging::PixelImage correct_perspective(const imaging::PixelImage& source, const Quadrilateral& corners);
 
 	// A conservative closed-page detector. An absent result is not a whole-picture fallback.
 	// Works with bright or dark pages against a contrasting surrounding background.
@@ -47,7 +46,6 @@ namespace iw::edits
 
 // ImageWalker by Zac Walker
 // Inverse projective sampling with straight-alpha output and conservative document detection.
-
 
 #include <algorithm>
 #include <climits>
@@ -73,7 +71,7 @@ namespace iw::edits
 		inline bool valid_image(const imaging::PixelImage& image)
 		{
 			return image.width > 1 && image.height > 1 &&
-				static_cast<std::uint64_t>(image.width) * image.height <= image.pixels.size();
+			       static_cast<std::uint64_t>(image.width) * image.height <= image.pixels.size();
 		}
 
 		// Maps the destination unit square directly into the source quadrilateral.
@@ -90,16 +88,22 @@ namespace iw::edits
 			const double h = (dx1 * dy3 - dx3 * dy1) / divisor;
 			// A linear denominator attains its extrema at a corner. No pole may cross the image.
 			if ((std::min)({1.0, 1.0 + g, 1.0 + h, 1.0 + g + h}) <= 1e-9) return {};
-			return std::array<double, 9>{
-				q[1].x - q[0].x + g * q[1].x, q[3].x - q[0].x + h * q[3].x, q[0].x,
-				q[1].y - q[0].y + g * q[1].y, q[3].y - q[0].y + h * q[3].y, q[0].y,
-				g, h, 1.0};
+			return std::array<double, 9>{q[1].x - q[0].x + g * q[1].x,
+			                             q[3].x - q[0].x + h * q[3].x,
+			                             q[0].x,
+			                             q[1].y - q[0].y + g * q[1].y,
+			                             q[3].y - q[0].y + h * q[3].y,
+			                             q[0].y,
+			                             g,
+			                             h,
+			                             1.0};
 		}
 
 		inline std::uint32_t sample(const imaging::PixelImage& image, double x, double y)
 		{
-			if (!std::isfinite(x) || !std::isfinite(y) || x < -1e-7 || y < -1e-7 ||
-				x > image.width - 1 + 1e-7 || y > image.height - 1 + 1e-7) return 0;
+			if (!std::isfinite(x) || !std::isfinite(y) || x < -1e-7 || y < -1e-7 || x > image.width - 1 + 1e-7 ||
+			    y > image.height - 1 + 1e-7)
+				return 0;
 			x = std::clamp(x, 0.0, static_cast<double>(image.width - 1));
 			y = std::clamp(y, 0.0, static_cast<double>(image.height - 1));
 			const int left = static_cast<int>(x), top = static_cast<int>(y);
@@ -138,20 +142,18 @@ namespace iw::edits
 
 		inline std::vector<Corner> convex_hull(std::vector<Corner> points)
 		{
-			std::ranges::sort(points, [](const Corner a, const Corner b)
-				{ return a.x < b.x || (a.x == b.x && a.y < b.y); });
+			std::ranges::sort(points,
+			                  [](const Corner a, const Corner b) { return a.x < b.x || (a.x == b.x && a.y < b.y); });
 			std::vector<Corner> hull;
 			for (const auto p : points)
 			{
-				while (hull.size() >= 2 && cross(hull[hull.size() - 2], hull.back(), p) <= 0)
-					hull.pop_back();
+				while (hull.size() >= 2 && cross(hull[hull.size() - 2], hull.back(), p) <= 0) hull.pop_back();
 				hull.push_back(p);
 			}
 			const auto lower = hull.size();
 			for (auto i = points.rbegin() + 1; i != points.rend(); ++i)
 			{
-				while (hull.size() > lower && cross(hull[hull.size() - 2], hull.back(), *i) <= 0)
-					hull.pop_back();
+				while (hull.size() > lower && cross(hull[hull.size() - 2], hull.back(), *i) <= 0) hull.pop_back();
 				hull.push_back(*i);
 			}
 			if (!hull.empty()) hull.pop_back();
@@ -163,11 +165,9 @@ namespace iw::edits
 	{
 		using namespace edit_geometry_detail;
 		for (const auto p : corners)
-			if (!std::isfinite(p.x) || !std::isfinite(p.y) || p.x < 0 || p.y < 0 || p.x > 1 || p.y > 1)
-				return false;
+			if (!std::isfinite(p.x) || !std::isfinite(p.y) || p.x < 0 || p.y < 0 || p.x > 1 || p.y > 1) return false;
 		for (size_t i = 0; i < 4; ++i)
-			if (cross(corners[i], corners[(i + 1) % 4], corners[(i + 2) % 4]) <= 1e-8)
-				return false;
+			if (cross(corners[i], corners[(i + 1) % 4], corners[(i + 2) % 4]) <= 1e-8) return false;
 		return true;
 	}
 
@@ -176,7 +176,11 @@ namespace iw::edits
 		using namespace edit_geometry_detail;
 		if (source.cx < 2 || source.cy < 2 || !inverse_map(corners)) return {};
 		auto q = corners;
-		for (auto& p : q) { p.x *= source.cx - 1; p.y *= source.cy - 1; }
+		for (auto& p : q)
+		{
+			p.x *= source.cx - 1;
+			p.y *= source.cy - 1;
+		}
 		const double width = (std::max)(distance(q[0], q[1]), distance(q[3], q[2]));
 		const double height = (std::max)(distance(q[0], q[3]), distance(q[1], q[2]));
 		if (width < 1 || height < 1 || width >= INT_MAX - 1.0 || height >= INT_MAX - 1.0) return {};
@@ -187,7 +191,8 @@ namespace iw::edits
 		return size;
 	}
 
-	inline imaging::PixelImage correct_perspective(const imaging::PixelImage& source, const Quadrilateral& corners) try
+	inline imaging::PixelImage correct_perspective(const imaging::PixelImage& source, const Quadrilateral& corners)
+	try
 	{
 		using namespace edit_geometry_detail;
 		if (!valid_image(source)) return {};
@@ -266,7 +271,10 @@ namespace iw::edits
 			const double separation = sum / background - (total - sum) / (opaque - background);
 			const double variance = static_cast<double>(background) * (opaque - background) * separation * separation;
 			if (std::abs(separation) >= 24 && variance > bestVariance)
-			{ bestVariance = variance; threshold = t; }
+			{
+				bestVariance = variance;
+				threshold = t;
+			}
 		}
 		if (threshold < 0) return {};
 
@@ -276,7 +284,9 @@ namespace iw::edits
 		{
 			std::vector<bool> visited(static_cast<size_t>(count));
 			const auto foreground = [&](const int i)
-				{ return gray[static_cast<size_t>(i)] >= 0 && (gray[static_cast<size_t>(i)] > threshold) == light; };
+			{
+				return gray[static_cast<size_t>(i)] >= 0 && (gray[static_cast<size_t>(i)] > threshold) == light;
+			};
 			for (int seed = 0; seed < count; ++seed)
 			{
 				if (visited[static_cast<size_t>(seed)] || !foreground(seed)) continue;
@@ -292,11 +302,22 @@ namespace iw::edits
 					for (const auto delta : std::array<pointi, 4>{{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}})
 					{
 						const int nx = x + delta.x, ny = y + delta.y;
-						if (nx < 0 || ny < 0 || nx >= width || ny >= height) { edge = true; continue; }
+						if (nx < 0 || ny < 0 || nx >= width || ny >= height)
+						{
+							edge = true;
+							continue;
+						}
 						const int neighbor = ny * width + nx;
-						if (!foreground(neighbor)) { edge = true; continue; }
+						if (!foreground(neighbor))
+						{
+							edge = true;
+							continue;
+						}
 						if (!visited[static_cast<size_t>(neighbor)])
-						{ visited[static_cast<size_t>(neighbor)] = true; component.push_back(neighbor); }
+						{
+							visited[static_cast<size_t>(neighbor)] = true;
+							component.push_back(neighbor);
+						}
 					}
 					if (edge) boundary.push_back({static_cast<double>(x), static_cast<double>(y)});
 				}
@@ -305,7 +326,8 @@ namespace iw::edits
 				auto hull = convex_hull(std::move(boundary));
 				const double hullArea = polygon_area(hull);
 				if (hull.size() < 4 || hullArea < count * 0.12 || hullArea > count * 0.9 ||
-					component.size() < hullArea * 0.7) continue;
+				    component.size() < hullArea * 0.7)
+					continue;
 				// Removing the smallest corner triangles greedily can cut several pixels off
 				// a rasterized page corner. That moves a candidate side inside the page and
 				// fails the independent edge test. Maximize the inscribed quadrilateral
@@ -321,7 +343,8 @@ namespace iw::edits
 						while (b + 1 < c && cross(hull[a], hull[b + 1], hull[c]) >= cross(hull[a], hull[b], hull[c]))
 							++b;
 						d = (std::max)(d, c + 1);
-						while (d + 1 < hull.size() && cross(hull[a], hull[c], hull[d + 1]) >= cross(hull[a], hull[c], hull[d]))
+						while (d + 1 < hull.size() &&
+						       cross(hull[a], hull[c], hull[d + 1]) >= cross(hull[a], hull[c], hull[d]))
 							++d;
 						const double area = cross(hull[a], hull[b], hull[c]) + cross(hull[a], hull[c], hull[d]);
 						if (area > largestArea)
@@ -344,7 +367,11 @@ namespace iw::edits
 					const double length = distance(a, b);
 					minSide = (std::min)(minSide, length);
 					maxSide = (std::max)(maxSide, length);
-					if (length < 12) { supported = false; break; }
+					if (length < 12)
+					{
+						supported = false;
+						break;
+					}
 					const double nx = -(b.y - a.y) / length, ny = (b.x - a.x) / length;
 					int votes = 0;
 					for (int step = 2; step <= 18; ++step)
@@ -355,12 +382,12 @@ namespace iw::edits
 						{
 							const int x = static_cast<int>(std::lround(px + sign * nx * 3));
 							const int y = static_cast<int>(std::lround(py + sign * ny * 3));
-							return x < 0 || y < 0 || x >= width || y >= height ? -1 :
-								gray[static_cast<size_t>(y) * width + x];
+							return x < 0 || y < 0 || x >= width || y >= height
+							           ? -1
+							           : gray[static_cast<size_t>(y) * width + x];
 						};
 						const int inside = at(1), outside = at(-1);
-						if (inside >= 0 && outside >= 0 && (light ? inside - outside : outside - inside) >= 18)
-							++votes;
+						if (inside >= 0 && outside >= 0 && (light ? inside - outside : outside - inside) >= 18) ++votes;
 					}
 					if (votes < 12) supported = false;
 					support += votes / 17.0;
@@ -368,16 +395,21 @@ namespace iw::edits
 				if (!supported || maxSide > minSide * 5) continue;
 				Quadrilateral q;
 				const auto first = static_cast<size_t>(std::min_element(hull.begin(), hull.end(),
-					[](const Corner a, const Corner b) { return a.x + a.y < b.x + b.y; }) - hull.begin());
+				                                                        [](const Corner a, const Corner b)
+				{ return a.x + a.y < b.x + b.y; }) - hull.begin());
 				for (size_t i = 0; i < 4; ++i)
 				{
 					const auto p = hull[(first + i) % 4];
 					// Downsampling refers to pixel cells; map their centres back to source centres.
 					q[i] = {((p.x + 0.5) * source.width / width - 0.5) / (source.width - 1),
-						((p.y + 0.5) * source.height / height - 0.5) / (source.height - 1)};
+					        ((p.y + 0.5) * source.height / height - 0.5) / (source.height - 1)};
 				}
 				const double score = area * support;
-				if (valid_quadrilateral(q) && score > bestScore) { bestScore = score; result = q; }
+				if (valid_quadrilateral(q) && score > bestScore)
+				{
+					bestScore = score;
+					result = q;
+				}
 			}
 		}
 		return result;

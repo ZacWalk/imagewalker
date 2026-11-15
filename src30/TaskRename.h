@@ -10,14 +10,13 @@
 namespace iw::rename
 {
 	tasks::TaskPlan analyze(const std::vector<std::filesystem::path>& sources, std::wstring_view templateText,
-	                       int start, tasks::CollisionPolicy policy, const std::stop_token& stop = {},
-	                       const tasks::ProgressFunction& progress = {});
+	                        int start, tasks::CollisionPolicy policy, const std::stop_token& stop = {},
+	                        const tasks::ProgressFunction& progress = {});
 	tasks::RunOptions run_options(const tasks::TaskPlan& plan);
 	tasks::TaskPlan direct_plan(const std::filesystem::path& source, std::wstring_view filename);
 
 	// "photo.jpg.xmp" keeps the whole name; "photo.xmp" keeps only the stem.
-	std::filesystem::path sidecar_destination(const std::filesystem::path& sidecar,
-	                                          const std::filesystem::path& source,
+	std::filesystem::path sidecar_destination(const std::filesystem::path& sidecar, const std::filesystem::path& source,
 	                                          const std::filesystem::path& destination);
 
 	// Shared by every row of one run. Recovery never overwrites a completed row or an unrelated file.
@@ -32,8 +31,7 @@ namespace iw::rename
 		// Where the item is now, which is a temporary path if it was moved out of the way.
 		std::filesystem::path actual(const std::filesystem::path& source) const;
 		void register_bundle(const std::filesystem::path& primary, const std::vector<std::filesystem::path>& sidecars);
-		bool stage(const std::filesystem::path& path,
-			std::vector<std::filesystem::path>* mutatedPaths = nullptr);
+		bool stage(const std::filesystem::path& path, std::vector<std::filesystem::path>* mutatedPaths = nullptr);
 		void settled(const std::filesystem::path& temporary);
 		struct Recovery
 		{
@@ -54,8 +52,7 @@ namespace iw::rename
 		std::vector<Entry> staged_;
 		std::vector<std::vector<std::filesystem::path>> bundles_;
 		bool restorationAttempted_{};
-		bool stage_one(const std::filesystem::path& path,
-			std::vector<std::filesystem::path>* mutatedPaths);
+		bool stage_one(const std::filesystem::path& path, std::vector<std::filesystem::path>* mutatedPaths);
 	};
 
 	// Performs one reviewed row, moving its sidecars with it. A destination held by another row of
@@ -89,7 +86,7 @@ namespace iw
 
 	private:
 		std::wstring template_text() const;
-		void set_template(std::wstring text);
+		void set_template(const std::wstring& text);
 
 		platform::TextInputPtr templateInput_;
 		platform::TextInputPtr startInput_;

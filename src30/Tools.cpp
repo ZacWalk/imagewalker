@@ -26,19 +26,20 @@ namespace iw::tools
 		class Reader
 		{
 		public:
-			explicit Reader(const std::wstring_view text) : text_(text)
-			{
-			}
+			explicit Reader(const std::wstring_view text) : text_(text) {}
 
 			bool failed() const { return failed_; }
 			void fail() { failed_ = true; }
-			bool finished() { skip_space(); return position_ == text_.size(); }
+			bool finished()
+			{
+				skip_space();
+				return position_ == text_.size();
+			}
 
 			void skip_space()
 			{
-				while (position_ < text_.size() &&
-					(text_[position_] == L' ' || text_[position_] == L'\t' || text_[position_] == L'\r' ||
-						text_[position_] == L'\n'))
+				while (position_ < text_.size() && (text_[position_] == L' ' || text_[position_] == L'\t' ||
+				                                    text_[position_] == L'\r' || text_[position_] == L'\n'))
 					++position_;
 			}
 
@@ -74,10 +75,16 @@ namespace iw::tools
 							if (result[index] >= 0xd800 && result[index] <= 0xdbff)
 							{
 								if (++index == result.size() || result[index] < 0xdc00 || result[index] > 0xdfff)
-								{ failed_ = true; return {}; }
+								{
+									failed_ = true;
+									return {};
+								}
 							}
 							else if (result[index] >= 0xdc00 && result[index] <= 0xdfff)
-							{ failed_ = true; return {}; }
+							{
+								failed_ = true;
+								return {};
+							}
 						}
 						return result;
 					}
@@ -103,29 +110,30 @@ namespace iw::tools
 					case L'\\': result.push_back(L'\\'); break;
 					case L'/': result.push_back(L'/'); break;
 					case L'u':
+					{
+						if (text_.size() - position_ < 4)
 						{
-							if (text_.size() - position_ < 4) { failed_ = true; return {}; }
-							unsigned int value = 0;
-							for (int digit = 0; digit < 4; ++digit)
-							{
-								const wchar_t hex = text_[position_++];
-								const int number = hex >= L'0' && hex <= L'9'
-									                   ? hex - L'0'
-									                   : hex >= L'a' && hex <= L'f'
-									                   ? hex - L'a' + 10
-									                   : hex >= L'A' && hex <= L'F'
-									                   ? hex - L'A' + 10
-									                   : -1;
-								if (number < 0)
-								{
-									failed_ = true;
-									return result;
-								}
-								value = value * 16 + static_cast<unsigned int>(number);
-							}
-							result.push_back(static_cast<wchar_t>(value));
-							break;
+							failed_ = true;
+							return {};
 						}
+						unsigned int value = 0;
+						for (int digit = 0; digit < 4; ++digit)
+						{
+							const wchar_t hex = text_[position_++];
+							const int number = hex >= L'0' && hex <= L'9'   ? hex - L'0'
+							                   : hex >= L'a' && hex <= L'f' ? hex - L'a' + 10
+							                   : hex >= L'A' && hex <= L'F' ? hex - L'A' + 10
+							                                                : -1;
+							if (number < 0)
+							{
+								failed_ = true;
+								return result;
+							}
+							value = value * 16 + static_cast<unsigned int>(number);
+						}
+						result.push_back(static_cast<wchar_t>(value));
+						break;
+					}
 					default: failed_ = true; return {};
 					}
 				}
@@ -147,66 +155,78 @@ namespace iw::tools
 				case L'"': read_string(); return;
 				case L'{':
 				case L'[':
+				{
+					const wchar_t close = character == L'{' ? L'}' : L']';
+					consume(character);
+					if (consume(close)) return;
+					for (;;)
 					{
-						const wchar_t close = character == L'{' ? L'}' : L']';
-						consume(character);
-						if (consume(close)) return;
-						for (;;)
+						if (failed_) return;
+						if (character == L'{')
 						{
-							if (failed_) return;
-							if (character == L'{')
+							read_string();
+							if (!consume(L':'))
 							{
-								read_string();
-								if (!consume(L':'))
-								{
-									failed_ = true;
-									return;
-								}
+								failed_ = true;
+								return;
 							}
-							skip_value(depth + 1);
-							if (consume(L',')) continue;
-							if (!consume(close)) failed_ = true;
-							return;
 						}
-					}
-				default:
-					{
-						const size_t start = position_;
-						while (position_ < text_.size())
-						{
-							const wchar_t scan = text_[position_];
-							if (scan == L',' || scan == L'}' || scan == L']' || scan == L' ' || scan == L'\n' ||
-								scan == L'\r' || scan == L'\t')
-								break;
-							++position_;
-						}
-						const auto token = text_.substr(start, position_ - start);
-						if (token == L"true" || token == L"false" || token == L"null") return;
-						size_t digit = 0;
-						if (digit < token.size() && token[digit] == L'-') ++digit;
-						if (digit >= token.size()) { failed_ = true; return; }
-						if (token[digit] == L'0') ++digit;
-						else
-						{
-							if (token[digit] < L'1' || token[digit] > L'9') { failed_ = true; return; }
-							while (digit < token.size() && token[digit] >= L'0' && token[digit] <= L'9') ++digit;
-						}
-						const auto digits = [&]
-						{
-							const size_t begin = digit;
-							while (digit < token.size() && token[digit] >= L'0' && token[digit] <= L'9') ++digit;
-							if (begin == digit) failed_ = true;
-						};
-						if (digit < token.size() && token[digit] == L'.') { ++digit; digits(); }
-						if (digit < token.size() && (token[digit] == L'e' || token[digit] == L'E'))
-						{
-							++digit;
-							if (digit < token.size() && (token[digit] == L'+' || token[digit] == L'-')) ++digit;
-							digits();
-						}
-						if (digit != token.size()) failed_ = true;
+						skip_value(depth + 1);
+						if (consume(L',')) continue;
+						if (!consume(close)) failed_ = true;
 						return;
 					}
+				}
+				default:
+				{
+					const size_t start = position_;
+					while (position_ < text_.size())
+					{
+						const wchar_t scan = text_[position_];
+						if (scan == L',' || scan == L'}' || scan == L']' || scan == L' ' || scan == L'\n' ||
+						    scan == L'\r' || scan == L'\t')
+							break;
+						++position_;
+					}
+					const auto token = text_.substr(start, position_ - start);
+					if (token == L"true" || token == L"false" || token == L"null") return;
+					size_t digit = 0;
+					if (digit < token.size() && token[digit] == L'-') ++digit;
+					if (digit >= token.size())
+					{
+						failed_ = true;
+						return;
+					}
+					if (token[digit] == L'0') ++digit;
+					else
+					{
+						if (token[digit] < L'1' || token[digit] > L'9')
+						{
+							failed_ = true;
+							return;
+						}
+						while (digit < token.size() && token[digit] >= L'0' && token[digit] <= L'9') ++digit;
+					}
+					const auto digits = [&]
+					{
+						const size_t begin = digit;
+						while (digit < token.size() && token[digit] >= L'0' && token[digit] <= L'9') ++digit;
+						if (begin == digit) failed_ = true;
+					};
+					if (digit < token.size() && token[digit] == L'.')
+					{
+						++digit;
+						digits();
+					}
+					if (digit < token.size() && (token[digit] == L'e' || token[digit] == L'E'))
+					{
+						++digit;
+						if (digit < token.size() && (token[digit] == L'+' || token[digit] == L'-')) ++digit;
+						digits();
+					}
+					if (digit != token.size()) failed_ = true;
+					return;
+				}
 				}
 			}
 
@@ -218,7 +238,11 @@ namespace iw::tools
 
 		void read_string_array(Reader& reader, std::vector<std::wstring>& into)
 		{
-			if (!reader.consume(L'[')) { reader.fail(); return; }
+			if (!reader.consume(L'['))
+			{
+				reader.fail();
+				return;
+			}
 			if (reader.consume(L']')) return;
 			for (;;)
 			{
@@ -270,7 +294,7 @@ namespace iw::tools
 		{
 			std::wstring name(value);
 			if (name.empty() || name.find_first_of(L"\\/:\"<>|?*\r\n\t") != std::wstring::npos ||
-				name.find(L'\0') != std::wstring::npos || name.back() == L'.' || name.back() == L' ')
+			    name.find(L'\0') != std::wstring::npos || name.back() == L'.' || name.back() == L' ')
 				return {};
 			if (std::filesystem::path(name).extension().empty()) name += L".exe";
 			return paths::iequals(std::filesystem::path(name).extension().wstring(), L".exe") ? name : L"";
@@ -285,10 +309,12 @@ namespace iw::tools
 				unsigned int value = first;
 				unsigned int minimum = 0;
 				size_t remaining = 0;
+				// clang-format off
 				if (first >= 0xc2 && first <= 0xdf) { value = first & 0x1f; remaining = 1; minimum = 0x80; }
 				else if (first >= 0xe0 && first <= 0xef) { value = first & 0x0f; remaining = 2; minimum = 0x800; }
 				else if (first >= 0xf0 && first <= 0xf4) { value = first & 7; remaining = 3; minimum = 0x10000; }
 				else if (first >= 0x80) return {};
+				// clang-format on
 				if (remaining > bytes.size() - index) return {};
 				while (remaining--)
 				{
@@ -312,13 +338,13 @@ namespace iw::tools
 	bool declaration_is_usable(const ToolDeclaration& declaration)
 	{
 		if (executable_name(declaration.exe).empty() || declaration.invoke.empty() ||
-			declaration.invoke.find_first_of(L"\r\n") != std::wstring::npos ||
-			declaration.invoke.find(L'\0') != std::wstring::npos) return false;
+		    declaration.invoke.find_first_of(L"\r\n") != std::wstring::npos ||
+		    declaration.invoke.find(L'\0') != std::wstring::npos)
+			return false;
 		const auto start = declaration.invoke.find_first_not_of(L" \t");
 		if (start == std::wstring::npos) return false;
 		const std::wstring_view command(declaration.invoke.data() + start, declaration.invoke.size() - start);
-		const size_t length = command.starts_with(L"{exe-path}") ? 10 :
-			command.starts_with(L"\"{exe-path}\"") ? 12 : 0;
+		const size_t length = command.starts_with(L"{exe-path}") ? 10 : command.starts_with(L"\"{exe-path}\"") ? 12 : 0;
 		return length && (command.size() == length || command[length] == L' ' || command[length] == L'\t');
 	}
 
@@ -354,7 +380,8 @@ namespace iw::tools
 		return files::ItemKind::other;
 	}
 
-	Configuration parse_configuration(const std::wstring_view text) try
+	Configuration parse_configuration(const std::wstring_view text)
+	try
 	{
 		Configuration configuration;
 		if (text.empty() || text.size() > maximumDocumentBytes) return configuration;
@@ -370,46 +397,48 @@ namespace iw::tools
 			{
 				sawTools = true;
 				if (!reader.consume(L'{')) return {};
-				if (!reader.consume(L'}')) for (;;)
-				{
-					const auto member = reader.read_string();
-					if (reader.failed() || !reader.consume(L':')) return {};
-					if (paths::iequals(member, L"folders"))
+				if (!reader.consume(L'}'))
+					for (;;)
 					{
-						std::vector<std::wstring> folders;
-						read_string_array(reader, folders);
-						for (auto& folder : folders)
-							if (!folder.empty() && folder.find(L'\0') == std::wstring::npos)
-								configuration.folders.emplace_back(std::move(folder));
+						const auto member = reader.read_string();
+						if (reader.failed() || !reader.consume(L':')) return {};
+						if (paths::iequals(member, L"folders"))
+						{
+							std::vector<std::wstring> folders;
+							read_string_array(reader, folders);
+							for (auto& folder : folders)
+								if (!folder.empty() && folder.find(L'\0') == std::wstring::npos)
+									configuration.folders.emplace_back(std::move(folder));
+						}
+						else if (paths::iequals(member, L"apps"))
+						{
+							if (!reader.consume(L'[')) return {};
+							size_t entry = 0;
+							if (!reader.consume(L']'))
+								for (;;)
+								{
+									++entry;
+									ToolDeclaration declaration;
+									if (reader.peek() != L'{') reader.skip_value(3);
+									else if (!read_app(reader, declaration)) return {};
+									if (reader.failed()) return {};
+									if (declaration_is_usable(declaration))
+										configuration.apps.push_back(std::move(declaration));
+									else
+										configuration.issues.push_back(std::format(
+											L"Tool entry {} needs an executable base name and an invoke template beginning with {{exe-path}}.",
+											entry));
+									if (reader.consume(L',')) continue;
+									if (!reader.consume(L']')) return {};
+									break;
+								}
+						}
+						else reader.skip_value(2);
+						if (reader.failed()) return {};
+						if (reader.consume(L',')) continue;
+						if (!reader.consume(L'}')) return {};
+						break;
 					}
-					else if (paths::iequals(member, L"apps"))
-					{
-						if (!reader.consume(L'[')) return {};
-						size_t entry = 0;
-						if (!reader.consume(L']'))
-							for (;;)
-							{
-								++entry;
-								ToolDeclaration declaration;
-								if (reader.peek() != L'{') reader.skip_value(3);
-								else if (!read_app(reader, declaration)) return {};
-								if (reader.failed()) return {};
-								if (declaration_is_usable(declaration))
-									configuration.apps.push_back(std::move(declaration));
-								else
-									configuration.issues.push_back(std::format(
-										L"Tool entry {} needs an executable base name and an invoke template beginning with {{exe-path}}.", entry));
-								if (reader.consume(L',')) continue;
-								if (!reader.consume(L']')) return {};
-								break;
-							}
-					}
-					else reader.skip_value(2);
-					if (reader.failed()) return {};
-					if (reader.consume(L',')) continue;
-					if (!reader.consume(L'}')) return {};
-					break;
-				}
 			}
 			else reader.skip_value(1);
 			if (reader.failed()) return {};
@@ -427,7 +456,7 @@ namespace iw::tools
 	}
 
 	std::vector<InstalledTool> discover(const Configuration& configuration, const size_t maximumDepth,
-		std::vector<std::wstring>* issues, const std::stop_token& stop)
+	                                    std::vector<std::wstring>* issues, const std::stop_token& stop)
 	{
 		std::vector<InstalledTool> result;
 		if (!configuration.valid || configuration.apps.empty()) return result;
@@ -452,9 +481,9 @@ namespace iw::tools
 				const auto [folder, depth] = pending.back();
 				pending.pop_back();
 				error.clear();
-				std::filesystem::directory_iterator iterator(
-					files::native_path(folder), std::filesystem::directory_options::skip_permission_denied,
-					error);
+				std::filesystem::directory_iterator iterator(files::native_path(folder),
+				                                             std::filesystem::directory_options::skip_permission_denied,
+				                                             error);
 				if (error) continue;
 				const std::filesystem::directory_iterator end;
 				while (iterator != end && !error && scanned < maximumScannedEntries && !stop.stop_requested())
@@ -467,8 +496,7 @@ namespace iw::tools
 					if (!attributes.known || attributes.reparse) continue;
 					if (entry.is_directory(entryError))
 					{
-						if (depth < (std::min)(maximumDepth, size_t{4}))
-							pending.emplace_back(entry.path(), depth + 1);
+						if (depth < (std::min)(maximumDepth, size_t{4})) pending.emplace_back(entry.path(), depth + 1);
 						continue;
 					}
 					if (!entry.is_regular_file(entryError) || entryError) continue;
@@ -485,7 +513,8 @@ namespace iw::tools
 			const auto executable = found.find(executable_name(declaration.exe));
 			if (executable == found.end())
 			{
-				if (issues) issues->push_back(L"Executable was not found in the configured search folders: " + declaration.exe);
+				if (issues)
+					issues->push_back(L"Executable was not found in the configured search folders: " + declaration.exe);
 				continue;
 			}
 			InstalledTool tool;
@@ -511,15 +540,14 @@ namespace iw::tools
 		const auto append = [&result](const InstalledTool& tool)
 		{
 			if (std::ranges::any_of(result, [&tool](const InstalledTool* existing)
-				{ return paths::equal(existing->executable, tool.executable) && existing->invoke == tool.invoke; })) return;
+			{ return paths::equal(existing->executable, tool.executable) && existing->invoke == tool.invoke; }))
+				return;
 			result.push_back(&tool);
 		};
 		// Extension tools first; a tool matching both ways is still listed once.
 		for (const auto& tool : installed)
 			if (std::ranges::any_of(tool.extensions, [&extension](const std::wstring& value)
-			{
-				return paths::iequals(value, extension);
-			}))
+			{ return paths::iequals(value, extension); }))
 				append(tool);
 		for (const auto& tool : installed)
 		{
@@ -530,7 +558,7 @@ namespace iw::tools
 	}
 
 	std::vector<const InstalledTool*> tools_for(const std::vector<InstalledTool>& installed,
-		const std::span<const std::filesystem::path> selected)
+	                                            const std::span<const std::filesystem::path> selected)
 	{
 		if (selected.empty()) return {};
 		auto result = tools_for(installed, selected.front());
@@ -539,10 +567,9 @@ namespace iw::tools
 			const auto applicable = tools_for(installed, path);
 			std::erase_if(result, [&applicable](const InstalledTool* tool)
 			{
-				return accepts_multiple_items(*tool) && std::ranges::none_of(applicable, [tool](const InstalledTool* candidate)
-				{
-					return paths::equal(candidate->executable, tool->executable) && candidate->invoke == tool->invoke;
-				});
+				return accepts_multiple_items(*tool) &&
+				       std::ranges::none_of(applicable, [tool](const InstalledTool* candidate)
+				{ return paths::equal(candidate->executable, tool->executable) && candidate->invoke == tool->invoke; });
 			});
 		}
 		return result;
@@ -566,7 +593,11 @@ namespace iw::tools
 			size_t backslashes = 0;
 			for (const auto character : value)
 			{
-				if (character == L'\\') { ++backslashes; continue; }
+				if (character == L'\\')
+				{
+					++backslashes;
+					continue;
+				}
 				quoted.append(character == L'"' ? backslashes * 2 + 1 : backslashes, L'\\');
 				backslashes = 0;
 				quoted.push_back(character);
@@ -578,9 +609,10 @@ namespace iw::tools
 		std::wstring result;
 		const std::wstring executable = quote(tool.executable.wstring());
 		if (!declaration_is_usable({tool.executable.filename().wstring(), tool.invoke}) ||
-			!tool.executable.is_absolute() || items.empty() ||
-			std::ranges::any_of(items, [](const auto& item) { return item.empty(); }) ||
-			(items.size() > 1 && !accepts_multiple_items(tool))) return {};
+		    !tool.executable.is_absolute() || items.empty() ||
+		    std::ranges::any_of(items, [](const auto& item) { return item.empty(); }) ||
+		    (items.size() > 1 && !accepts_multiple_items(tool)))
+			return {};
 		const std::wstring itemPath = quote(items.front().wstring());
 		std::wstring itemPaths;
 		for (const auto& item : items)
@@ -634,7 +666,8 @@ namespace iw::tools
 		return result;
 	}
 
-	void ToolTable::load(const std::filesystem::path& configurationFile, const std::stop_token& stop) try
+	void ToolTable::load(const std::filesystem::path& configurationFile, const std::stop_token& stop)
+	try
 	{
 		installed_.clear();
 		issues_.clear();
@@ -648,8 +681,8 @@ namespace iw::tools
 		if (!std::filesystem::is_regular_file(native, error))
 		{
 			report(error && error != std::errc::no_such_file_or_directory
-				? L"Tool configuration could not be inspected."
-				: L"Tool configuration is missing or is not a regular file.");
+			           ? L"Tool configuration could not be inspected."
+			           : L"Tool configuration is missing or is not a regular file.");
 			return;
 		}
 		const auto size = std::filesystem::file_size(native, error);
@@ -667,7 +700,7 @@ namespace iw::tools
 		std::string bytes(static_cast<size_t>(size), '\0');
 		stream.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
 		if (stream.gcount() != static_cast<std::streamsize>(bytes.size()) ||
-			stream.peek() != std::char_traits<char>::eof())
+		    stream.peek() != std::char_traits<char>::eof())
 		{
 			report(L"Tool configuration changed while it was being read.");
 			return;
@@ -699,7 +732,8 @@ namespace iw::tools
 		const size_t shown = (std::min)(issues_.size(), size_t{20});
 		for (size_t i = 0; i < shown; ++i) result += L"\n" + issues_[i] + L"\n";
 		if (shown != issues_.size())
-			result += std::format(L"\nShowing {} of {} issues. See the diagnostic log beside the executable for the complete list.",
+			result += std::format(
+				L"\nShowing {} of {} issues. See the diagnostic log beside the executable for the complete list.",
 				shown, issues_.size());
 		return result;
 	}

@@ -11,8 +11,7 @@ namespace iw::ui
 
 	inline int rounded_divide(const std::int64_t numerator, const std::int64_t denominator)
 	{
-		return static_cast<int>((numerator + (numerator < 0 ? -denominator / 2 : denominator / 2)) /
-			denominator);
+		return static_cast<int>((numerator + (numerator < 0 ? -denominator / 2 : denominator / 2)) / denominator);
 	}
 
 	inline int scale_metric(const int logicalValue, const unsigned int dpi)
@@ -22,7 +21,6 @@ namespace iw::ui
 
 	inline int unscale_metric(const int physicalValue, const unsigned int dpi)
 	{
-		return rounded_divide(static_cast<std::int64_t>(physicalValue) * default_dpi,
-		                      dpi ? dpi : default_dpi);
+		return rounded_divide(static_cast<std::int64_t>(physicalValue) * default_dpi, dpi ? dpi : default_dpi);
 	}
 }

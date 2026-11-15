@@ -102,10 +102,8 @@ namespace iw
 		virtual bool auto_analyze() const { return true; }
 		virtual std::wstring description() const { return {}; }
 		virtual std::wstring review_cell(const tasks::TaskRow& row, size_t column) const;
-		// Positions any native control the view hosts inside the drawn panel.
-		virtual void layout_hosted_controls()
-		{
-		}
+		// Positions the drawn edits or the video the view shows over its own drawing.
+		virtual void layout_hosted_controls() {}
 
 		// False means the view has no reviewed plan, so no analysis and no runner.
 		virtual bool uses_plan() const { return true; }
@@ -128,7 +126,10 @@ namespace iw
 		void invalidate();
 		void refresh_commands();
 		void set_status(std::wstring text);
-		void ask_host_to_close() const { if (host_.closed) host_.closed(); }
+		void ask_host_to_close() const
+		{
+			if (host_.closed) host_.closed();
+		}
 		std::filesystem::path choose_folder(std::wstring_view title) const;
 		void show_choice_popup(ui::Control& control);
 		int metric(const int value) const { return ui::scale_metric(value, dpi_); }
@@ -158,8 +159,7 @@ namespace iw
 		platform::MessageResult key(const platform::WindowFramePtr& frame, platform::KeyMessage message,
 		                            const platform::KeyInput& input) override;
 		void paint(const platform::WindowFramePtr& frame, platform::DrawContext& draw) override;
-		void size(const platform::WindowFramePtr& frame, app::sizei extent,
-		          platform::MeasureContext& measure) override;
+		void size(const platform::WindowFramePtr& frame, app::sizei extent, platform::MeasureContext& measure) override;
 
 		void layout(const ui::CanvasRenderer& renderer);
 		void draw_panel(const ui::CanvasRenderer& renderer) const;

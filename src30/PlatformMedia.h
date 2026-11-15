@@ -1,5 +1,5 @@
 // ImageWalker by Zac Walker
-// UI-thread media transport with a separate native video composition surface.
+// UI-thread media transport over a decoding worker; the video is drawn in the owner's frame.
 
 #pragma once
 
@@ -8,7 +8,17 @@
 
 namespace iw::media
 {
-	enum class PlaybackState { closed, opening, ready, playing, paused, stopped, ended, error };
+	enum class PlaybackState
+	{
+		closed,
+		opening,
+		ready,
+		playing,
+		paused,
+		stopped,
+		ended,
+		error
+	};
 
 	struct PlaybackStatus
 	{
@@ -24,8 +34,8 @@ namespace iw::media
 
 	inline bool can_play(const PlaybackState state)
 	{
-		return state == PlaybackState::ready || state == PlaybackState::paused ||
-			state == PlaybackState::stopped || state == PlaybackState::ended;
+		return state == PlaybackState::ready || state == PlaybackState::paused || state == PlaybackState::stopped ||
+		       state == PlaybackState::ended;
 	}
 
 	inline std::int64_t seek_position(const int fraction, const std::int64_t duration)
@@ -47,10 +57,15 @@ namespace iw::media
 		virtual void seek(std::int64_t ticks) = 0;
 		virtual void volume(float value) = 0;
 		virtual void close() = 0;
+		// Where the video is drawn in the owner's frame, fitted inside and letterboxed.
 		virtual void bounds(app::recti bounds) = 0;
 		virtual const PlaybackStatus& status() const = 0;
+		// The video frame shown now; null before the first, and for sound alone.
+		virtual ::core::const_surface_ptr picture() const = 0;
 	};
 
 	using StatusHandler = std::function<void(const PlaybackStatus&)>;
+	// Status changes reach changed on the UI thread. A parent libdesktop does not draw - a test's - leaves the
+	// video undrawn but decoded.
 	std::unique_ptr<Player> create_player(const platform::WindowFramePtr& parent, StatusHandler changed);
 }

@@ -5,15 +5,6 @@
 // Copyright (C) 1998-2026 Zac Walker. MIT licence - see LICENSE.
 // For more information on ImageWalker see www.ImageWalker.com
 
-/*///////////////////////////////////////////////////////////////////////
-//
-// This file is part of the ImageWalker code base.
-// For more information on ImageWalker see www.ImageWalker.com
-//
-// Copyright (C) 1998-2001 Zac Walker.  All rights reserved.
-//
-///////////////////////////////////////////////////////////////////////*/
-
 #ifndef _HelpMapIncluded_
 #define _HelpMapIncluded_
 

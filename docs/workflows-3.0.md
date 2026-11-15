@@ -1,16 +1,13 @@
 # ImageWalker 3.0 file workflows
 
 Six workflows act on files: Open with, Copy to and Move to folder, Convert or
-Resize, Batch Rename, Photo Edit, and Synchronize. Convert, Rename and Sync
-share one planning and safety model, described first. Copy and Move use a
-dialog, and Open with and Edit act directly. The rest of the application is in
-[features.md](features.md); development safety requirements are in
-[app-rules.md](app-rules.md).
+Resize, Batch Rename, Photo Edit, and Synchronize. Convert, Rename, Edit and
+Sync are task views sharing the model below, and Convert, Rename and Sync also
+share its planning and safety rules. Copy and Move use a dialog, and Open with
+acts directly. [features.md](features.md) describes the rest of the
+application, and [app-rules.md](app-rules.md) the development rules.
 
 ## 1. Shared model
-
-This section covers the four task views — Convert, Rename, Edit and Sync. Copy,
-Move and Open with are described with their own workflows.
 
 ### Target
 
@@ -96,11 +93,11 @@ programs as *(app)*, and weights frequently used entries.
 
 A registered application receives every selected file when the selection is all
 files of one extension. A configured tool using `{item-paths}` receives the
-complete selection. Existing `{item-path}` declarations retain single-file
-behavior, and their menu entries and chooser rows explicitly say first item only.
-Configured batch tools may receive mixed file types when the executable and
-template declarations accept every selected item; registered Windows
-applications are offered only for a uniform extension.
+complete selection; one using `{item-path}` receives only the first item, and
+its menu entries and chooser rows say so. Configured batch tools may receive
+mixed file types when the executable and template declarations accept every
+selected item; registered Windows applications are offered only for a uniform
+extension.
 
 ### Configuration
 
@@ -116,18 +113,18 @@ declarations:
 | `group` | Optional media group, such as photo, video or audio |
 | `text` | Name shown to the user |
 
-A declaration is accepted only with `exe` and `invoke`. The roots are scanned
-four folders deep, matching the executable base name case-insensitively, and a
-tool whose executable is not found is omitted. Extension-specific tools are
-ordered before group tools and are never listed twice for one file type.
+A declaration needs an `exe` and an `invoke` template that begins with
+`{exe-path}`. The roots are scanned four folders deep, matching the executable
+base name case-insensitively, and a tool whose executable is not found is
+omitted. Extension-specific tools are ordered before group tools and are never
+listed twice for one file type.
 
 The template expands `{exe-path}` to the discovered executable, `{item-path}`
 to one selected file, and `{item-paths}` to individually quoted selected paths.
-The path handed to the
-operating system is always the one found on disk, never text from the
-configuration file. Missing files, invalid declarations, unavailable search
-roots and executables that could not be found are retained as configuration
-issues and written to the latest-run diagnostic log.
+The path handed to the operating system is always the one found on disk, never
+text from the configuration file. Missing files, invalid declarations,
+unavailable search roots and executables that could not be found are kept as
+configuration issues and written to the latest-run diagnostic log.
 
 Launching an external application is not itself a modification. Whatever that
 application then does is outside ImageWalker's control and outside its results.
@@ -141,8 +138,9 @@ destination folder with completion. Sidecar companions — `.xmp`, `.thm`, `.aae
 decision is never made for half a set.
 
 Where a collision is found, the choice is Auto-rename or Replace, defaulting to
-Auto-rename; Replace secures a recovery copy before overwriting. The destination folder is
-created after that decision, so cancelling leaves nothing behind.
+Auto-rename; Replace secures a recovery copy before overwriting. The
+destination folder is created after that decision, so cancelling leaves
+nothing behind.
 
 The run itself is not cancellable: a status window pumps messages so the
 application stays responsive, but there is no Cancel. Per-item results are
@@ -195,13 +193,14 @@ crops away the emptied corners. Nothing is written until Save, which re-renders
 at full resolution.
 
 The draft starts from the upright photo, and Save writes upright pixels with the
-orientation reset to 1. Saving into the photo's own format keeps its metadata
-and colour profile. A JPEG's metadata segments are copied byte for byte, maker
-notes included; only the EXIF and XMP orientation, the EXIF pixel size and the
-now-stale EXIF and JFIF thumbnails are corrected, and a multi-picture index
-pointing into the old file is dropped. TIFF and PNG copy their metadata blocks.
-Saving as another format keeps only the colour profile, and WebP keeps none;
-see [known-issues.md](known-issues.md).
+orientation reset to 1. Saving a JPEG as JPEG copies its metadata segments byte
+for byte, maker notes included; only the EXIF and XMP orientation, the EXIF
+pixel size and the stale EXIF and JFIF thumbnails are corrected, and a
+multi-picture index pointing into the old file is dropped. Other saves,
+including Save as into another format, carry the source's metadata blocks -
+camera, date and GPS fields among them - and an RGB colour profile wherever the
+destination format can hold them. A BMP holds none, and a WebP save writes
+none; see [known-issues.md](known-issues.md).
 
 An in-place Save writes an original backup copy first by default. A format that
 cannot hold the result asks for an explicit save as JPEG rather than silently
@@ -219,8 +218,8 @@ crop. Escape cancels an active drag rather than closing the task.
 Auto document looks for a complete, contrasting quadrilateral. It refuses
 clipped, low-contrast, transparent or non-quadrilateral subjects instead of
 inventing a page. Its result remains editable through the corner handles.
-Perspective output is limited to 128 million pixels and four times the source
-area; rejected geometry and allocation failures retain the draft.
+Perspective output is limited to about 134 million pixels (2^27) and four times
+the source area; rejected geometry and allocation failures keep the draft.
 
 Draft Undo/Redo restores geometry and colour adjustments without writing files.
 A successful save or a new photo establishes a new draft baseline.
@@ -257,16 +256,14 @@ its own result.
 | Edit Save as | Yes | The user confirms the destination | A failed save leaves the draft |
 | Sync | Depends on the reviewed action | Reviewed copy may replace; deletion is permanent | Row results retained; nothing is rolled back |
 
-Copy, Move and Edit saves run to completion. Only Convert, Rename and Sync offer
-Cancel.
-
 ### Session Undo
 
 Edit > Undo (`Ctrl+Z`) undoes the active Photo Edit draft, or, after closing the
-task, the latest completed file task. File Undo asks for confirmation and reports
-restored paths, conflicts and failures. It covers Convert, batch/direct Rename,
-Sync, the Copy/Move dialog and Photo Edit saves. Partial runs retain history for
-the parts that actually completed, including partially transferred sidecars.
+task, the latest completed file task. File Undo asks for confirmation and
+reports restored paths, conflicts and failures. It covers Convert, batch and
+direct Rename, Sync, the Copy/Move dialog and Photo Edit saves. Partial runs
+keep history for the parts that actually completed, including partially
+transferred sidecars.
 
 Recovery copies are secured before destructive changes. Undo checks file
 identity, contents, parent identity and bundle relationships; later external
@@ -278,10 +275,11 @@ Directory merges record only the nodes and files actually changed. An unrelated
 child prevents removal of a created directory.
 
 Automatic Undo is current-session only. Flushed manifests and original bytes
-remain in `exe/imagewalker30.undo/` after exit or a crash for manual recovery.
-They are not replayed automatically or evicted; failed/conflicting operations
-report the retained recovery location. Cross-volume recovery can also retain
-documented staging siblings at the original volume.
+remain in `exe\imagewalker30.undo\` after exit or a crash for manual recovery.
+They are neither replayed nor evicted automatically, and a failed or
+conflicting operation reports where its recovery copies are. Cross-volume
+recovery can also leave a `.iw30-undo-*` staging item beside the original path,
+named in the recovery record.
 
 Clipboard/drop operations managed by the Windows shell and Recycle Bin
 deletions use Windows recovery, not this history. External-application changes

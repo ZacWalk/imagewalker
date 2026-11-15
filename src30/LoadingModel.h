@@ -11,8 +11,20 @@ namespace iw::ui
 	class LoadingModel
 	{
 	public:
-		enum class Phase : std::uint8_t { none, placeholder, thumbnail, source };
-		enum class Failure : std::uint8_t { none, unreadable, unsupported, offline };
+		enum class Phase : std::uint8_t
+		{
+			none,
+			placeholder,
+			thumbnail,
+			source
+		};
+		enum class Failure : std::uint8_t
+		{
+			none,
+			unreadable,
+			unsupported,
+			offline
+		};
 
 		void begin(const std::uint64_t generation, const int requiredWidth, const int requiredHeight,
 		           const bool shapedPlaceholder)
@@ -63,7 +75,7 @@ namespace iw::ui
 		{
 			if (generation != generation_ || width <= 0 || height <= 0 || phase < phase_) return false;
 			if (phase == phase_ &&
-				(width < heldWidth_ || height < heldHeight_ || (width == heldWidth_ && height == heldHeight_)))
+			    (width < heldWidth_ || height < heldHeight_ || (width == heldWidth_ && height == heldHeight_)))
 				return false;
 			phase_ = phase;
 			heldWidth_ = width;
@@ -91,8 +103,7 @@ namespace iw::ui
 	private:
 		void clear_satisfied_need()
 		{
-			if (heldWidth_ >= requiredWidth_ && heldHeight_ >= requiredHeight_)
-				requiredWidth_ = requiredHeight_ = 0;
+			if (heldWidth_ >= requiredWidth_ && heldHeight_ >= requiredHeight_) requiredWidth_ = requiredHeight_ = 0;
 		}
 
 		std::uint64_t generation_{};

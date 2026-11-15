@@ -30,13 +30,11 @@ namespace iw
 		}
 	}
 
-	TaskView::TaskView()
-		: TaskView(tasks::TaskRunner::Dispatcher{})
+	TaskView::TaskView() : TaskView(tasks::TaskRunner::Dispatcher{})
 	{
 	}
 
-	TaskView::TaskView(tasks::TaskRunner::Dispatcher dispatcher)
-		: runner_(std::move(dispatcher))
+	TaskView::TaskView(tasks::TaskRunner::Dispatcher dispatcher) : runner_(std::move(dispatcher))
 	{
 		plan_.blockReason = L"Analyze to review the changes.";
 	}
@@ -64,8 +62,7 @@ namespace iw
 		panel_.set_activate_handler([this](ui::Control& control) { control_activated(control); });
 		columns_ = review_columns();
 
-		runner_.progress = [this](const tasks::TaskRunner::Phase phase, const size_t complete,
-		                          const size_t total)
+		runner_.progress = [this](const tasks::TaskRunner::Phase phase, const size_t complete, const size_t total)
 		{
 			const auto keepAlive = shared_from_this();
 			const auto generation = runner_.generation();
@@ -73,9 +70,10 @@ namespace iw
 			total_ = total;
 			if (host_.progress) host_.progress(complete, total);
 			if (generation != runner_.generation()) return;
-			set_status(cancelling_ ? L"Cancelling..." : phase == tasks::TaskRunner::Phase::analyzing
-				           ? L"Analyzing..."
-				           : std::format(L"Processing... {} of {}", complete, total));
+			set_status(cancelling_ ? L"Cancelling..."
+			           : phase == tasks::TaskRunner::Phase::analyzing
+			               ? L"Analyzing..."
+			               : std::format(L"Processing... {} of {}", complete, total));
 		};
 		runner_.rowProgress = [this](const size_t index, const tasks::TaskRow& row)
 		{
@@ -120,8 +118,8 @@ namespace iw
 			// The third column becomes Status once there are results to show.
 			columns_ = review_columns();
 			const auto result = tasks::summarize_results(plan_);
-			plan_.blockReason = optionsChangedDuringRun_
-				? L"Options changed. Analyze again before running." : L"Analyze again before running.";
+			plan_.blockReason = optionsChangedDuringRun_ ? L"Options changed. Analyze again before running."
+			                                             : L"Analyze again before running.";
 			const auto status = result + (optionsChangedDuringRun_ ? L" - Options changed. Analyze again." : L"");
 			optionsChangedDuringRun_ = false;
 			panel_.set_interactive(true);
@@ -211,37 +209,54 @@ namespace iw
 
 	std::vector<platform::ToolbarItem> TaskView::toolbar_items()
 	{
-		const auto make = [](std::wstring name, std::function<void()> invoke,
-		                     std::function<bool()> enabled = {})
+		const auto make = [](std::wstring name, std::function<void()> invoke, std::function<bool()> enabled = {})
 		{
 			auto command = std::make_shared<platform::Command>();
 			command->name = std::move(name);
 			command->tooltip = command->name;
-			command->toolbarText = [text = command->name] { return text; };
+			command->toolbarText = [text = command->name]
+			{
+				return text;
+			};
 			command->invoke = std::move(invoke);
 			command->enabled = std::move(enabled);
 			return command;
 		};
 
 		const auto weak = weak_from_this();
-		runCommand_ = make(run_label(), [weak] { if (const auto self = weak.lock()) self->start_run(); }, [weak]
+		runCommand_ = make(run_label(),
+		                   [weak]
+		{
+			if (const auto self = weak.lock()) self->start_run();
+		}, [weak]
 		{
 			const auto self = weak.lock();
 			return self && !self->busy() && !self->finished_ && self->plan_.can_run() &&
-				self->analysis_block_reason().empty() && self->run_block_reason().empty();
+			       self->analysis_block_reason().empty() && self->run_block_reason().empty();
 		});
 		auto settingsReason = analysis_block_reason();
 		if (settingsReason.empty()) settingsReason = run_block_reason();
-		runCommand_->tooltip = !settingsReason.empty() ? settingsReason :
-			plan_.blockReason.empty() ? run_label() : plan_.blockReason;
-		cancelCommand_ = make(L"Cancel", [weak] { if (const auto self = weak.lock()) self->cancel(); },
-			[weak] { const auto self = weak.lock(); return self && self->busy() && !self->cancelling_; });
-		refreshCommand_ = make(refresh_label(), [weak] { if (const auto self = weak.lock()) self->analyze(); },
-			[weak]
-			{
-				const auto self = weak.lock();
-				return self && !self->busy() && self->analysis_block_reason().empty();
-			});
+		runCommand_->tooltip = !settingsReason.empty()     ? settingsReason
+		                       : plan_.blockReason.empty() ? run_label()
+		                                                   : plan_.blockReason;
+		cancelCommand_ = make(L"Cancel",
+		                      [weak]
+		{
+			if (const auto self = weak.lock()) self->cancel();
+		}, [weak]
+		{
+			const auto self = weak.lock();
+			return self && self->busy() && !self->cancelling_;
+		});
+		refreshCommand_ = make(refresh_label(),
+		                       [weak]
+		{
+			if (const auto self = weak.lock()) self->analyze();
+		}, [weak]
+		{
+			const auto self = weak.lock();
+			return self && !self->busy() && self->analysis_block_reason().empty();
+		});
 		const auto analysisReason = analysis_block_reason();
 		if (!analysisReason.empty()) refreshCommand_->tooltip = analysisReason;
 		std::vector<platform::ToolbarItem> items{platform::ToolbarItem::action(runCommand_)};
@@ -263,8 +278,8 @@ namespace iw
 			maximize->toolbarText = [weak]
 			{
 				const auto self = weak.lock();
-				return self && self->host_.maximized && self->host_.maximized()
-					? std::wstring(L"Restore") : std::wstring(L"Maximize");
+				return self && self->host_.maximized && self->host_.maximized() ? std::wstring(L"Restore")
+				                                                                : std::wstring(L"Maximize");
 			};
 			maximize->invoke = [weak]
 			{
@@ -278,7 +293,10 @@ namespace iw
 		}
 		closeCommand_ = std::make_shared<platform::Command>();
 		closeCommand_->name = closeCommand_->tooltip = L"Close";
-		closeCommand_->toolbarText = [] { return std::wstring(L"Close"); };
+		closeCommand_->toolbarText = []
+		{
+			return std::wstring(L"Close");
+		};
 		closeCommand_->invoke = [weak]
 		{
 			if (const auto self = weak.lock()) self->ask_host_to_close();
@@ -292,8 +310,9 @@ namespace iw
 		{
 			auto settingsReason = analysis_block_reason();
 			if (settingsReason.empty()) settingsReason = run_block_reason();
-			runCommand_->tooltip = !settingsReason.empty() ? settingsReason :
-				plan_.blockReason.empty() ? run_label() : plan_.blockReason;
+			runCommand_->tooltip = !settingsReason.empty()     ? settingsReason
+			                       : plan_.blockReason.empty() ? run_label()
+			                                                   : plan_.blockReason;
 		}
 		if (refreshCommand_)
 		{
@@ -358,7 +377,9 @@ namespace iw
 			}
 			queued = runner_.analyze(std::move(analyzer));
 		}
-		catch (...) {}
+		catch (...)
+		{
+		}
 		if (!queued)
 		{
 			analyzing_ = false;
@@ -377,13 +398,14 @@ namespace iw
 		if (!plan_.can_run()) return plan_.blockReason;
 		const auto collisions = tasks::describe_collisions(plan_);
 		return std::format(L"{} item{}{}{}", plan_.rows.size(), plan_.rows.size() == 1 ? L"" : L"s",
-			collisions.empty() ? L"" : L" - ", collisions);
+		                   collisions.empty() ? L"" : L" - ", collisions);
 	}
 
 	void TaskView::start_run()
 	{
-		if (busy() || closePending_ || finished_ || !plan_.can_run() ||
-			!analysis_block_reason().empty() || !run_block_reason().empty()) return;
+		if (busy() || closePending_ || finished_ || !plan_.can_run() || !analysis_block_reason().empty() ||
+		    !run_block_reason().empty())
+			return;
 		const auto keepAlive = shared_from_this();
 		const auto generation = runner_.generation();
 		running_ = true;
@@ -412,7 +434,9 @@ namespace iw
 			}
 			queued = runner_.run(plan_, std::move(options));
 		}
-		catch (...) {}
+		catch (...)
+		{
+		}
 		if (!queued)
 		{
 			running_ = false;
@@ -541,9 +565,7 @@ namespace iw
 	{
 		switch (control.kind)
 		{
-		case ui::ControlKind::choice:
-			show_choice_popup(control);
-			break;
+		case ui::ControlKind::choice: show_choice_popup(control); break;
 		case ui::ControlKind::folder:
 		{
 			const int id = control.id;
@@ -597,18 +619,15 @@ namespace iw
 		const int statusHeight = metric(24);
 		const app::recti panelArea{gap, gap, panel - gap * 2, client.height - gap * 2};
 		// The panel is laid out at its scrolled position, so hit testing and drawing agree.
-		panelBounds_ = {
-			panelArea.x, panelArea.y - panelScroll_.offset,
-			(std::max)(0, panelArea.width - metric(12)), panelArea.height
-		};
+		panelBounds_ = {panelArea.x, panelArea.y - panelScroll_.offset, (std::max)(0, panelArea.width - metric(12)),
+		                panelArea.height};
 		panel_.layout(panelBounds_, renderer);
 
-		const int thumbnailRows = targets_.empty()
-			                          ? 0
-			                          : metric(thumbnailEdge) + renderer.measure_text(L"Wg").height + gap;
+		const int thumbnailRows = targets_.empty() ? 0
+		                                           : metric(thumbnailEdge) + renderer.measure_text(L"Wg").height + gap;
 		const auto previousOffset = panelScroll_.offset;
-		panelScroll_.layout(panelArea, panel_.content_height() + thumbnailRows + gap, panelScroll_.offset,
-		                    metric(12), metric(28));
+		panelScroll_.layout(panelArea, panel_.content_height() + thumbnailRows + gap, panelScroll_.offset, metric(12),
+		                    metric(28));
 		if (previousOffset != panelScroll_.offset)
 		{
 			panelBounds_.y = panelArea.y - panelScroll_.offset;
@@ -620,15 +639,11 @@ namespace iw
 		const app::recti right{panel, gap, (std::max)(0, client.width - panel - gap), client.height - gap * 2};
 		reviewHeaderBounds_ = {right.x, right.y, right.width, metric(22)};
 		statusBounds_ = {right.x, right.bottom() - statusHeight, right.width, statusHeight};
-		reviewBounds_ = {
-			right.x, reviewHeaderBounds_.bottom(), right.width,
-			(std::max)(0, statusBounds_.y - reviewHeaderBounds_.bottom() - metric(4))
-		};
-		contentBounds_ = {
-			right.x, right.y, right.width, (std::max)(0, statusBounds_.y - right.y - metric(4))
-		};
-		reviewScroll_.layout(reviewBounds_, static_cast<int>(plan_.rows.size()) * row_height(),
-		                     reviewScroll_.offset, metric(12), metric(28));
+		reviewBounds_ = {right.x, reviewHeaderBounds_.bottom(), right.width,
+		                 (std::max)(0, statusBounds_.y - reviewHeaderBounds_.bottom() - metric(4))};
+		contentBounds_ = {right.x, right.y, right.width, (std::max)(0, statusBounds_.y - right.y - metric(4))};
+		reviewScroll_.layout(reviewBounds_, static_cast<int>(plan_.rows.size()) * row_height(), reviewScroll_.offset,
+		                     metric(12), metric(28));
 		layout_hosted_controls();
 	}
 
@@ -646,10 +661,8 @@ namespace iw
 
 	void TaskView::draw_panel(const ui::CanvasRenderer& renderer) const
 	{
-		const app::recti clip{
-			panelBounds_.x, metric(8), panelBounds_.width + metric(12),
-			panelScroll_.viewportExtent > 0 ? panelScroll_.viewportExtent : panelBounds_.height
-		};
+		const app::recti clip{panelBounds_.x, metric(8), panelBounds_.width + metric(12),
+		                      panelScroll_.viewportExtent > 0 ? panelScroll_.viewportExtent : panelBounds_.height};
 		renderer.clip(clip);
 		panel_.draw(renderer);
 		if (!targets_.empty() && thumbnailBounds_.height > 0)
@@ -673,11 +686,10 @@ namespace iw
 				}
 				x += edge + spacing;
 			}
-			renderer.text(std::format(L"{} item{} selected", targets_.size(),
-			                          targets_.size() == 1 ? L"" : L"s"), {
-				              thumbnailBounds_.x, thumbnailBounds_.y + edge + spacing, thumbnailBounds_.width,
-				              thumbnailBounds_.height - edge - spacing
-			              }, platform::system_color(platform::SystemColor::grayText),
+			renderer.text(std::format(L"{} item{} selected", targets_.size(), targets_.size() == 1 ? L"" : L"s"),
+			              {thumbnailBounds_.x, thumbnailBounds_.y + edge + spacing, thumbnailBounds_.width,
+			               thumbnailBounds_.height - edge - spacing},
+			              platform::system_color(platform::SystemColor::grayText),
 			              platform::TextFormat::left | platform::TextFormat::singleLine);
 		}
 		renderer.reset_clip();
@@ -713,48 +725,42 @@ namespace iw
 		for (size_t index = 0; index < columns_.size(); ++index)
 			renderer.text(columns_[index].title, columnRect(reviewHeaderBounds_, index), text,
 			              platform::TextFormat::left | platform::TextFormat::verticalCenter |
-			              platform::TextFormat::singleLine);
+			                  platform::TextFormat::singleLine);
 
 		if (plan_.rows.empty())
 		{
 			renderer.text(analyzing_ ? L"Analyzing..." : L"Nothing to review yet.", viewport, gray,
 			              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-			              platform::TextFormat::singleLine);
+			                  platform::TextFormat::singleLine);
 			renderer.scrollbar(reviewScroll_);
 			return;
 		}
 
 		const int height = row_height();
 		const size_t first = static_cast<size_t>((std::max)(0, reviewScroll_.offset) / height);
-		const size_t last = (std::min)(plan_.rows.size(),
-		                               first + static_cast<size_t>(viewport.height / height) + 2);
+		const size_t last = (std::min)(plan_.rows.size(), first + static_cast<size_t>(viewport.height / height) + 2);
 		renderer.clip(viewport);
 		for (size_t index = first; index < last; ++index)
 		{
 			const auto& row = plan_.rows[index];
-			const app::recti bounds{
-				viewport.x, viewport.y + static_cast<int>(index) * height - reviewScroll_.offset,
-				viewport.width, height
-			};
+			const app::recti bounds{viewport.x, viewport.y + static_cast<int>(index) * height - reviewScroll_.offset,
+			                        viewport.width, height};
 			if (running_ && index == runningRow_)
 				renderer.fill(bounds, platform::system_color(platform::SystemColor::highlight));
 			else if (index % 2) renderer.fill(bounds, face);
 			const bool selectedRow = running_ && index == runningRow_;
-			const color foreground = selectedRow
-				                         ? platform::system_color(platform::SystemColor::highlightText)
-				                         : row.state == tasks::RowState::blocked ||
-				                         row.state == tasks::RowState::failed
-				                         ? color{0xb0, 0x30, 0x20, 0xff}
-				                         : row.state == tasks::RowState::skipped ||
-				                         row.state == tasks::RowState::notRun
-				                         ? gray
-				                         : text;
+			const color foreground = selectedRow ? platform::system_color(platform::SystemColor::highlightText)
+			                         : row.state == tasks::RowState::blocked || row.state == tasks::RowState::failed
+			                             ? color{0xb0, 0x30, 0x20, 0xff}
+			                         : row.state == tasks::RowState::skipped || row.state == tasks::RowState::notRun
+			                             ? gray
+			                             : text;
 			for (size_t column = 0; column < columns_.size(); ++column)
 				renderer.text(review_cell(row, column), columnRect(bounds, column), foreground,
 				              platform::TextFormat::left | platform::TextFormat::verticalCenter |
-				              platform::TextFormat::singleLine |
-				              (columns_[column].path ? platform::TextFormat::pathEllipsis
-				                                     : platform::TextFormat::endEllipsis));
+				                  platform::TextFormat::singleLine |
+				                  (columns_[column].path ? platform::TextFormat::pathEllipsis
+				                                         : platform::TextFormat::endEllipsis));
 		}
 		renderer.reset_clip();
 		renderer.scrollbar(reviewScroll_);
@@ -767,10 +773,10 @@ namespace iw
 		const auto& text = settingsReason.empty() ? statusText_ : settingsReason;
 		renderer.text(text, statusBounds_,
 		              settingsReason.empty() && (plan_.can_run() || finished_ || text.empty())
-			              ? platform::system_color(platform::SystemColor::windowText)
-			              : color{0xb0, 0x30, 0x20, 0xff},
+		                  ? platform::system_color(platform::SystemColor::windowText)
+		                  : color{0xb0, 0x30, 0x20, 0xff},
 		              platform::TextFormat::left | platform::TextFormat::verticalCenter |
-		              platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
+		                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
 	}
 
 	void TaskView::draw_content(const ui::CanvasRenderer& renderer, app::recti)
@@ -789,18 +795,12 @@ namespace iw
 	{
 		switch (input.key)
 		{
-		case platform::KeyCode::down: reviewScroll_.scroll_by(row_height());
-			break;
-		case platform::KeyCode::up: reviewScroll_.scroll_by(-row_height());
-			break;
-		case platform::KeyCode::pageDown: reviewScroll_.scroll_by(reviewScroll_.viewportExtent);
-			break;
-		case platform::KeyCode::pageUp: reviewScroll_.scroll_by(-reviewScroll_.viewportExtent);
-			break;
-		case platform::KeyCode::home: reviewScroll_.offset = 0;
-			break;
-		case platform::KeyCode::end: reviewScroll_.offset = reviewScroll_.maximum();
-			break;
+		case platform::KeyCode::down: reviewScroll_.scroll_by(row_height()); break;
+		case platform::KeyCode::up: reviewScroll_.scroll_by(-row_height()); break;
+		case platform::KeyCode::pageDown: reviewScroll_.scroll_by(reviewScroll_.viewportExtent); break;
+		case platform::KeyCode::pageUp: reviewScroll_.scroll_by(-reviewScroll_.viewportExtent); break;
+		case platform::KeyCode::home: reviewScroll_.offset = 0; break;
+		case platform::KeyCode::end: reviewScroll_.offset = reviewScroll_.maximum(); break;
 		default: return false;
 		}
 		invalidate();
@@ -847,18 +847,16 @@ namespace iw
 		return 0;
 	}
 
-	platform::MessageResult TaskView::mouse(const platform::WindowFramePtr& frame,
-	                                        const platform::MouseMessage message,
+	platform::MessageResult TaskView::mouse(const platform::WindowFramePtr& frame, const platform::MouseMessage message,
 	                                        const platform::MouseInput& input)
 	{
 		if (frame != frame_) return 0;
 		const auto keepAlive = shared_from_this();
-		if (content_dragging() && (message == platform::MouseMessage::move ||
-			message == platform::MouseMessage::leftButtonUp))
+		if (content_dragging() &&
+		    (message == platform::MouseMessage::move || message == platform::MouseMessage::leftButtonUp))
 			return content_mouse(message, input) ? 1 : 0;
-		const bool insidePanel = input.point.x >= panelBounds_.x &&
-			input.point.x < panelBounds_.right() && input.point.y >= metric(8) &&
-			input.point.y < metric(8) + panelScroll_.viewportExtent;
+		const bool insidePanel = input.point.x >= panelBounds_.x && input.point.x < panelBounds_.right() &&
+		                         input.point.y >= metric(8) && input.point.y < metric(8) + panelScroll_.viewportExtent;
 		switch (message)
 		{
 		case platform::MouseMessage::move:
@@ -896,8 +894,9 @@ namespace iw
 					scrollGrab_ = input.point.y - scroll->thumb.y;
 					frame_->set_capture();
 				}
-				else scroll->scroll_by(input.point.y < scroll->thumb.y
-					? -scroll->viewportExtent : scroll->viewportExtent);
+				else
+					scroll->scroll_by(input.point.y < scroll->thumb.y ? -scroll->viewportExtent
+					                                                  : scroll->viewportExtent);
 				invalidate();
 				return 1;
 			}
@@ -935,9 +934,7 @@ namespace iw
 			content_mouse(message, input);
 			break;
 
-		default:
-			content_mouse(message, input);
-			break;
+		default: content_mouse(message, input); break;
 		}
 		return 0;
 	}
@@ -973,7 +970,7 @@ namespace iw
 				if (top < panelScroll_.offset) panelScroll_.offset = top;
 				else if (top + control->bounds.height > panelScroll_.offset + panelScroll_.viewportExtent)
 					panelScroll_.offset = (std::min)(panelScroll_.maximum(),
-						top + control->bounds.height - panelScroll_.viewportExtent);
+					                                 top + control->bounds.height - panelScroll_.viewportExtent);
 				if (control->kind == ui::ControlKind::text) control_activated(*control);
 			}
 			invalidate();
@@ -982,13 +979,12 @@ namespace iw
 		return panel_.key(input);
 	}
 
-	platform::MessageResult TaskView::key(const platform::WindowFramePtr& frame,
-	                                      const platform::KeyMessage message, const platform::KeyInput& input)
+	platform::MessageResult TaskView::key(const platform::WindowFramePtr& frame, const platform::KeyMessage message,
+	                                      const platform::KeyInput& input)
 	{
 		if (frame != frame_) return 0;
 		const auto keepAlive = shared_from_this();
-		if (message == platform::KeyMessage::character)
-			return input.character == L'\t' && control_key(input) ? 1 : 0;
+		if (message == platform::KeyMessage::character) return input.character == L'\t' && control_key(input) ? 1 : 0;
 		if (message != platform::KeyMessage::down) return 0;
 		if (input.key == platform::KeyCode::escape)
 		{
@@ -1007,21 +1003,18 @@ namespace iw
 		const auto weak = weak_from_this();
 		for (size_t index = 0; index < thumbnails_.size(); ++index)
 		{
-			platform::queue_work(platform::WorkQueue::thumbnail,
-			                     [weak, generation, index, edge, path = targets_[index]]
-			                     {
-				                     auto decoded = files::load_thumbnail(path, edge, edge);
-				                     platform::queue_ui([weak, generation, index, decoded = std::move(decoded)]
-				                     {
-					                     const auto self = weak.lock();
-					                     if (!self || self->thumbnailGeneration_ != generation) return;
-					                     if (index >= self->thumbnails_.size()) return;
-					                     self->thumbnails_[index] = {
-						                     decoded.width, decoded.height, std::move(decoded.pixels)
-					                     };
-					                     self->invalidate();
-				                     });
-			                     });
+			platform::queue_work(platform::WorkQueue::thumbnail, [weak, generation, index, edge, path = targets_[index]]
+			{
+				auto decoded = files::load_thumbnail(path, edge, edge);
+				platform::queue_ui([weak, generation, index, decoded = std::move(decoded)]() mutable
+				{
+					const auto self = weak.lock();
+					if (!self || self->thumbnailGeneration_ != generation) return;
+					if (index >= self->thumbnails_.size()) return;
+					self->thumbnails_[index] = {decoded.width, decoded.height, std::move(decoded.pixels)};
+					self->invalidate();
+				});
+			});
 		}
 		invalidate();
 	}

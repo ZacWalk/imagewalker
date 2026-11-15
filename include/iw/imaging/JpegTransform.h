@@ -9,8 +9,22 @@
 
 namespace iw::imaging
 {
-	enum class JpegTransform { none, clockwise, halfTurn, counterClockwise, flipHorizontal, flipVertical, transpose, transverse };
-	enum class JpegTransformPolicy { perfect, partialBlocks };
+	enum class JpegTransform
+	{
+		none,
+		clockwise,
+		halfTurn,
+		counterClockwise,
+		flipHorizontal,
+		flipVertical,
+		transpose,
+		transverse
+	};
+	enum class JpegTransformPolicy
+	{
+		perfect,
+		partialBlocks
+	};
 
 	struct JpegTransformOptions
 	{
@@ -31,8 +45,7 @@ namespace iw::imaging
 		std::vector<std::uint8_t> bytes;
 	};
 
-	EncodedImageResult transform_jpeg(std::span<const std::uint8_t> source,
-	                                  const JpegTransformOptions& options = {});
+	EncodedImageResult transform_jpeg(std::span<const std::uint8_t> source, const JpegTransformOptions& options = {});
 }
 
 #include <iw/imaging/detail/JpegTransform.h>

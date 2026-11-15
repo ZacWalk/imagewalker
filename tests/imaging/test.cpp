@@ -20,8 +20,11 @@
 
 IW_TEST(QuarterTurnsPreserveEveryPixelAndAlpha)
 {
-	const iw::imaging::PixelImage source{3, 2,
-		{0x00112233, 0x40445566, 0x80778899, 0xffaabbcc, 0xff102030, 0xff405060}, 30, 20};
+	const iw::imaging::PixelImage source{3,
+	                                     2,
+	                                     {0x00112233, 0x40445566, 0x80778899, 0xffaabbcc, 0xff102030, 0xff405060},
+	                                     30,
+	                                     20};
 	auto turned = iw::imaging::rotate_quarters(source, 1);
 	IW_CHECK_EQ(turned.width, 2);
 	IW_CHECK_EQ(turned.height, 3);
@@ -30,8 +33,7 @@ IW_TEST(QuarterTurnsPreserveEveryPixelAndAlpha)
 	IW_CHECK_EQ(turned.pixels[1], source.pixels[0]);
 	for (int i = 0; i < 3; ++i) turned = iw::imaging::rotate_quarters(turned, 1);
 	IW_CHECK(turned.pixels == source.pixels);
-	IW_CHECK(iw::imaging::rotate_quarters(source, -1).pixels ==
-		iw::imaging::rotate_quarters(source, 3).pixels);
+	IW_CHECK(iw::imaging::rotate_quarters(source, -1).pixels == iw::imaging::rotate_quarters(source, 3).pixels);
 }
 
 IW_TEST(PixelBoundsRejectTruncatedAndOverflowingDimensions)
@@ -40,8 +42,14 @@ IW_TEST(PixelBoundsRejectTruncatedAndOverflowingDimensions)
 	IW_CHECK(!iw::imaging::valid_pixels(3, 2, 5));
 	IW_CHECK(!iw::imaging::valid_pixels(INT_MAX, INT_MAX, 32));
 	bool rejected = false;
-	try { (void)iw::imaging::rotate_quarters({2, 2, {0}}, 1); }
-	catch (const std::invalid_argument&) { rejected = true; }
+	try
+	{
+		(void)iw::imaging::rotate_quarters({2, 2, {0}}, 1);
+	}
+	catch (const std::invalid_argument&)
+	{
+		rejected = true;
+	}
 	IW_CHECK(rejected);
 }
 
@@ -63,8 +71,11 @@ namespace
 
 IW_TEST(StandaloneCodecsRetainAlphaAndNativeMetadataWithoutAnApplication)
 {
-	const iw::imaging::PixelImage source{3, 2,
-		{0x00112233, 0x40445566, 0x80778899, 0xffaabbcc, 0xff102030, 0xff405060}, 3, 2};
+	const iw::imaging::PixelImage source{3,
+	                                     2,
+	                                     {0x00112233, 0x40445566, 0x80778899, 0xffaabbcc, 0xff102030, 0xff405060},
+	                                     3,
+	                                     2};
 	TemporaryImage file;
 	const auto encoded = iw::imaging::encode_to_file(source, file.path, iw::imaging::ImageSaveFormat::png);
 	IW_CHECK(static_cast<bool>(encoded));
@@ -76,6 +87,7 @@ IW_TEST(StandaloneCodecsRetainAlphaAndNativeMetadataWithoutAnApplication)
 	if (!native) return;
 	IW_CHECK_EQ(native.document.frames.size(), size_t{1});
 	IW_CHECK(iw::imaging::frame_pixels(native).pixels == source.pixels);
+	// NOLINTNEXTLINE(performance-unnecessary-copy-initialization): the copy is what this test checks.
 	const auto copy = native;
 	IW_CHECK(iw::imaging::frame_pixels(copy).pixels == source.pixels);
 	IW_CHECK(copy.document.frames[0].pixels.data() != native.document.frames[0].pixels.data());
@@ -89,8 +101,7 @@ IW_TEST(StandaloneCodecsRetainAlphaAndNativeMetadataWithoutAnApplication)
 
 IW_TEST(ScannedMetadataSurvivesWithoutANativeDocumentDecoder)
 {
-	const iw::imaging::PixelImage image{2, 2,
-		{0xff112233, 0xff445566, 0xff778899, 0xffabcdef}, 2, 2};
+	const iw::imaging::PixelImage image{2, 2, {0xff112233, 0xff445566, 0xff778899, 0xffabcdef}, 2, 2};
 	libfiles::image_view view;
 	view.pixels = reinterpret_cast<const std::uint8_t*>(image.pixels.data());
 	view.stride = 2 * sizeof(std::uint32_t);
@@ -118,7 +129,7 @@ IW_TEST(ScannedMetadataSurvivesWithoutANativeDocumentDecoder)
 	{
 		std::ofstream output(source.path, std::ios::binary);
 		output.write(reinterpret_cast<const char*>(encoded.data.data()),
-			static_cast<std::streamsize>(encoded.data.size()));
+		             static_cast<std::streamsize>(encoded.data.size()));
 		output.close();
 		IW_CHECK(static_cast<bool>(output));
 	}
@@ -129,8 +140,8 @@ IW_TEST(ScannedMetadataSurvivesWithoutANativeDocumentDecoder)
 		iw::imaging::SaveOptions options;
 		options.metadataSource = source.path;
 		options.carry = carry;
-		const auto saved = iw::imaging::encode_to_file(image, destination.path,
-			iw::imaging::ImageSaveFormat::png, options);
+		const auto saved = iw::imaging::encode_to_file(image, destination.path, iw::imaging::ImageSaveFormat::png,
+		                                               options);
 		IW_CHECK(static_cast<bool>(saved));
 		IW_CHECK(!saved.warnings.empty());
 		iw::imaging::PlatformFileStream stream(destination.path);
@@ -149,7 +160,7 @@ IW_TEST(ScannedMetadataSurvivesWithoutANativeDocumentDecoder)
 			IW_CHECK(info.description == "source caption");
 			libfiles::xmp::meta carried;
 			carried.parse(std::string_view(reinterpret_cast<const char*>(scanned.metadata.xmp.data()),
-				scanned.metadata.xmp.size()));
+			                               scanned.metadata.xmp.size()));
 			std::int32_t orientation = 0;
 			IW_CHECK(carried.get_property_int(libfiles::xmp::ns::tiff, "Orientation", &orientation));
 			IW_CHECK_EQ(orientation, 1);
@@ -159,11 +170,10 @@ IW_TEST(ScannedMetadataSurvivesWithoutANativeDocumentDecoder)
 
 IW_TEST(RasterJpegSavesCarryOpaqueSourceMarkersOnlyWhenRequested)
 {
-	const iw::imaging::PixelImage image{2, 2,
-		{0xff112233, 0xff445566, 0xff778899, 0xffabcdef}, 2, 2};
+	const iw::imaging::PixelImage image{2, 2, {0xff112233, 0xff445566, 0xff778899, 0xffabcdef}, 2, 2};
 	libfiles::jpeg_encoder encoder;
 	auto bytes = encoder.encode(2, 2, reinterpret_cast<const std::uint8_t*>(image.pixels.data()),
-		2 * sizeof(std::uint32_t), 1, {}, {});
+	                            2 * sizeof(std::uint32_t), 1, {}, {});
 	IW_CHECK(bytes.size() > 2);
 	if (bytes.size() <= 2) return;
 	const std::vector<std::uint8_t> opaque{0xff, 0xef, 0, 8, 'o', 'p', 'a', 'q', 'u', 'e'};
@@ -181,8 +191,8 @@ IW_TEST(RasterJpegSavesCarryOpaqueSourceMarkersOnlyWhenRequested)
 		iw::imaging::SaveOptions options;
 		options.metadataSource = source.path;
 		options.carry = carry;
-		const auto saved = iw::imaging::encode_to_file(image, destination.path,
-			iw::imaging::ImageSaveFormat::jpeg, options);
+		const auto saved = iw::imaging::encode_to_file(image, destination.path, iw::imaging::ImageSaveFormat::jpeg,
+		                                               options);
 		IW_CHECK(static_cast<bool>(saved));
 		iw::imaging::PlatformFileStream stream(destination.path);
 		libfiles::reader input(stream);
@@ -206,7 +216,10 @@ IW_TEST(DecodeCancellationAndMemoryLimitsAreDistinctFailures)
 	IW_CHECK(nativeTooLarge.error == iw::imaging::ImageError::resource_limit);
 	IW_CHECK(nativeTooLarge.document.frames.empty());
 	iw::imaging::DecodeOptions stopped;
-	stopped.cancelled = [] { return true; };
+	stopped.cancelled = []
+	{
+		return true;
+	};
 	IW_CHECK(iw::imaging::decode(file.path, stopped).error == iw::imaging::ImageError::cancelled);
 	IW_CHECK(iw::imaging::decode_document(file.path, stopped).error == iw::imaging::ImageError::cancelled);
 	IW_CHECK(static_cast<bool>(iw::imaging::decode(file.path)));
@@ -239,12 +252,18 @@ IW_TEST(PixelRowsValidateStrideAndPreservePaletteAlpha)
 	frame.pixels = bytes;
 	frame.palette = palette;
 	const auto decoded = iw::imaging::pixels_from_rows(frame);
-	IW_CHECK(decoded.pixels == std::vector<std::uint32_t>({palette[0], palette[1], palette[2],
-		palette[2], palette[1], palette[0]}));
+	IW_CHECK(decoded.pixels ==
+	         std::vector<std::uint32_t>({palette[0], palette[1], palette[2], palette[2], palette[1], palette[0]}));
 	frame.stride = 3;
 	bool rejected{};
-	try { (void)iw::imaging::pixels_from_rows(frame); }
-	catch (const std::invalid_argument&) { rejected = true; }
+	try
+	{
+		(void)iw::imaging::pixels_from_rows(frame);
+	}
+	catch (const std::invalid_argument&)
+	{
+		rejected = true;
+	}
 	IW_CHECK(rejected);
 }
 
@@ -273,8 +292,8 @@ IW_TEST(TiledTiffDecodingRetainsTheRasterRatherThanReturningABlankPage)
 	std::vector<std::uint8_t> sourceProfile(128);
 	sourceProfile[3] = 128;
 	std::copy_n("CMYK", 4, sourceProfile.begin() + 16);
-	IW_CHECK(TIFFSetField(encoded.get(), TIFFTAG_ICCPROFILE,
-		static_cast<std::uint32_t>(sourceProfile.size()), sourceProfile.data()));
+	IW_CHECK(TIFFSetField(encoded.get(), TIFFTAG_ICCPROFILE, static_cast<std::uint32_t>(sourceProfile.size()),
+	                      sourceProfile.data()));
 	std::vector<std::uint8_t> tile(16 * 16 * 3);
 	for (size_t i = 0; i < tile.size(); i += 3)
 	{
@@ -284,8 +303,8 @@ IW_TEST(TiledTiffDecodingRetainsTheRasterRatherThanReturningABlankPage)
 	}
 	for (std::uint32_t y : {0u, 16u})
 		for (std::uint32_t x : {0u, 16u})
-			IW_CHECK(TIFFWriteEncodedTile(encoded.get(), TIFFComputeTile(encoded.get(), x, y, 0, 0),
-				tile.data(), static_cast<tmsize_t>(tile.size())) == static_cast<tmsize_t>(tile.size()));
+			IW_CHECK(TIFFWriteEncodedTile(encoded.get(), TIFFComputeTile(encoded.get(), x, y, 0, 0), tile.data(),
+			                              static_cast<tmsize_t>(tile.size())) == static_cast<tmsize_t>(tile.size()));
 	encoded.reset();
 	const auto decoded = iw::imaging::decode_document(file.path);
 	IW_CHECK(static_cast<bool>(decoded));
@@ -329,8 +348,8 @@ namespace
 	// code before every literal keeps each LZW code three bits wide without an encoder.
 	std::vector<std::uint8_t> make_gif(const std::initializer_list<std::uint8_t> frames)
 	{
-		std::vector<std::uint8_t> bytes{'G', 'I', 'F', '8', '9', 'a', 3, 0, 2, 0, 0x81, 0, 0,
-			0, 0, 0, 0xff, 0, 0, 0, 0xff, 0, 0, 0, 0xff};
+		std::vector<std::uint8_t> bytes{'G', 'I', 'F', '8',  '9', 'a', 3, 0,    2, 0, 0x81, 0,   0,
+		                                0,   0,   0,   0xff, 0,   0,   0, 0xff, 0, 0, 0,    0xff};
 		for (const auto index : frames)
 		{
 			const std::uint8_t descriptor[] = {0x2c, 0, 0, 0, 0, 3, 0, 2, 0, 0, 2};
@@ -363,7 +382,7 @@ namespace
 	{
 		const auto pixels = iw::imaging::frame_pixels(document, frame);
 		return !pixels.pixels.empty() &&
-			std::ranges::all_of(pixels.pixels, [colour](const std::uint32_t pixel) { return pixel == colour; });
+		       std::ranges::all_of(pixels.pixels, [colour](const std::uint32_t pixel) { return pixel == colour; });
 	}
 
 	constexpr std::uint8_t kAviHeader[] = {'R', 'I', 'F', 'F', 4, 0, 0, 0, 'A', 'V', 'I', ' ', 0, 0, 0, 0};
@@ -402,8 +421,11 @@ IW_TEST(UnclaimedFilesAreUnsupportedAndFallbackLoadersNeverRecurse)
 
 IW_TEST(WebPAndWindowsCodecLoadersServeNativeDocuments)
 {
-	const iw::imaging::PixelImage source{3, 2,
-		{0xff112233, 0xff445566, 0xff778899, 0xffaabbcc, 0xff102030, 0xff405060}, 3, 2};
+	const iw::imaging::PixelImage source{3,
+	                                     2,
+	                                     {0xff112233, 0xff445566, 0xff778899, 0xffaabbcc, 0xff102030, 0xff405060},
+	                                     3,
+	                                     2};
 	iw::imaging::SaveOptions lossless;
 	lossless.lossless = true;
 	const auto webp = iw::webp::encode(source, lossless);
@@ -412,8 +434,9 @@ IW_TEST(WebPAndWindowsCodecLoadersServeNativeDocuments)
 	for (const auto* extension : {L".webp", L".jpg", L""})
 	{
 		const auto decoded = iw::imaging::decode_document(webp, extension);
-		if (!decoded) IW::Test::Detail::Print(" extension %ls: %ls (error %d)\n",
-			extension, decoded.message.c_str(), static_cast<int>(decoded.error));
+		if (!decoded)
+			IW::Test::Detail::Print(" extension %ls: %ls (error %d)\n", extension, decoded.message.c_str(),
+			                        static_cast<int>(decoded.error));
 		IW_CHECK(static_cast<bool>(decoded));
 		if (decoded) IW_CHECK(iw::imaging::frame_pixels(decoded).pixels == source.pixels);
 	}
@@ -439,8 +462,7 @@ IW_TEST(WebPAndWindowsCodecLoadersServeNativeDocuments)
 
 IW_TEST(WebPDecodeBudgetsAndFailuresAreReportedBeforePublication)
 {
-	const iw::imaging::PixelImage source{32, 32,
-		std::vector<std::uint32_t>(1024, 0xff336699), 32, 32};
+	const iw::imaging::PixelImage source{32, 32, std::vector<std::uint32_t>(1024, 0xff336699), 32, 32};
 	iw::imaging::SaveOptions save;
 	save.lossless = true;
 	const auto bytes = iw::webp::encode(source, save);
@@ -511,13 +533,10 @@ IW_TEST(WebPThumbnailsKeepTheNativeRoundingAndSourceDimensions)
 
 IW_TEST(WindowsBitmapAdapterPreservesSourceDimensionsAndBounds)
 {
-	const iw::imaging::PixelImage source{7, 5,
-		std::vector<std::uint32_t>(35, 0xff336699), 7, 5};
+	const iw::imaging::PixelImage source{7, 5, std::vector<std::uint32_t>(35, 0xff336699), 7, 5};
 	TemporaryImage file;
-	IW_CHECK(static_cast<bool>(iw::imaging::encode_to_file(
-		source, file.path, iw::imaging::ImageSaveFormat::png)));
-	if (iw::imaging::pixel_decoder(L".png") != iw::imaging::PixelDecoder::wic)
-		return;
+	IW_CHECK(static_cast<bool>(iw::imaging::encode_to_file(source, file.path, iw::imaging::ImageSaveFormat::png)));
+	if (iw::imaging::pixel_decoder(L".png") != iw::imaging::PixelDecoder::wic) return;
 
 	const auto full = iw::imaging::decode(file.path);
 	IW_CHECK(static_cast<bool>(full));
@@ -545,17 +564,18 @@ IW_TEST(WindowsBitmapAdapterPreservesSourceDimensionsAndBounds)
 		IW_CHECK(thumbnail.reduced);
 	}
 
-	thumbnail_options.cancelled = [] { return true; };
-	IW_CHECK(iw::imaging::decode(file.path, thumbnail_options).error ==
-		iw::imaging::ImageError::cancelled);
+	thumbnail_options.cancelled = []
+	{
+		return true;
+	};
+	IW_CHECK(iw::imaging::decode(file.path, thumbnail_options).error == iw::imaging::ImageError::cancelled);
 }
 
 IW_TEST(PlatformFileStreamKeepsReadingAfterSharedRename)
 {
 	TemporaryImage source;
 	const std::array<std::uint8_t, 4> original{10, 20, 30, 40};
-	auto file = platform::open_file(iw::imaging::desktop_file_path(source.path),
-		platform::file_open_mode::create);
+	auto file = platform::open_file(iw::imaging::desktop_file_path(source.path), platform::file_open_mode::create);
 	IW_CHECK(file != nullptr);
 	if (!file) return;
 	IW_CHECK_EQ(file->write(original.data(), original.size()), original.size());
@@ -567,15 +587,15 @@ IW_TEST(PlatformFileStreamKeepsReadingAfterSharedRename)
 	if (!reader.is_open()) return;
 	auto renamed = source.path;
 	renamed += L".shared";
-	const auto moved = platform::move_file(
-		iw::imaging::desktop_file_path(source.path),
-		iw::imaging::desktop_file_path(renamed), false);
+	const auto moved = platform::move_file(iw::imaging::desktop_file_path(source.path),
+	                                       iw::imaging::desktop_file_path(renamed), false);
 	IW_CHECK(!moved.failed());
 	std::array<std::uint8_t, 4> read{};
 	IW_CHECK_EQ(reader.read(0, read.data(), read.size()), read.size());
 	IW_CHECK(read == original);
-	IW_CHECK(!platform::move_file(iw::imaging::desktop_file_path(renamed),
-		iw::imaging::desktop_file_path(source.path), false).failed());
+	IW_CHECK(!platform::move_file(iw::imaging::desktop_file_path(renamed), iw::imaging::desktop_file_path(source.path),
+	                              false)
+	              .failed());
 }
 
 IW_TEST(DamageAfterACompleteGifFrameKeepsTheCompleteFrames)
@@ -685,7 +705,10 @@ IW_TEST(NativeDecodesStopWhenCancelledPartWayThroughThePixels)
 	IW_CHECK(static_cast<bool>(iw::imaging::encode_to_file(source, file.path, iw::imaging::ImageSaveFormat::png)));
 	int polls{};
 	iw::imaging::DecodeOptions options;
-	options.cancelled = [&polls] { return ++polls > 8; };
+	options.cancelled = [&polls]
+	{
+		return ++polls > 8;
+	};
 	const auto decoded = iw::imaging::decode_document(file.path, options);
 	IW_CHECK(decoded.error == iw::imaging::ImageError::cancelled);
 	IW_CHECK_EQ(decoded.document.frames.size(), size_t{0});

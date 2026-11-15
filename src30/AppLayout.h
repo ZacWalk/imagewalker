@@ -21,7 +21,11 @@ namespace iw::ui
 	using iw::app::sizei;
 
 	inline constexpr int propertyRowHeight = 26;
-	enum class Axis { row, column };
+	enum class Axis
+	{
+		row,
+		column
+	};
 
 	struct FlexStyle
 	{
@@ -67,8 +71,8 @@ namespace iw::ui
 			for (auto& child : element.children) child.intrinsic.height = rowHeight;
 			arrange(element, bounds);
 			const int contentHeight = element.style.padding * 2 +
-				static_cast<int>(element.children.size()) * rowHeight +
-				(std::max)(0, static_cast<int>(element.children.size()) - 1) * element.style.gap;
+			                          static_cast<int>(element.children.size()) * rowHeight +
+			                          (std::max)(0, static_cast<int>(element.children.size()) - 1) * element.style.gap;
 			return {bounds.width, contentHeight};
 		}
 
@@ -91,14 +95,14 @@ namespace iw::ui
 			int cursor = (row ? element.bounds.x : element.bounds.y) + element.style.padding;
 			for (auto& child : element.children)
 			{
-				const int natural = child.style.basis
-					                    ? child.style.basis
-					                    : (row ? child.intrinsic.width : child.intrinsic.height);
+				const int natural = child.style.basis ? child.style.basis
+				                                      : (row ? child.intrinsic.width : child.intrinsic.height);
 				const int extent = (std::max)(child.style.minimum,
 				                              natural + (grow ? available * child.style.grow / grow : 0));
-				const recti childBounds = row
-					                          ? recti{cursor, element.bounds.y + element.style.padding, extent, innerCross}
-					                          : recti{element.bounds.x + element.style.padding, cursor, innerCross, extent};
+				const recti childBounds = row ? recti{cursor, element.bounds.y + element.style.padding, extent,
+				                                      innerCross}
+				                              : recti{element.bounds.x + element.style.padding, cursor, innerCross,
+				                                      extent};
 				arrange(child, childBounds);
 				cursor += extent + element.style.gap;
 			}
@@ -155,26 +159,22 @@ namespace iw::ui
 				track = thumb = {};
 				return;
 			}
-			track = vertical()
-				        ? recti{panel.right() - thickness, panel.y, thickness, panel.height}
-				        : recti{panel.x, panel.bottom() - thickness, panel.width, thickness};
+			track = vertical() ? recti{panel.right() - thickness, panel.y, thickness, panel.height}
+			                   : recti{panel.x, panel.bottom() - thickness, panel.width, thickness};
 			const int trackExtent = vertical() ? track.height : track.width;
 			const auto proportional = static_cast<std::int64_t>(trackExtent) * viewportExtent / contentExtent;
-			const int thumbExtent = (std::min)(trackExtent,
-			                                   (std::max)(minimumThumb, static_cast<int>(proportional)));
+			const int thumbExtent = (std::min)(trackExtent, (std::max)(minimumThumb, static_cast<int>(proportional)));
 			const std::int64_t travel = trackExtent - thumbExtent;
 			const int position = maximum() ? static_cast<int>(travel * offset / maximum()) : 0;
-			thumb = vertical()
-				        ? recti{track.x, track.y + position, thickness, thumbExtent}
-				        : recti{track.x + position, track.y, thumbExtent, thickness};
+			thumb = vertical() ? recti{track.x, track.y + position, thickness, thumbExtent}
+			                   : recti{track.x + position, track.y, thumbExtent, thickness};
 		}
 
 		recti viewport(const recti panel) const
 		{
 			if (!visible()) return panel;
-			return vertical()
-				       ? recti{panel.x, panel.y, panel.width - track.width, panel.height}
-				       : recti{panel.x, panel.y, panel.width, panel.height - track.height};
+			return vertical() ? recti{panel.x, panel.y, panel.width - track.width, panel.height}
+			                  : recti{panel.x, panel.y, panel.width, panel.height - track.height};
 		}
 
 		bool scroll_by(const int delta)
@@ -205,8 +205,8 @@ namespace iw::ui
 
 	inline recti normalize(const pointi first, const pointi second)
 	{
-		return {(std::min)(first.x, second.x), (std::min)(first.y, second.y),
-		        std::abs(second.x - first.x), std::abs(second.y - first.y)};
+		return {(std::min)(first.x, second.x), (std::min)(first.y, second.y), std::abs(second.x - first.x),
+		        std::abs(second.y - first.y)};
 	}
 
 	inline recti fit_centered(const sizei source, const recti bounds)
@@ -226,53 +226,67 @@ namespace iw::ui
 		const size_t count = (std::min)(dimensions.size(), maximumCells);
 		if (count == 0 || bounds.is_empty()) return {};
 		std::vector<recti> results(count);
-		if (count == 1) { results.front() = bounds; return results; }
+		if (count == 1)
+		{
+			results.front() = bounds;
+			return results;
+		}
 		std::vector<double> aspects;
 		aspects.reserve(count);
 		for (size_t index = 0; index < count; ++index)
 		{
 			const auto extent = dimensions[index];
-			aspects.push_back(extent.width > 0 && extent.height > 0
-				                  ? static_cast<double>(extent.width) / extent.height : 1.0);
+			aspects.push_back(extent.width > 0 && extent.height > 0 ? static_cast<double>(extent.width) / extent.height
+			                                                        : 1.0);
 		}
 		const double canvasAspect = static_cast<double>(bounds.width) / bounds.height;
-		const auto feature = static_cast<size_t>(std::min_element(aspects.begin(), aspects.end(),
-			[canvasAspect](const double left, const double right)
-			{
-				return std::abs(std::log(left / canvasAspect)) < std::abs(std::log(right / canvasAspect));
-			}) - aspects.begin());
+		const auto feature = static_cast<size_t>(
+			std::min_element(aspects.begin(), aspects.end(), [canvasAspect](const double left, const double right) {
+			return std::abs(std::log(left / canvasAspect)) < std::abs(std::log(right / canvasAspect));
+		}) - aspects.begin());
 		std::vector<double> weights(count, 1.0);
 		weights[feature] = goldenRatio * goldenRatio;
 		if (count >= 6) weights[(feature + count / 2) % count] = goldenRatio;
 		const auto weight_sum = [&weights](size_t start, size_t end)
-		{ return std::accumulate(weights.begin() + start, weights.begin() + end, 0.0); };
+		{
+			return std::accumulate(weights.begin() + start, weights.begin() + end, 0.0);
+		};
 		const auto place = [&](const auto& self, size_t start, size_t end, const recti area) -> void
 		{
-			if (end - start == 1) { results[start] = area; return; }
+			if (end - start == 1)
+			{
+				results[start] = area;
+				return;
+			}
 			const double total = weight_sum(start, end);
 			size_t divide = start + 1;
 			double balance = (std::numeric_limits<double>::max)();
 			for (size_t candidate = start + 1; candidate < end; ++candidate)
 			{
 				const double offset = std::abs(weight_sum(start, candidate) / total - 0.5);
-				if (offset < balance) { balance = offset; divide = candidate; }
+				if (offset < balance)
+				{
+					balance = offset;
+					divide = candidate;
+				}
 			}
 			const double fraction = weight_sum(start, divide) / total;
 			if (area.width > 1 && (area.width >= area.height || area.height <= 1))
 			{
-				const int x = std::clamp(area.x + static_cast<int>(std::lround(area.width * fraction)),
-				                         area.x + 1, area.right() - 1);
+				const int x = std::clamp(area.x + static_cast<int>(std::lround(area.width * fraction)), area.x + 1,
+				                         area.right() - 1);
 				self(self, start, divide, {area.x, area.y, x - area.x, area.height});
 				self(self, divide, end, {x, area.y, area.right() - x, area.height});
 			}
 			else if (area.height > 1)
 			{
-				const int y = std::clamp(area.y + static_cast<int>(std::lround(area.height * fraction)),
-				                         area.y + 1, area.bottom() - 1);
+				const int y = std::clamp(area.y + static_cast<int>(std::lround(area.height * fraction)), area.y + 1,
+				                         area.bottom() - 1);
 				self(self, start, divide, {area.x, area.y, area.width, y - area.y});
 				self(self, divide, end, {area.x, y, area.width, area.bottom() - y});
 			}
-			else for (size_t index = start; index < end; ++index) results[index] = area;
+			else
+				for (size_t index = start; index < end; ++index) results[index] = area;
 		};
 		place(place, 0, count, bounds);
 		return results;

@@ -3,6 +3,7 @@
 
 #pragma once
 
+// clang-format off
 #define IDI_APP                         1
 #define IDC_ZOOM_CURSOR                  104
 #define IDB_TOOLBAR_SYMBOLS              105
@@ -13,3 +14,4 @@
 #define IDB_FILE_AUDIO                  111
 #define IDB_FILE_OTHER                  112
 #define IDB_STATUS_SYMBOLS              113
+// clang-format on

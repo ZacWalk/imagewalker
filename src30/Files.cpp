@@ -24,8 +24,10 @@ namespace iw::files
 {
 	namespace
 	{
-		template <class T>
-		void release(T* value) { if (value) value->Release(); }
+		template <class T> void release(T* value)
+		{
+			if (value) value->Release();
+		}
 
 		class TemporaryOutput
 		{
@@ -50,7 +52,8 @@ namespace iw::files
 			{
 				for (int attempt = 0; attempt < 16; ++attempt)
 				{
-					const auto candidate = ::platform::temp_file(".tmp", desktop::folder_path(destination.parent_path()));
+					const auto candidate = ::platform::temp_file(".tmp",
+					                                             desktop::folder_path(destination.parent_path()));
 					const auto file = ::platform::open_file(candidate, ::platform::file_open_mode::create_new);
 					if (file)
 					{
@@ -58,8 +61,7 @@ namespace iw::files
 						return {};
 					}
 					const auto attributes = ::platform::file_attributes(candidate);
-					if (!attributes.exists())
-						return desktop::attributes_error(attributes);
+					if (!attributes.exists()) return desktop::attributes_error(attributes);
 				}
 				return std::make_error_code(std::errc::file_exists);
 			}
@@ -70,8 +72,7 @@ namespace iw::files
 			std::error_code commit(const std::filesystem::path& destination, const bool overwrite)
 			{
 				// Publish only a complete output; an unreviewed destination wins a racing create.
-				const auto result = ::platform::move_file(
-					path_, desktop::file_path(destination), !overwrite);
+				const auto result = ::platform::move_file(path_, desktop::file_path(destination), !overwrite);
 				if (result.failed()) return desktop::operation_error(result);
 				path_.clear();
 				return {};
@@ -84,14 +85,12 @@ namespace iw::files
 		ItemKind classify_extension(const std::wstring& extension)
 		{
 			if (imaging::supports_extension(extension) && !imaging::is_preview_only(extension)) return ItemKind::image;
-			constexpr std::array documents{
-				L".doc", L".docx", L".pdf", L".ppt", L".pptx", L".rtf", L".txt",
-				L".xls", L".xlsx", L".csv"
-			};
-			constexpr std::array videos{L".avi", L".m4v", L".mkv", L".mov", L".mp4", L".mpeg", L".mpg",
-				L".wmv", L".webm", L".mts", L".m2ts", L".asf", L".3gp", L".3g2", L".ts"};
-			constexpr std::array audio{L".aac", L".flac", L".m4a", L".mp3", L".ogg", L".wav", L".wma",
-				L".opus", L".aif", L".aiff"};
+			constexpr std::array documents{L".doc", L".docx", L".pdf", L".ppt",  L".pptx",
+			                               L".rtf", L".txt",  L".xls", L".xlsx", L".csv"};
+			constexpr std::array videos{L".avi",  L".m4v", L".mkv",  L".mov", L".mp4", L".mpeg", L".mpg", L".wmv",
+			                            L".webm", L".mts", L".m2ts", L".asf", L".3gp", L".3g2",  L".ts"};
+			constexpr std::array audio{L".aac", L".flac", L".m4a",  L".mp3", L".ogg",
+			                           L".wav", L".wma",  L".opus", L".aif", L".aiff"};
 			if (std::ranges::find(documents, extension) != documents.end()) return ItemKind::document;
 			if (std::ranges::find(videos, extension) != videos.end()) return ItemKind::video;
 			if (std::ranges::find(audio, extension) != audio.end()) return ItemKind::audio;
@@ -110,9 +109,15 @@ namespace iw::files
 
 	}
 
-	void set_show_hidden(const bool value) { showHidden.store(value, std::memory_order_relaxed); }
+	void set_show_hidden(const bool value)
+	{
+		showHidden.store(value, std::memory_order_relaxed);
+	}
 
-	bool show_hidden() { return showHidden.load(std::memory_order_relaxed); }
+	bool show_hidden()
+	{
+		return showHidden.load(std::memory_order_relaxed);
+	}
 
 	bool is_supported_image(const std::filesystem::path& path)
 	{
@@ -126,7 +131,7 @@ namespace iw::files
 		std::error_code error;
 		const auto status = std::filesystem::status(native_path(path), error);
 		return !error && std::filesystem::is_regular_file(status) &&
-			(status.permissions() & std::filesystem::perms::owner_write) != std::filesystem::perms::none;
+		       (status.permissions() & std::filesystem::perms::owner_write) != std::filesystem::perms::none;
 	}
 
 	std::optional<FileSnapshot> snapshot_file(const std::filesystem::path& path)
@@ -134,19 +139,22 @@ namespace iw::files
 		if (path.empty()) return std::nullopt;
 		std::error_code directoryError;
 		const bool directory = std::filesystem::is_directory(native_path(path), directoryError);
-		const auto attributes = directory
-			                        ? ::platform::file_attributes(desktop::folder_path(path))
-			                        : ::platform::file_attributes(desktop::file_path(path));
+		const auto attributes = directory ? ::platform::file_attributes(desktop::folder_path(path))
+		                                  : ::platform::file_attributes(desktop::file_path(path));
 		if (!attributes.exists())
 		{
 			if (attributes.confirmed_missing()) return FileSnapshot{};
 			return std::nullopt;
 		}
 		if (!attributes.identity.valid) return std::nullopt;
-		return FileSnapshot{
-			true, directory, attributes.is_readonly, attributes.is_reparse,
-			attributes.identity.volume, attributes.identity.index, attributes.size, attributes.modified
-		};
+		return FileSnapshot{true,
+		                    directory,
+		                    attributes.is_readonly,
+		                    attributes.is_reparse,
+		                    attributes.identity.volume,
+		                    attributes.identity.index,
+		                    attributes.size,
+		                    attributes.modified};
 	}
 
 	bool matches_snapshot(const std::filesystem::path& path, const FileSnapshot& snapshot)
@@ -161,8 +169,7 @@ namespace iw::files
 		return classify_extension(paths::lowercase_extension(path));
 	}
 
-	std::vector<FolderItem> scan_folder_items(const std::filesystem::path& folder,
-	                                          const std::stop_token& stop,
+	std::vector<FolderItem> scan_folder_items(const std::filesystem::path& folder, const std::stop_token& stop,
 	                                          const std::function<void(size_t, size_t)>& progress,
 	                                          std::error_code* error)
 	{
@@ -190,9 +197,7 @@ namespace iw::files
 				if (!skip_entry(attributes, includeHidden))
 				{
 					std::error_code entryError;
-					const bool directory = attributes.known
-						                       ? attributes.directory
-						                       : entry.is_directory(entryError);
+					const bool directory = attributes.known ? attributes.directory : entry.is_directory(entryError);
 					entryError.clear();
 					const bool regular = directory || entry.is_regular_file(entryError);
 					entryError.clear();
@@ -320,16 +325,16 @@ namespace iw::files
 		}
 	}
 
-	std::vector<std::filesystem::path> scan_folder(const std::filesystem::path& folder,
-	                                               const std::stop_token& stop,
+	std::vector<std::filesystem::path> scan_folder(const std::filesystem::path& folder, const std::stop_token& stop,
 	                                               const std::function<void(size_t, size_t)>& progress)
 	{
 		std::vector<std::filesystem::path> result;
 		try
 		{
 			std::error_code iterationError;
-			std::filesystem::directory_iterator iterator(
-				native_path(folder), std::filesystem::directory_options::skip_permission_denied, iterationError);
+			std::filesystem::directory_iterator iterator(native_path(folder),
+			                                             std::filesystem::directory_options::skip_permission_denied,
+			                                             iterationError);
 			if (iterationError) return result;
 			const std::filesystem::directory_iterator end;
 			const bool includeHidden = show_hidden();
@@ -341,7 +346,7 @@ namespace iw::files
 				++entries;
 				std::error_code entryError;
 				if (!skip_entry(platform::read_file_attributes(entry.path()), includeHidden) &&
-					entry.is_regular_file(entryError) && is_supported_image(entry.path()))
+				    entry.is_regular_file(entryError) && is_supported_image(entry.path()))
 					result.push_back(folder / entry.path().filename());
 				if (progress && entries % 32 == 0) progress(entries, result.size());
 				iterator.increment(iterationError);
@@ -349,9 +354,7 @@ namespace iw::files
 			}
 			if (progress) progress(entries, result.size());
 			std::ranges::stable_sort(result, [](const std::filesystem::path& left, const std::filesystem::path& right)
-			{
-				return paths::natural_compare(left.filename().wstring(), right.filename().wstring()) < 0;
-			});
+			{ return paths::natural_compare(left.filename().wstring(), right.filename().wstring()) < 0; });
 		}
 		catch (const std::exception&)
 		{
@@ -366,7 +369,7 @@ namespace iw::files
 		std::error_code error;
 		for (size_t number = 1; number <= maximumAttempts; ++number)
 		{
-			const auto candidate = folder / std::format(L"New {}{}", number, image_save_extension(format));
+			auto candidate = folder / std::format(L"New {}{}", number, image_save_extension(format));
 			const bool exists = std::filesystem::exists(native_path(candidate), error);
 			if (error) return {};
 			if (!exists) return candidate;
@@ -393,9 +396,7 @@ namespace iw::files
 				error.clear();
 				if (!std::filesystem::is_regular_file(native_path(candidate), error)) continue;
 				if (std::ranges::any_of(result, [&candidate](const std::filesystem::path& found)
-				{
-					return paths::equal(found, candidate);
-				}))
+				{ return paths::equal(found, candidate); }))
 					continue;
 				result.push_back(candidate);
 			}
@@ -423,7 +424,7 @@ namespace iw::files
 		const auto extension = proposed.extension().wstring();
 		for (int number = 2; number <= maximumAttempts; ++number)
 		{
-			const auto candidate = folder / std::format(L"{} ({}){}", stem, number, extension);
+			auto candidate = folder / std::format(L"{} ({}){}", stem, number, extension);
 			if (!taken(candidate)) return candidate;
 			if (error) return {};
 		}
@@ -437,8 +438,7 @@ namespace iw::files
 		{
 			nativeDestination = native_path(destination);
 			const auto destinationAttributes = ::platform::file_attributes(desktop::file_path(destination));
-			if (destinationAttributes.exists() && !overwrite)
-				return std::make_error_code(std::errc::file_exists);
+			if (destinationAttributes.exists() && !overwrite) return std::make_error_code(std::errc::file_exists);
 			if (!destinationAttributes.exists() && !destinationAttributes.confirmed_missing())
 				return desktop::attributes_error(destinationAttributes);
 			const auto folder = destination.parent_path();
@@ -447,10 +447,8 @@ namespace iw::files
 				const auto folderAttributes = ::platform::file_attributes(desktop::folder_path(folder));
 				if (!folderAttributes.exists())
 				{
-					if (!folderAttributes.confirmed_missing())
-						return desktop::attributes_error(folderAttributes);
-					if (const auto created = ::platform::create_folder(desktop::folder_path(folder));
-					    created.failed())
+					if (!folderAttributes.confirmed_missing()) return desktop::attributes_error(folderAttributes);
+					if (const auto created = ::platform::create_folder(desktop::folder_path(folder)); created.failed())
 						return desktop::operation_error(created);
 				}
 			}
@@ -466,8 +464,7 @@ namespace iw::files
 		if (paths::equal(source, destination)) return std::make_error_code(std::errc::invalid_argument);
 		TemporaryOutput output;
 		if (const auto error = output.create(destination)) return error;
-		if (const auto copied = ::platform::copy_file(
-			    desktop::file_path(source), output.desktop_path(), false, false);
+		if (const auto copied = ::platform::copy_file(desktop::file_path(source), output.desktop_path(), false, false);
 		    copied.failed())
 			return desktop::operation_error(copied);
 		if (beforeCommit && !beforeCommit()) return std::make_error_code(std::errc::operation_canceled);
@@ -481,8 +478,8 @@ namespace iw::files
 		if (const auto prepared = prepare_destination(destination, overwrite, nativeDestination)) return prepared;
 		if (paths::equal(source, destination)) return std::make_error_code(std::errc::invalid_argument);
 		if (beforeCommit && !beforeCommit()) return std::make_error_code(std::errc::operation_canceled);
-		const auto moved = ::platform::move_file(
-			desktop::file_path(source), desktop::file_path(destination), !overwrite, false);
+		const auto moved = ::platform::move_file(desktop::file_path(source), desktop::file_path(destination),
+		                                         !overwrite, false);
 		if (moved.success()) return {};
 		const auto moveError = desktop::operation_error(moved);
 		if (moveError != std::errc::cross_device_link) return moveError;
@@ -496,9 +493,8 @@ namespace iw::files
 	{
 		std::error_code error;
 		if (!std::filesystem::is_regular_file(native_path(path), error)) return {};
-		const auto proposed = path.parent_path() /
-			(path.stem().wstring() + L"-original" + path.extension().wstring());
-		const auto backup = unique_destination(proposed);
+		const auto proposed = path.parent_path() / (path.stem().wstring() + L"-original" + path.extension().wstring());
+		auto backup = unique_destination(proposed);
 		if (backup.empty() || copy_file_to(path, backup, false)) return {};
 		return backup;
 	}
@@ -539,7 +535,7 @@ namespace iw::files
 			result.minute = number(14, 2);
 			result.second = number(17, 2);
 			result.known = result.year > 0 && result.month > 0 && result.day > 0 && result.hour >= 0 &&
-				result.minute >= 0 && result.second >= 0;
+			               result.minute >= 0 && result.second >= 0;
 			return result;
 		}
 
@@ -571,7 +567,9 @@ namespace iw::files
 		std::wstring exif_text(const libfiles::date& d)
 		{
 			if (!d.valid()) return {};
-			if (d.has_time) return std::format(L"{:04}:{:02}:{:02} {:02}:{:02}:{:02}", d.year, d.month, d.day, d.hour, d.minute, d.second);
+			if (d.has_time)
+				return std::format(L"{:04}:{:02}:{:02} {:02}:{:02}:{:02}", d.year, d.month, d.day, d.hour, d.minute,
+				                   d.second);
 			if (d.day != 0) return std::format(L"{:04}:{:02}:{:02}", d.year, d.month, d.day);
 			if (d.month != 0) return std::format(L"{:04}:{:02}", d.year, d.month);
 			return std::format(L"{:04}", d.year);
@@ -580,7 +578,10 @@ namespace iw::files
 		std::wstring token_value(const std::wstring_view token, const Metadata& metadata,
 		                         const std::filesystem::path& path, const NameDate& date)
 		{
-			const auto is = [token](const wchar_t* name) { return paths::iequals(token, name); };
+			const auto is = [token](const wchar_t* name)
+			{
+				return paths::iequals(token, name);
+			};
 			if (is(L"name")) return path.stem().wstring();
 			if (is(L"ext")) return paths::lowercase_extension(path);
 			if (is(L"folder")) return path.parent_path().filename().wstring();
@@ -663,8 +664,7 @@ namespace iw::files
 		// Under a second as 1/n, as a camera shows it, and otherwise in seconds.
 		if (photo.exposure_time > 0.0 && photo.exposure_time < 1.0)
 			result.exposure = std::format(L"1/{:.0f} s", 1.0 / photo.exposure_time);
-		else if (photo.exposure_time >= 1.0)
-			result.exposure = std::format(L"{:.1f} s", photo.exposure_time);
+		else if (photo.exposure_time >= 1.0) result.exposure = std::format(L"{:.1f} s", photo.exposure_time);
 
 		if (photo.f_number > 0.0) result.aperture = std::format(L"f/{:.1f}", photo.f_number);
 		if (photo.iso_speed > 0) result.iso = std::format(L"ISO {}", photo.iso_speed);
@@ -696,7 +696,8 @@ namespace iw::files
 
 	namespace
 	{
-		DecodedImage decode_photo(const std::filesystem::path& path, const int width, const int height, const bool thumbnail)
+		DecodedImage decode_photo(const std::filesystem::path& path, const int width, const int height,
+		                          const bool thumbnail)
 		{
 			imaging::DecodeOptions options;
 			options.maximumWidth = width;
@@ -704,13 +705,15 @@ namespace iw::files
 			options.thumbnail = thumbnail;
 			options.stop = platform::exit_token();
 			auto result = imaging::decode(path, options);
-			if (!result && result.error != imaging::ImageError::cancelled)
-				platform::write_diagnostic(result.message);
+			if (!result && result.error != imaging::ImageError::cancelled) platform::write_diagnostic(result.message);
 			return std::move(result.image);
 		}
 	}
 
-	DecodedImage load_image(const std::filesystem::path& path) { return decode_photo(path, 0, 0, false); }
+	DecodedImage load_image(const std::filesystem::path& path)
+	{
+		return decode_photo(path, 0, 0, false);
+	}
 	DecodedImage load_image_for_area(const std::filesystem::path& path, int width, int height)
 	{
 		return decode_photo(path, width, height, false);
@@ -722,7 +725,7 @@ namespace iw::files
 	}
 
 	bool save_image(const DecodedImage& image, const std::filesystem::path& path, ImageSaveFormat format,
-		const SaveOptions& options, bool overwrite, const std::function<bool()>& beforeCommit)
+	                const SaveOptions& options, bool overwrite, const std::function<bool()>& beforeCommit)
 	{
 		TemporaryOutput output;
 		if (path.empty() || output.create(path)) return false;

@@ -14,7 +14,11 @@
 #include <filesystem>
 #include <vector>
 
-namespace iw::imaging { struct PixelImage; struct SaveOptions; }
+namespace iw::imaging
+{
+	struct PixelImage;
+	struct SaveOptions;
+}
 namespace iw::webp
 {
 	bool probe(std::span<const std::uint8_t> bytes, int& width, int& height);
@@ -61,7 +65,7 @@ namespace iw::webp
 		inline bool dimensions_ok(const int width, const int height)
 		{
 			return width > 0 && height > 0 && width <= maximumDimension && height <= maximumDimension &&
-				static_cast<std::uint64_t>(width) * height <= maximumPixels;
+			       static_cast<std::uint64_t>(width) * height <= maximumPixels;
 		}
 
 		inline bool features(const std::span<const std::uint8_t> bytes, libfiles::webp_header& value)
@@ -77,14 +81,12 @@ namespace iw::webp
 		inline std::vector<std::uint8_t> read(const std::filesystem::path& path)
 		{
 			imaging::PlatformFileStream file(path);
-			if (!file.is_open() || file.size() == 0 || file.size() > maximumFileBytes)
-				return {};
+			if (!file.is_open() || file.size() == 0 || file.size() > maximumFileBytes) return {};
 			std::vector<std::uint8_t> bytes(static_cast<size_t>(file.size()));
 			std::size_t offset = 0;
 			while (offset < bytes.size())
 			{
-				const auto count = file.read(offset, bytes.data() + offset,
-					bytes.size() - offset);
+				const auto count = file.read(offset, bytes.data() + offset, bytes.size() - offset);
 				if (count == 0) return {};
 				offset += count;
 			}
@@ -112,12 +114,11 @@ namespace iw::webp
 		if (!file.is_open()) return false;
 		std::array<std::uint8_t, 64> header{};
 		const auto size = file.read(0, header.data(), header.size());
-		return size > 0 && probe(std::span<const std::uint8_t>(header.data(), size),
-			width, height);
+		return size > 0 && probe(std::span<const std::uint8_t>(header.data(), size), width, height);
 	}
 
 	inline imaging::PixelImage decode(const std::span<const std::uint8_t> bytes, const int maximumWidth,
-		const int maximumHeight)
+	                                  const int maximumHeight)
 	{
 		using namespace webp_detail;
 		libfiles::webp_header value;
@@ -145,8 +146,8 @@ namespace iw::webp
 		const auto result = libfiles::decode(input, sink, options);
 		if (!result.success)
 		{
-			imaging::report_diagnostic(result.refused ? L"The WebP exceeds the decoded-image limit." :
-				std::wstring(result.error.begin(), result.error.end()));
+			imaging::report_diagnostic(result.refused ? L"The WebP exceeds the decoded-image limit."
+			                                          : std::wstring(result.error.begin(), result.error.end()));
 			return {};
 		}
 		return std::move(sink.image);
@@ -162,7 +163,7 @@ namespace iw::webp
 	{
 		using namespace webp_detail;
 		if (!dimensions_ok(image.width, image.height) ||
-			static_cast<std::uint64_t>(image.width) * image.height > image.pixels.size())
+		    static_cast<std::uint64_t>(image.width) * image.height > image.pixels.size())
 			return {};
 		libfiles::image_view view;
 		view.pixels = reinterpret_cast<const std::uint8_t*>(image.pixels.data());

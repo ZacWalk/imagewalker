@@ -16,9 +16,25 @@
 
 namespace iw::tasks
 {
-	enum class CollisionPolicy { block, skip, autoRename, replace };
+	enum class CollisionPolicy
+	{
+		block,
+		skip,
+		autoRename,
+		replace
+	};
 
-	enum class RowState { pending, ready, blocked, running, success, failed, skipped, notRun };
+	enum class RowState
+	{
+		pending,
+		ready,
+		blocked,
+		running,
+		success,
+		failed,
+		skipped,
+		notRun
+	};
 
 	struct TaskRow
 	{
@@ -50,7 +66,8 @@ namespace iw::tasks
 		size_t count(const RowState state) const
 		{
 			size_t result = 0;
-			for (const auto& row : rows) if (row.state == state) ++result;
+			for (const auto& row : rows)
+				if (row.state == state) ++result;
 			return result;
 		}
 
@@ -61,7 +78,7 @@ namespace iw::tasks
 	inline bool row_writes(const TaskRow& row)
 	{
 		return !row.destination.empty() && row.state != RowState::skipped && row.state != RowState::blocked &&
-			row.state != RowState::notRun;
+		       row.state != RowState::notRun;
 	}
 
 	namespace detail
@@ -104,13 +121,13 @@ namespace iw::tasks
 	// Chooses a free destination near the proposed one. `alsoTaken` reports names this plan has
 	// already claimed but that do not exist on disk yet. Returns an empty path when bounded
 	// searching finds nothing.
-	using UniqueFunction = std::function<std::filesystem::path(const std::filesystem::path& proposed,
-	                                                           const ExistsFunction& alsoTaken)>;
+	using UniqueFunction =
+		std::function<std::filesystem::path(const std::filesystem::path& proposed, const ExistsFunction& alsoTaken)>;
 
 	// Applies the collision policy to every pending row and leaves each one ready, skipped or
 	// blocked. `occupied` answers whether a destination is already on disk.
-	inline void resolve_collisions(TaskPlan& plan, const CollisionPolicy policy,
-	                               const ExistsFunction& occupied, const UniqueFunction& unique)
+	inline void resolve_collisions(TaskPlan& plan, const CollisionPolicy policy, const ExistsFunction& occupied,
+	                               const UniqueFunction& unique)
 	{
 		plan.collisions = 0;
 		plan.replacements = 0;
@@ -213,7 +230,8 @@ namespace iw::tasks
 
 		if (blocked)
 			plan.blockReason = std::format(L"{} destination{} cannot be written. Choose another destination or "
-			                               L"collision policy.", blocked, blocked == 1 ? L"" : L"s");
+			                               L"collision policy.",
+			                               blocked, blocked == 1 ? L"" : L"s");
 		else if (!block_duplicate_destinations(plan))
 		{
 			const auto ready = plan.count(RowState::ready);

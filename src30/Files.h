@@ -16,9 +16,25 @@
 
 namespace iw::files
 {
-	enum class ItemKind { folder, image, document, video, audio, other };
+	enum class ItemKind
+	{
+		folder,
+		image,
+		document,
+		video,
+		audio,
+		other
+	};
 
-	enum class SortField { name, modified, type, size, dimensions, duration };
+	enum class SortField
+	{
+		name,
+		modified,
+		type,
+		size,
+		dimensions,
+		duration
+	};
 
 	using imaging::ImageSaveFormat;
 
@@ -87,13 +103,11 @@ namespace iw::files
 	void set_show_hidden(bool showHidden);
 	bool show_hidden();
 
-	std::vector<FolderItem> scan_folder_items(const std::filesystem::path& folder,
-	                                          const std::stop_token& stop,
+	std::vector<FolderItem> scan_folder_items(const std::filesystem::path& folder, const std::stop_token& stop,
 	                                          const std::function<void(size_t, size_t)>& progress = {},
 	                                          std::error_code* error = nullptr);
 	void sort_items(std::vector<FolderItem>& items, SortField field, bool ascending = true);
-	std::vector<std::filesystem::path> scan_folder(const std::filesystem::path& folder,
-	                                               const std::stop_token& stop,
+	std::vector<std::filesystem::path> scan_folder(const std::filesystem::path& folder, const std::stop_token& stop,
 	                                               const std::function<void(size_t, size_t)>& progress = {});
 	Metadata read_metadata(const std::filesystem::path& path);
 	std::wstring read_colour_profile(const std::filesystem::path& path);

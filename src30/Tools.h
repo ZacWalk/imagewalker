@@ -18,7 +18,7 @@ namespace iw::tools
 	{
 		std::wstring name;
 		std::filesystem::path executable;
-		std::wstring invoke; // template using {exe-path} and {item-path}
+		std::wstring invoke;                  // template using {exe-path} and {item-path}
 		std::vector<std::wstring> extensions; // lowercase, with the leading dot
 		files::ItemKind group{files::ItemKind::other};
 		bool hasGroup{};
@@ -56,13 +56,13 @@ namespace iw::tools
 	// names, matched case-insensitively on the base name. Once stop is requested it returns
 	// nothing and reports nothing: no tool was looked for in full.
 	std::vector<InstalledTool> discover(const Configuration& configuration, size_t maximumDepth = 4,
-		std::vector<std::wstring>* issues = nullptr, const std::stop_token& stop = {});
+	                                    std::vector<std::wstring>* issues = nullptr, const std::stop_token& stop = {});
 
 	// Extension tools first, then group tools, and never the same tool twice for one file type.
 	std::vector<const InstalledTool*> tools_for(const std::vector<InstalledTool>& installed,
 	                                            const std::filesystem::path& path);
 	std::vector<const InstalledTool*> tools_for(const std::vector<InstalledTool>& installed,
-		std::span<const std::filesystem::path> paths);
+	                                            std::span<const std::filesystem::path> paths);
 
 	// Expands the launch template. The executable is always the discovered path, never text from
 	// the configuration, and every path is quoted.

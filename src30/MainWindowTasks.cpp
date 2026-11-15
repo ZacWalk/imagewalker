@@ -32,10 +32,8 @@ namespace iw
 	{
 		shortcuts_.clear();
 		std::error_code error;
-		for (const auto folder : {
-			     platform::KnownFolder::pictures, platform::KnownFolder::documents,
-			     platform::KnownFolder::desktop, platform::KnownFolder::downloads
-		     })
+		for (const auto folder : {platform::KnownFolder::pictures, platform::KnownFolder::documents,
+		                          platform::KnownFolder::desktop, platform::KnownFolder::downloads})
 			if (auto path = platform::known_folder(folder); !path.empty()) shortcuts_.push_back(std::move(path));
 		for (size_t index = 0; index < maximumShortcuts; ++index)
 		{
@@ -44,10 +42,7 @@ namespace iw
 			std::filesystem::path path(text);
 			error.clear();
 			if (!std::filesystem::is_directory(files::native_path(path), error)) continue;
-			if (std::ranges::any_of(shortcuts_, [&path](const auto& existing)
-			{
-				return paths::equal(existing, path);
-			}))
+			if (std::ranges::any_of(shortcuts_, [&path](const auto& existing) { return paths::equal(existing, path); }))
 				continue;
 			shortcuts_.push_back(std::move(path));
 		}
@@ -60,10 +55,8 @@ namespace iw
 		for (const auto& path : shortcuts_)
 		{
 			bool known = false;
-			for (const auto folder : {
-				     platform::KnownFolder::pictures, platform::KnownFolder::documents,
-				     platform::KnownFolder::desktop, platform::KnownFolder::downloads
-			     })
+			for (const auto folder : {platform::KnownFolder::pictures, platform::KnownFolder::documents,
+			                          platform::KnownFolder::desktop, platform::KnownFolder::downloads})
 				known = known || paths::equal(platform::known_folder(folder), path);
 			if (!known) pinned.push_back(path);
 		}
@@ -85,7 +78,7 @@ namespace iw
 			{modeRename, ModeBar::Glyph::rename, L"Rename"},
 			{modeEdit, ModeBar::Glyph::edit, L"Edit"},
 			{modeSync, ModeBar::Glyph::sync, L"Sync"},
-			{modeFullscreen, ModeBar::Glyph::fullscreen, L"Full", {}, fullscreen_}
+			{modeFullscreen, ModeBar::Glyph::fullscreen, L"Full", {}, fullscreen_},
 		});
 		update_mode_bar();
 	}
@@ -112,10 +105,8 @@ namespace iw
 		pin.glyph = ModeBar::Glyph::pin;
 		pin.caption = L"Pin";
 		pin.enabled = !folder_.empty() && shortcuts_.size() < maximumShortcuts * 2 &&
-			std::ranges::none_of(shortcuts_, [this](const auto& existing)
-			{
-				return paths::equal(existing, folder_);
-			});
+		              std::ranges::none_of(shortcuts_,
+		                                   [this](const auto& existing) { return paths::equal(existing, folder_); });
 		buttons.push_back(std::move(pin));
 		modeBar_->set_shortcuts(std::move(buttons));
 
@@ -130,9 +121,7 @@ namespace iw
 	{
 		switch (button.id)
 		{
-		case modeBrowse:
-			close_task();
-			return;
+		case modeBrowse: close_task(); return;
 
 		case modeFolders:
 			showTree_ = !showTree_;
@@ -167,8 +156,7 @@ namespace iw
 			configure_mode_bar();
 			return;
 
-		default:
-			break;
+		default: break;
 		}
 		if (!button.path.empty() && close_task()) open_folder(button.path);
 		else if (button.glyph == ModeBar::Glyph::pin && !folder_.empty())
@@ -183,9 +171,7 @@ namespace iw
 	{
 		if (button.path.empty()) return;
 		const auto removed = std::erase_if(shortcuts_, [&button](const auto& existing)
-		{
-			return paths::equal(existing, button.path);
-		});
+		{ return paths::equal(existing, button.path); });
 		if (!removed) return;
 		save_shortcuts();
 		update_mode_bar();
@@ -194,10 +180,8 @@ namespace iw
 	bool MainWindow::has_photo_selection() const
 	{
 		const auto selected = canvas_.selected_paths();
-		return !selected.empty() && std::ranges::all_of(selected, [](const auto& path)
-		{
-			return files::is_supported_image(path);
-		});
+		return !selected.empty() &&
+		       std::ranges::all_of(selected, [](const auto& path) { return files::is_supported_image(path); });
 	}
 
 	std::vector<std::filesystem::path> MainWindow::photo_selection() const
@@ -208,7 +192,8 @@ namespace iw
 		{
 			std::error_code error;
 			if (!files::is_supported_image(path) ||
-				!std::filesystem::is_regular_file(files::native_path(path), error) || error) return {};
+			    !std::filesystem::is_regular_file(files::native_path(path), error) || error)
+				return {};
 		}
 		return selected;
 	}
@@ -218,7 +203,7 @@ namespace iw
 		// Edit is a single-photo task: the focused photo, not a hidden batch target.
 		const int focused = canvas_.focused_index();
 		if (focused >= 0 && static_cast<size_t>(focused) < files_.size() &&
-			files::is_editable_image(files_[static_cast<size_t>(focused)]))
+		    files::is_editable_image(files_[static_cast<size_t>(focused)]))
 			return files_[static_cast<size_t>(focused)];
 		const auto selected = canvas_.selected_paths();
 		if (selected.size() == 1 && files::is_editable_image(selected.front())) return selected.front();
@@ -242,8 +227,14 @@ namespace iw
 			statusText_ = std::move(text);
 			update_status_surface();
 		};
-		host.progress = [this](const size_t complete, const size_t total) { update_progress(complete, total); };
-		host.refreshChrome = [this] { update_toolbar_state(); };
+		host.progress = [this](const size_t complete, const size_t total)
+		{
+			update_progress(complete, total);
+		};
+		host.refreshChrome = [this]
+		{
+			update_toolbar_state();
+		};
 		host.completed = [weak](const tasks::TaskPlan& plan)
 		{
 			if (const auto self = weak.lock())
@@ -261,8 +252,7 @@ namespace iw
 		{
 			const auto self = weak.lock();
 			const auto savedTask = taskWeak.lock();
-			if (!self || !self->frame_->native_handle() ||
-				(self->task_ && self->task_ != savedTask)) return;
+			if (!self || !self->frame_->native_handle() || (self->task_ && self->task_ != savedTask)) return;
 			self->canvas_.invalidate_file(path);
 			if (saveAs)
 			{
@@ -348,10 +338,9 @@ namespace iw
 		auto selected = photo_selection();
 		if (selected.empty())
 		{
-			platform::show_error(
-				L"The selection contains a folder, non-photo, missing file, or unreadable file. "
-				L"Select only local photo files before converting.",
-				L"Convert or Resize", frame_);
+			platform::show_error(L"The selection contains a folder, non-photo, missing file, or unreadable file. "
+			                     L"Select only local photo files before converting.",
+			                     L"Convert or Resize", frame_);
 			return;
 		}
 		auto task = std::make_shared<TaskConvert>();

@@ -26,8 +26,7 @@ namespace iw
 		constexpr color() noexcept = default;
 
 		constexpr color(const std::uint8_t red, const std::uint8_t green, const std::uint8_t blue,
-		                const std::uint8_t alpha = 255) noexcept
-			: r(red), g(green), b(blue), a(alpha)
+		                const std::uint8_t alpha = 255) noexcept : r(red), g(green), b(blue), a(alpha)
 		{
 		}
 
@@ -42,14 +41,11 @@ namespace iw
 				static_cast<std::uint8_t>(value),
 				static_cast<std::uint8_t>(value >> 8),
 				static_cast<std::uint8_t>(value >> 16),
-				alpha
+				alpha,
 			};
 		}
 
-		constexpr color with_alpha(const std::uint8_t alpha) const noexcept
-		{
-			return {r, g, b, alpha};
-		}
+		constexpr color with_alpha(const std::uint8_t alpha) const noexcept { return {r, g, b, alpha}; }
 
 		constexpr bool operator==(const color&) const noexcept = default;
 	};

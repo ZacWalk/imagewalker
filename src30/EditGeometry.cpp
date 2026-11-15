@@ -15,24 +15,33 @@ namespace iw::edits
 		if (r && b) return CropHandle::bottomRight;
 		if (l && b) return CropHandle::bottomLeft;
 		if (point.y >= crop.y && point.y <= crop.bottom())
-		{ if (l) return CropHandle::left; if (r) return CropHandle::right; }
+		{
+			if (l) return CropHandle::left;
+			if (r) return CropHandle::right;
+		}
 		if (point.x >= crop.x && point.x <= crop.right())
-		{ if (t) return CropHandle::top; if (b) return CropHandle::bottom; }
+		{
+			if (t) return CropHandle::top;
+			if (b) return CropHandle::bottom;
+		}
 		return crop.contains(point) ? CropHandle::move : CropHandle::none;
 	}
 
-	app::recti drag_crop(const app::recti initial, const app::recti bounds, const CropHandle handle, const app::pointi delta)
+	app::recti drag_crop(const app::recti initial, const app::recti bounds, const CropHandle handle,
+	                     const app::pointi delta)
 	{
 		if (bounds.width <= 0 || bounds.height <= 0 || initial.width <= 0 || initial.height <= 0) return {};
 		const int width = (std::min)(initial.width, bounds.width), height = (std::min)(initial.height, bounds.height);
 		int l = std::clamp(initial.x, bounds.x, bounds.right() - width), r = l + width;
 		int t = std::clamp(initial.y, bounds.y, bounds.bottom() - height), b = t + height;
 		const auto shift = [](const int value, const int deltaValue, const int low, const int high)
-			{ return static_cast<int>(std::clamp(static_cast<long long>(value) + deltaValue,
-				static_cast<long long>(low), static_cast<long long>(high))); };
+		{
+			return static_cast<int>(std::clamp(static_cast<long long>(value) + deltaValue, static_cast<long long>(low),
+			                                   static_cast<long long>(high)));
+		};
 		if (handle == CropHandle::move)
 			return {shift(l, delta.x, bounds.x, bounds.right() - width),
-				shift(t, delta.y, bounds.y, bounds.bottom() - height), width, height};
+			        shift(t, delta.y, bounds.y, bounds.bottom() - height), width, height};
 		if (handle == CropHandle::left || handle == CropHandle::topLeft || handle == CropHandle::bottomLeft)
 			l = shift(l, delta.x, bounds.x, r - 1);
 		if (handle == CropHandle::right || handle == CropHandle::topRight || handle == CropHandle::bottomRight)

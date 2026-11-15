@@ -1,16 +1,16 @@
 # ImageWalker 2.x development guidelines
 
-Follow these rules when changing ImageWalker 2.0, 2.2 or 2.3. Release names,
-dates and feature highlights belong in [versions.md](versions.md) and
-[features.md](features.md).
+Follow these rules when changing ImageWalker 2.0, 2.2 or 2.3.
+[app-rules.md](app-rules.md) holds the rules for all five applications.
 
 - Keep each application independently buildable, with its own UI translation
-  units and header-only shared imaging, not a runtime dependency on
-  another ImageWalker executable.
-- Put reusable UI helpers, image algorithms and adapters inline in `include/`, and use
-  libfiles for formats, documents, codecs and metadata; see [libiw-plan.md](libiw-plan.md).
-- Fix common imaging behaviour once in the library. Apply equivalent UI,
-  tool, printing, settings, logging and worker-ownership fixes consistently
+  units and header-only shared imaging, and no runtime dependency on another
+  ImageWalker executable.
+- Put reusable UI helpers, image algorithms and adapters inline in `include/`,
+  and use libfiles for formats, documents, codecs and metadata; see
+  [imaging.md](imaging.md).
+- Fix common imaging behaviour once, in the shared headers. Apply equivalent
+  UI, tool, printing, settings, logging and worker-ownership fixes consistently
   across `src20`, `src22` and `src23`.
 - Keep each release's resources and interface details local to its directory.
 
@@ -32,7 +32,7 @@ toolbar padding. On leaving full screen, restore the previous window placement
 and maximized state; in 2.3, also restore the window skin.
 
 Keep resource identity, icons, version strings, About text and layout code
-local to each application. Preserve the appropriate description view:
+local to each application. Preserve each release's description view:
 `ViewDescriptionWindow.h` in 2.0 and 2.2, `ViewDescriptionDlg.h` in 2.3.
 Keep `ViewModeTabs.h` with 2.0's tab selector and `ViewTabCtrl.h` with 2.3.
 Keep the read-only Metadata command in ImageWalker 2.3's Image menu.
@@ -40,18 +40,10 @@ Keep the read-only Metadata command in ImageWalker 2.3's Image menu.
 ## Version labels
 
 Use `ImageWalker 2.0`, `ImageWalker 2.2` and `ImageWalker 2.3` in log banners,
-test banners, About titles and resource product names. Use the corresponding
-numeric file/product versions `2.0.0.0`, `2.2.0.0` and `2.3.0.0`.
-Take each public label from `APP_VERSION_NAME` in that application's `Ver.h`,
-and test it against the compiled version resource and About dialog.
+test banners, About titles and resource product names, and the numeric file and
+product versions `2.0.0.0`, `2.2.0.0` and `2.3.0.0`. Take each public label from
+`APP_VERSION_NAME` in that application's `Ver.h`, and test it against the
+compiled version resource and About dialog.
 
-Keep Delete mapped to the Recycle Bin, F2 to Rename and F7 to Move To.
-Validate the compiled accelerator tables, not just resource-source text.
-
-## ImageWalker 1.0 and 3.0
-
-Preserve ImageWalker 1.0's read-only scope and smaller frame and views. Use the common
-codec registry rather than maintaining a separate loader set.
-Keep ImageWalker 3.0 changes in its own platform, canvas, collection and task
-interfaces; do not add a dependency on a WTL application. Follow
-[app-rules.md](app-rules.md) for cross-application requirements.
+Keep Delete mapped to the Recycle Bin, F2 to Rename and F7 to Move To, and
+validate the compiled accelerator tables, not just the resource source.

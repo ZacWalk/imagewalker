@@ -9,7 +9,6 @@
 
 #include <iw/imaging/PixelOps.h>
 
-#include <commctrl.h>
 #include <objbase.h>
 #include <shlwapi.h>
 #include <algorithm>
@@ -31,15 +30,30 @@ namespace iw::platform
 {
 	namespace
 	{
-		core::recti core_rect(const app::recti v) { return static_cast<core::recti>(v); }
+		core::recti core_rect(const app::recti v)
+		{
+			return static_cast<core::recti>(v);
+		}
 
-		app::recti app_rect(const core::recti v) { return {v.left, v.top, v.width(), v.height()}; }
+		app::recti app_rect(const core::recti v)
+		{
+			return {v.left, v.top, v.width(), v.height()};
+		}
 
-		core::sizei core_size(const app::sizei v) { return static_cast<core::sizei>(v); }
+		core::sizei core_size(const app::sizei v)
+		{
+			return static_cast<core::sizei>(v);
+		}
 
-		app::sizei app_size(const core::sizei v) { return {v.cx, v.cy}; }
+		app::sizei app_size(const core::sizei v)
+		{
+			return {v.cx, v.cy};
+		}
 
-		core::color core_color(const color v) { return core::color(core::rgba(v.r, v.g, v.b, v.a)); }
+		core::color core_color(const color v)
+		{
+			return core::color(core::rgba(v.r, v.g, v.b, v.a));
+		}
 
 		color app_color(const core::color32 v)
 		{
@@ -75,15 +89,15 @@ namespace iw::platform
 				if (total < sizeof(BITMAPINFOHEADER)) break;
 				const auto* const header = reinterpret_cast<const BITMAPINFOHEADER*>(memory);
 				if (header->biSize < sizeof(BITMAPINFOHEADER) || header->biSize > total || header->biPlanes != 1 ||
-					header->biWidth <= 0 || header->biWidth > INT_MAX || header->biHeight == 0 ||
-					header->biHeight == std::numeric_limits<LONG>::min())
+				    header->biWidth <= 0 || header->biWidth > INT_MAX || header->biHeight == 0 ||
+				    header->biHeight == std::numeric_limits<LONG>::min())
 					break;
 				if (header->biCompression != BI_RGB && header->biCompression != BI_BITFIELDS) break;
 				const auto bits = static_cast<std::size_t>(header->biBitCount);
 				if (bits != 8 && bits != 16 && bits != 24 && bits != 32) break;
 				const auto width = static_cast<std::size_t>(header->biWidth);
-				const auto height =
-					static_cast<std::size_t>(header->biHeight < 0 ? -header->biHeight : header->biHeight);
+				const auto height = static_cast<std::size_t>(header->biHeight < 0 ? -header->biHeight
+				                                                                  : header->biHeight);
 				if (width > std::numeric_limits<std::size_t>::max() / bits) break;
 				const auto row_bits = width * bits;
 				if (row_bits > std::numeric_limits<std::size_t>::max() - 31) break;
@@ -119,12 +133,12 @@ namespace iw::platform
 					green_mask = 0x0000ff00;
 					blue_mask = 0x000000ff;
 				}
-				const auto palette_count = bits <= 8
-					? (header->biClrUsed ? static_cast<std::size_t>(header->biClrUsed) : (std::size_t{1} << bits))
-					: std::size_t{0};
+				const auto palette_count = bits <= 8 ? (header->biClrUsed ? static_cast<std::size_t>(header->biClrUsed)
+				                                                          : (std::size_t{1} << bits))
+				                                     : std::size_t{0};
 				const auto palette_size = palette_count > std::numeric_limits<std::size_t>::max() / sizeof(RGBQUAD)
-					? std::numeric_limits<std::size_t>::max()
-					: palette_count * sizeof(RGBQUAD);
+				                              ? std::numeric_limits<std::size_t>::max()
+				                              : palette_count * sizeof(RGBQUAD);
 				std::size_t offset = header->biSize;
 				if (offset > total || masks_size > total - offset) break;
 				offset += masks_size;
@@ -132,7 +146,7 @@ namespace iw::platform
 				const auto* const palette = reinterpret_cast<const RGBQUAD*>(memory + offset);
 				offset += palette_size;
 				if (offset > total || row_bytes > std::numeric_limits<std::size_t>::max() / height ||
-					row_bytes * height > total - offset)
+				    row_bytes * height > total - offset)
 					break;
 				BitmapResource image;
 				image.size = {static_cast<int>(width), static_cast<int>(height)};
@@ -151,27 +165,27 @@ namespace iw::platform
 							if (index >= palette_count) continue;
 							const auto& entry = palette[index];
 							value = static_cast<std::uint32_t>(entry.rgbRed) << 16 |
-								static_cast<std::uint32_t>(entry.rgbGreen) << 8 | entry.rgbBlue;
+							        static_cast<std::uint32_t>(entry.rgbGreen) << 8 | entry.rgbBlue;
 						}
 						else if (bits == 16)
 						{
 							std::memcpy(&value, row + x * 2, sizeof(std::uint16_t));
 							value = static_cast<std::uint32_t>(unpack_clipboard_channel(value, red_mask)) << 16 |
-								static_cast<std::uint32_t>(unpack_clipboard_channel(value, green_mask)) << 8 |
-								unpack_clipboard_channel(value, blue_mask);
+							        static_cast<std::uint32_t>(unpack_clipboard_channel(value, green_mask)) << 8 |
+							        unpack_clipboard_channel(value, blue_mask);
 						}
 						else if (bits == 24)
 						{
 							const auto* const source = row + x * 3;
 							value = static_cast<std::uint32_t>(source[2]) << 16 |
-								static_cast<std::uint32_t>(source[1]) << 8 | source[0];
+							        static_cast<std::uint32_t>(source[1]) << 8 | source[0];
 						}
 						else
 						{
 							std::memcpy(&value, row + x * 4, sizeof(value));
 							value = static_cast<std::uint32_t>(unpack_clipboard_channel(value, red_mask)) << 16 |
-								static_cast<std::uint32_t>(unpack_clipboard_channel(value, green_mask)) << 8 |
-								unpack_clipboard_channel(value, blue_mask);
+							        static_cast<std::uint32_t>(unpack_clipboard_channel(value, green_mask)) << 8 |
+							        unpack_clipboard_channel(value, blue_mask);
 						}
 						image.pixels[y * width + x] = 0xff000000u | value;
 					}
@@ -197,7 +211,7 @@ namespace iw::platform
 				{
 					BITMAP info{};
 					if (GetObjectW(bitmap, sizeof(info), &info) == sizeof(info) && info.bmWidth > 0 &&
-						info.bmHeight > 0)
+					    info.bmHeight > 0)
 					{
 						BitmapResource image;
 						image.size = {info.bmWidth, info.bmHeight};
@@ -212,7 +226,7 @@ namespace iw::platform
 						if (const auto dc = GetDC(nullptr); dc)
 						{
 							const auto rows = GetDIBits(dc, bitmap, 0, static_cast<UINT>(info.bmHeight),
-								image.pixels.data(), &format, DIB_RGB_COLORS);
+							                            image.pixels.data(), &format, DIB_RGB_COLORS);
 							ReleaseDC(nullptr, dc);
 							if (rows == info.bmHeight)
 							{
@@ -242,32 +256,31 @@ namespace iw::platform
 			}
 		}
 
-		KeyCode key_code(const int key)
+		KeyCode key_code(const char32_t key)
 		{
-			const auto c = static_cast<char32_t>(key);
-			if (c == ::platform::keys::LEFT) return KeyCode::left;
-			if (c == ::platform::keys::RIGHT) return KeyCode::right;
-			if (c == ::platform::keys::UP) return KeyCode::up;
-			if (c == ::platform::keys::DOWN) return KeyCode::down;
-			if (c == ::platform::keys::HOME) return KeyCode::home;
-			if (c == ::platform::keys::END) return KeyCode::end;
-			if (c == ::platform::keys::PRIOR) return KeyCode::pageUp;
-			if (c == ::platform::keys::NEXT) return KeyCode::pageDown;
-			if (c == ::platform::keys::SPACE) return KeyCode::space;
-			if (c == ::platform::keys::DEL) return KeyCode::deleteKey;
-			if (c == ::platform::keys::F2) return KeyCode::f2;
-			if (c == ::platform::keys::RETURN) return KeyCode::enter;
-			if (c == ::platform::keys::ESCAPE) return KeyCode::escape;
-			if (c == ::platform::keys::DIVIDE) return KeyCode::divide;
-			if (c == ::platform::keys::MULTIPLY) return KeyCode::multiply;
-			if (c == ::platform::keys::ADD) return KeyCode::add;
-			if (c == ::platform::keys::SUBTRACT) return KeyCode::subtract;
+			if (key == ::platform::keys::LEFT) return KeyCode::left;
+			if (key == ::platform::keys::RIGHT) return KeyCode::right;
+			if (key == ::platform::keys::UP) return KeyCode::up;
+			if (key == ::platform::keys::DOWN) return KeyCode::down;
+			if (key == ::platform::keys::HOME) return KeyCode::home;
+			if (key == ::platform::keys::END) return KeyCode::end;
+			if (key == ::platform::keys::PRIOR) return KeyCode::pageUp;
+			if (key == ::platform::keys::NEXT) return KeyCode::pageDown;
+			if (key == ::platform::keys::SPACE) return KeyCode::space;
+			if (key == ::platform::keys::DEL) return KeyCode::deleteKey;
+			if (key == ::platform::keys::F2) return KeyCode::f2;
+			if (key == ::platform::keys::RETURN) return KeyCode::enter;
+			if (key == ::platform::keys::ESCAPE) return KeyCode::escape;
+			if (key == ::platform::keys::DIVIDE) return KeyCode::divide;
+			if (key == ::platform::keys::MULTIPLY) return KeyCode::multiply;
+			if (key == ::platform::keys::ADD) return KeyCode::add;
+			if (key == ::platform::keys::SUBTRACT) return KeyCode::subtract;
 			return KeyCode::unknown;
 		}
 
 		// The longest prefix that fits, never ending between the halves of a surrogate pair.
 		std::wstring fitting_prefix(const std::wstring_view text, const int available,
-			const std::function<int(std::wstring_view)>& measure)
+		                            const std::function<int(std::wstring_view)>& measure)
 		{
 			size_t low = 0, high = text.size();
 			while (low < high)
@@ -277,7 +290,8 @@ namespace iw::platform
 				else high = middle - 1;
 			}
 			if (low > 0 && low < text.size() && text[low - 1] >= 0xd800 && text[low - 1] <= 0xdbff &&
-				text[low] >= 0xdc00 && text[low] <= 0xdfff) --low;
+			    text[low] >= 0xdc00 && text[low] <= 0xdfff)
+				--low;
 			return std::wstring(text.substr(0, low));
 		}
 
@@ -303,22 +317,22 @@ namespace iw::platform
 			app::sizei measure_text(std::wstring_view value, std::uint32_t, const FontPtr& font) override
 			{
 				if (value.empty()) return {};
-				const auto face =
-					font && *font ? static_cast<render::font_face>(font->native_handle()) : render::font_face::dialog;
+				const auto face = font && *font ? static_cast<render::font_face>(font->native_handle())
+				                                : render::font_face::dialog;
 				return app_size(draw_.measure_text(::core::utf16_to_utf8(value), face, render::text_style::single_line,
-					(std::numeric_limits<int>::max)()));
+				                                   (std::numeric_limits<int>::max)()));
 			}
 
 			void image(std::span<const std::uint32_t> pixels, app::sizei source, app::recti destination, bool) override
 			{
 				if (source.is_empty() || destination.is_empty() ||
-					pixels.size() < static_cast<size_t>(source.width) * source.height)
+				    pixels.size() < static_cast<size_t>(source.width) * source.height)
 					return;
 				auto surface = std::make_shared<core::surface>();
 				surface->alloc(core_size(source), core::texture_format::ARGB);
 				for (int y = 0; y < source.height; ++y)
 					std::memcpy(surface->pixels_line(y), pixels.data() + static_cast<size_t>(y) * source.width,
-						static_cast<size_t>(source.width) * sizeof(std::uint32_t));
+					            static_cast<size_t>(source.width) * sizeof(std::uint32_t));
 				render::draw_surface(draw_, surface, core_rect(destination), 1.0f);
 			}
 
@@ -329,13 +343,13 @@ namespace iw::platform
 				if (r.is_empty()) return;
 				const auto clr = core_color(c);
 				draw_.draw_line({static_cast<double>(r.x), static_cast<double>(r.y)},
-					{static_cast<double>(r.right()), static_cast<double>(r.y)}, clr, width);
+				                {static_cast<double>(r.right()), static_cast<double>(r.y)}, clr, width);
 				draw_.draw_line({static_cast<double>(r.right()), static_cast<double>(r.y)},
-					{static_cast<double>(r.right()), static_cast<double>(r.bottom())}, clr, width);
+				                {static_cast<double>(r.right()), static_cast<double>(r.bottom())}, clr, width);
 				draw_.draw_line({static_cast<double>(r.right()), static_cast<double>(r.bottom())},
-					{static_cast<double>(r.x), static_cast<double>(r.bottom())}, clr, width);
+				                {static_cast<double>(r.x), static_cast<double>(r.bottom())}, clr, width);
 				draw_.draw_line({static_cast<double>(r.x), static_cast<double>(r.bottom())},
-					{static_cast<double>(r.x), static_cast<double>(r.y)}, clr, width);
+				                {static_cast<double>(r.x), static_cast<double>(r.y)}, clr, width);
 			}
 
 			void clip(const app::recti r) override { draw_.clip_bounds(core_rect(r)); }
@@ -354,22 +368,26 @@ namespace iw::platform
 			app::sizei measure_text(std::wstring_view value, std::uint32_t, const FontPtr& font) const override
 			{
 				if (value.empty()) return {};
-				const auto face =
-					font && *font ? static_cast<render::font_face>(font->native_handle()) : render::font_face::dialog;
+				const auto face = font && *font ? static_cast<render::font_face>(font->native_handle())
+				                                : render::font_face::dialog;
 				return app_size(measure_.measure_text(::core::utf16_to_utf8(value), face,
-					render::text_style::single_line, (std::numeric_limits<int>::max)()));
+				                                      render::text_style::single_line,
+				                                      (std::numeric_limits<int>::max)()));
 			}
 
 		private:
 			render::measure_context& measure_;
 		};
 
-		class LibdesktopWindowFrame final : public WindowFrame,
-		                                    public std::enable_shared_from_this<LibdesktopWindowFrame>
+		class LibdesktopWindowFrame final :
+			public WindowFrame,
+			public std::enable_shared_from_this<LibdesktopWindowFrame>
 		{
 		public:
-			LibdesktopWindowFrame(::ui::frame_ptr native, std::shared_ptr<LibdesktopFrameHost> host)
-				: native_(std::move(native)), host_(std::move(host)) {}
+			LibdesktopWindowFrame(::ui::frame_ptr native, std::shared_ptr<LibdesktopFrameHost> host) :
+				native_(std::move(native)), host_(std::move(host))
+			{
+			}
 
 			void attach_owner();
 			void set_menu_bar(std::vector<::ui::command_ptr> menus);
@@ -377,6 +395,8 @@ namespace iw::platform
 			bool created_ok() const { return created_ok_; }
 
 			::ui::frame_ptr ui_frame() const { return native_; }
+
+			const std::shared_ptr<LibdesktopFrameHost>& host() const { return host_; }
 
 			NativeHandle native_handle() const override
 			{
@@ -487,8 +507,8 @@ namespace iw::platform
 			{
 				pendingMaximized_ = value;
 				if (native_)
-					native_->sys_command(
-						value ? ::platform::sys_command_type::MAXIMIZE : ::platform::sys_command_type::RESTORE);
+					native_->sys_command(value ? ::platform::sys_command_type::MAXIMIZE
+					                           : ::platform::sys_command_type::RESTORE);
 			}
 
 			WindowPlacement placement() const override
@@ -528,13 +548,24 @@ namespace iw::platform
 			bool created_ok_{true};
 		};
 
-		class LibdesktopFrameHost final : public ::ui::frame_host,
-		                                  public std::enable_shared_from_this<LibdesktopFrameHost>
+		class LibdesktopFrameHost final :
+			public ::ui::frame_host,
+			public std::enable_shared_from_this<LibdesktopFrameHost>
 		{
 		public:
+			// An element drawn over the reactor's painting, laid out at the bounds its owner gave it.
+			struct Hosted
+			{
+				::ui::element_ptr element;
+				core::recti bounds;
+				bool placed{};
+			};
+
 			explicit LibdesktopFrameHost(FrameReactorPtr reactor) : reactor_(std::move(reactor)) {}
 
 			void set_owner(const std::shared_ptr<LibdesktopWindowFrame>& owner) { owner_ = owner; }
+
+			std::shared_ptr<LibdesktopWindowFrame> owner() const { return owner_.lock(); }
 
 			void add_child(const std::shared_ptr<LibdesktopFrameHost>& child)
 			{
@@ -542,6 +573,45 @@ namespace iw::platform
 			}
 
 			void set_reactor(FrameReactorPtr reactor) { reactor_ = std::move(reactor); }
+
+			std::shared_ptr<Hosted> add_element(::ui::element_ptr element)
+			{
+				auto entry = std::make_shared<Hosted>(Hosted{std::move(element)});
+				hosted_.push_back(entry);
+				return entry;
+			}
+
+			void remove_element(const Hosted& entry)
+			{
+				const auto bounds = entry.bounds;
+				const bool visible = entry.element && entry.element->is_visible();
+				std::erase_if(hosted_, [&entry](const auto& item) { return item.get() == &entry; });
+				if (visible) invalidate(bounds);
+			}
+
+			void place_element(Hosted& entry, const core::recti bounds)
+			{
+				if (entry.bounds == bounds) return;
+				const auto previous = entry.bounds;
+				entry.bounds = bounds;
+				entry.placed = false;
+				// A paint lays an element out before drawing it, so only a move between paints asks for one.
+				if (!painting_ && entry.element->is_visible()) invalidate(previous.make_union(bounds));
+			}
+
+			void show_element(const Hosted& entry, const bool visible)
+			{
+				if (entry.element->is_visible() == visible) return;
+				entry.element->is_visible(visible);
+				if (!painting_) invalidate(entry.bounds);
+			}
+
+			void release_graphics()
+			{
+				const ::ui::element_event event{::ui::element_event_type::free_graphics_resources, nullptr};
+				for (const auto& entry : std::vector(hosted_)) release_graphics(entry->element, event);
+				if (const auto owner = owner_.lock(); owner && !hosted_.empty()) owner->invalidate();
+			}
 
 			void set_menu_bar(std::vector<::ui::command_ptr> menus)
 			{
@@ -572,15 +642,24 @@ namespace iw::platform
 					LibdesktopMeasureContext measure(mc);
 					reactor_->size(owner, app_size(extent), measure);
 				}
+				for (const auto& entry : std::vector(hosted_)) place(mc, *entry);
 			}
 
 			void on_window_paint(render::draw_context& dc) override
 			{
 				if (menuBar_ && menuBar_->is_visible()) menuBar_->render(dc, {});
+				painting_ = true;
+				const core::scope_exit painted([this] { painting_ = false; });
 				if (const auto owner = owner_.lock(); owner && reactor_)
 				{
 					LibdesktopDrawContext draw(dc);
 					reactor_->paint(owner, draw);
+				}
+				// The reactor places its elements as it lays its own drawing out, so they follow it.
+				for (const auto& entry : std::vector(hosted_))
+				{
+					if (!entry->placed) place(dc, *entry);
+					if (entry->element->is_visible() && !entry->bounds.is_empty()) entry->element->render(dc, {});
 				}
 			}
 
@@ -658,13 +737,13 @@ namespace iw::platform
 
 			void pan_end(core::pointi, core::pointi final) override { call_pan(final, false, true); }
 
-			bool key_down(int c, ::platform::key_state k) override
+			bool key_down(char32_t c, ::platform::key_state k) override
 			{
 				if (const auto owner = owner_.lock(); owner && reactor_)
 				{
 					KeyInput i;
 					i.key = key_code(c);
-					i.character = c >= 0 && c <= 0xffff ? static_cast<wchar_t>(c) : L'\0';
+					i.character = c <= 0xffff ? static_cast<wchar_t>(c) : L'\0';
 					i.control = k.control;
 					i.shift = k.shift;
 					i.alt = k.alt;
@@ -673,14 +752,14 @@ namespace iw::platform
 				return false;
 			}
 
-			::platform::drop_effect drag_over(
-				const ::platform::clipboard_data& d, ::platform::key_state, core::pointi) override
+			::platform::drop_effect drag_over(const ::platform::clipboard_data& d, ::platform::key_state,
+			                                  core::pointi) override
 			{
 				return d.has_drop_files() ? ::platform::drop_effect::copy : ::platform::drop_effect::none;
 			}
 
-			::platform::drop_effect drag_drop(
-				::platform::clipboard_data& d, ::platform::key_state, core::pointi p) override
+			::platform::drop_effect drag_drop(::platform::clipboard_data& d, ::platform::key_state,
+			                                  core::pointi p) override
 			{
 				if (!d.has_drop_files()) return ::platform::drop_effect::none;
 				if (const auto owner = owner_.lock(); owner && reactor_)
@@ -696,6 +775,7 @@ namespace iw::platform
 			void visit_elements(const std::function<void(const ::ui::element_ptr&, core::pointi)>& visit) override
 			{
 				if (menuBar_ && menuBar_->is_visible()) visit(menuBar_, {});
+				for (const auto& entry : std::vector(hosted_)) visit(entry->element, {});
 			}
 
 			std::vector<::ui::command_ptr> menu(core::pointi screen) override
@@ -724,6 +804,25 @@ namespace iw::platform
 			}
 
 		private:
+			static void place(render::measure_context& mc, Hosted& entry)
+			{
+				entry.element->layout(mc, entry.bounds);
+				entry.placed = true;
+			}
+
+			static void release_graphics(const ::ui::element_ptr& element, const ::ui::element_event& event)
+			{
+				if (!element) return;
+				element->dispatch_event(event);
+				element->visit_children([&event](const ::ui::element_ptr& child) { release_graphics(child, event); });
+			}
+
+			void invalidate(const core::recti bounds) const
+			{
+				if (bounds.is_empty()) return;
+				if (const auto owner = owner_.lock()) owner->invalidate(app_rect(bounds));
+			}
+
 			bool contains_screen(const core::pointi screen) const
 			{
 				const auto owner = owner_.lock();
@@ -765,8 +864,10 @@ namespace iw::platform
 			std::weak_ptr<LibdesktopWindowFrame> owner_;
 			FrameReactorPtr reactor_;
 			::ui::control_ptr menuBar_;
+			std::vector<std::shared_ptr<Hosted>> hosted_;
 			int menuHeight_{};
 			double pinchDistance_{};
+			bool painting_{};
 			std::vector<std::weak_ptr<LibdesktopFrameHost>> children_;
 		};
 
@@ -799,7 +900,7 @@ namespace iw::platform
 			style.hardware_accelerated = true;
 			style.timer_milliseconds = 50;
 			style.colors = {ui::style::colors.view_background, ui::style::colors.view_text,
-				ui::style::colors.view_selected_background};
+			                ui::style::colors.view_selected_background};
 			auto child = native_->create_frame(host, style);
 			if (!child) return {};
 			if (host_) host_->add_child(host);
@@ -818,16 +919,66 @@ namespace iw::platform
 			if (host_) host_->set_menu_bar(std::move(menus));
 		}
 
-		class NullWindowEvents final : public ::platform::window_events
-		{};
+		// The hosts that draw elements, which give up their textures when the graphics device is lost.
+		std::vector<std::weak_ptr<LibdesktopFrameHost>>& element_hosts()
+		{
+			static std::vector<std::weak_ptr<LibdesktopFrameHost>> hosts;
+			return hosts;
+		}
 
-		class NativeTestWindowFrame final : public WindowFrame,
-		                                    public std::enable_shared_from_this<NativeTestWindowFrame>
+		class HostedFrameElement final : public FrameElement
 		{
 		public:
-			NativeTestWindowFrame(::platform::window_ptr native, std::shared_ptr<NullWindowEvents> events)
-				: native_(std::move(native)), events_(std::move(events))
-			{}
+			HostedFrameElement(const std::shared_ptr<LibdesktopFrameHost>& host,
+			                   std::shared_ptr<LibdesktopFrameHost::Hosted> entry) :
+				host_(host), entry_(std::move(entry))
+			{
+			}
+
+			~HostedFrameElement() override
+			{
+				if (const auto host = host_.lock()) host->remove_element(*entry_);
+			}
+
+			HostedFrameElement(const HostedFrameElement&) = delete;
+			HostedFrameElement& operator=(const HostedFrameElement&) = delete;
+
+			void set_bounds(const app::recti bounds) override
+			{
+				if (const auto host = host_.lock()) host->place_element(*entry_, core_rect(bounds));
+			}
+
+			void show(const bool visible) override
+			{
+				if (const auto host = host_.lock()) host->show_element(*entry_, visible);
+				else entry_->element->is_visible(visible);
+			}
+
+			::ui::frame_ptr frame() const override
+			{
+				const auto host = host_.lock();
+				const auto owner = host ? host->owner() : nullptr;
+				return owner ? owner->ui_frame() : nullptr;
+			}
+
+		private:
+			std::weak_ptr<LibdesktopFrameHost> host_;
+			std::shared_ptr<LibdesktopFrameHost::Hosted> entry_;
+		};
+
+		class NullWindowEvents final : public ::platform::window_events
+		{
+		};
+
+		class NativeTestWindowFrame final :
+			public WindowFrame,
+			public std::enable_shared_from_this<NativeTestWindowFrame>
+		{
+		public:
+			NativeTestWindowFrame(::platform::window_ptr native, std::shared_ptr<NullWindowEvents> events) :
+				native_(std::move(native)), events_(std::move(events))
+			{
+			}
 
 			NativeHandle native_handle() const override
 			{
@@ -854,7 +1005,7 @@ namespace iw::platform
 			{
 				return native_ ? app_size(native_->client_extent())
 				               : app::recti{0, 0, pending_.width > 0 ? pending_.width : 1000,
-				                     pending_.height > 0 ? pending_.height : 700};
+				                            pending_.height > 0 ? pending_.height : 700};
 			}
 
 			void move(app::recti r) override
@@ -927,8 +1078,8 @@ namespace iw::platform
 			{
 				maximized_ = v;
 				if (native_)
-					native_->sys_command(
-						v ? ::platform::sys_command_type::MAXIMIZE : ::platform::sys_command_type::RESTORE);
+					native_->sys_command(v ? ::platform::sys_command_type::MAXIMIZE
+					                       : ::platform::sys_command_type::RESTORE);
 			}
 
 			WindowPlacement placement() const override
@@ -1008,7 +1159,7 @@ namespace iw::platform
 			return r;
 		}
 
-		::ui::command_ptr ui_command(const CommandPtr& source, std::wstring label = {})
+		::ui::command_ptr ui_command(const CommandPtr& source, const std::wstring& label = {})
 		{
 			if (!source) return {};
 			auto r = std::make_shared<::ui::command>();
@@ -1112,10 +1263,7 @@ namespace iw::platform
 					std::function<void()> work;
 					{
 						std::unique_lock lock(mutex_);
-						ready_.wait(lock, [this]
-						{
-							return stopping_ || !queue_.empty();
-						});
+						ready_.wait(lock, [this] { return stopping_ || !queue_.empty(); });
 						if (stopping_) return;
 						work = std::move(queue_.front());
 						queue_.pop_front();
@@ -1125,7 +1273,8 @@ namespace iw::platform
 						work();
 					}
 					catch (...)
-					{}
+					{
+					}
 				}
 			}
 
@@ -1157,13 +1306,18 @@ namespace iw::platform
 
 	Font::Font() = default;
 
-	Font::Font(std::unique_ptr<Impl> p) : impl_(std::move(p)) {}
+	Font::Font(std::unique_ptr<Impl> p) : impl_(std::move(p))
+	{
+	}
 
 	Font::~Font() = default;
 	Font::Font(Font&&) noexcept = default;
 	Font& Font::operator=(Font&&) noexcept = default;
 
-	Font::operator bool() const { return impl_ && impl_->valid; }
+	Font::operator bool() const
+	{
+		return impl_ && impl_->valid;
+	}
 
 	NativeHandle Font::native_handle() const
 	{
@@ -1212,7 +1366,10 @@ namespace iw::platform
 		return system_color(SystemColor::face);
 	}
 
-	app::sizei drag_threshold() { return {4, 4}; }
+	app::sizei drag_threshold()
+	{
+		return {4, 4};
+	}
 
 	PopupItem PopupItem::action(CommandPtr command, std::wstring text)
 	{
@@ -1226,8 +1383,8 @@ namespace iw::platform
 		return r;
 	}
 
-	void LibdesktopDrawContext::text(
-		std::wstring_view value, app::recti bounds, color textColor, std::uint32_t format, const FontPtr& font)
+	void LibdesktopDrawContext::text(std::wstring_view value, app::recti bounds, color textColor, std::uint32_t format,
+	                                 const FontPtr& font)
 	{
 		if (value.empty() || bounds.is_empty()) return;
 		std::wstring shortened;
@@ -1256,10 +1413,10 @@ namespace iw::platform
 		else if (format & TextFormat::right) x += bounds.width - extent.width;
 		int y = bounds.y;
 		if (format & TextFormat::verticalCenter) y += (bounds.height - extent.height) / 2;
-		const auto face =
-			font && *font ? static_cast<render::font_face>(font->native_handle()) : render::font_face::dialog;
+		const auto face = font && *font ? static_cast<render::font_face>(font->native_handle())
+		                                : render::font_face::dialog;
 		draw_.draw_text(::core::utf16_to_utf8(shown), {x, y, x + extent.width, y + extent.height}, face,
-			render::text_style::single_line, core_color(textColor), core::color(0, 0, 0, 0));
+		                render::text_style::single_line, core_color(textColor), core::color(0, 0, 0, 0));
 	}
 
 	std::wstring path_ellipsis(std::wstring_view path, int width, const std::function<int(std::wstring_view)>& measure)
@@ -1299,7 +1456,7 @@ namespace iw::platform
 		if (const auto uiFrame = frame->ui_frame()) uiFrame->track_menu({screenPoint.x, screenPoint.y, 1, 1}, commands);
 	}
 
-	void set_frame_menu(const WindowFramePtr& owner, std::vector<Menu> menus)
+	void set_frame_menu(const WindowFramePtr& owner, const std::vector<Menu>& menus)
 	{
 		const auto frame = std::dynamic_pointer_cast<LibdesktopWindowFrame>(owner);
 		if (!frame) return;
@@ -1318,6 +1475,24 @@ namespace iw::platform
 		return {};
 	}
 
+	FrameElementPtr add_frame_element(const WindowFramePtr& frame, ::ui::element_ptr element)
+	{
+		const auto native = std::dynamic_pointer_cast<LibdesktopWindowFrame>(frame);
+		const auto host = native ? native->host() : nullptr;
+		if (!host || !element) return {};
+		auto& hosts = element_hosts();
+		std::erase_if(hosts, [](const auto& weak) { return weak.expired(); });
+		if (std::ranges::none_of(hosts, [&host](const auto& weak) { return weak.lock() == host; }))
+			hosts.push_back(host);
+		return std::make_unique<HostedFrameElement>(host, host->add_element(std::move(element)));
+	}
+
+	void release_graphics()
+	{
+		for (const auto& weak : std::vector(element_hosts()))
+			if (const auto host = weak.lock()) host->release_graphics();
+	}
+
 	std::shared_ptr<::ui::frame_host> create_frame_host(FrameReactorPtr reactor)
 	{
 		return std::make_shared<LibdesktopFrameHost>(std::move(reactor));
@@ -1333,8 +1508,8 @@ namespace iw::platform
 	{
 		if (pendingMainFrame && pendingMainHost)
 		{
-			auto frame = std::make_shared<LibdesktopWindowFrame>(
-				std::exchange(pendingMainFrame, nullptr), std::exchange(pendingMainHost, nullptr));
+			auto frame = std::make_shared<LibdesktopWindowFrame>(std::exchange(pendingMainFrame, nullptr),
+			                                                     std::exchange(pendingMainHost, nullptr));
 			frame->attach_owner();
 			frame->set_reactor(std::move(reactor));
 			if (!frame->created_ok()) return {};
@@ -1375,11 +1550,8 @@ namespace iw::platform
 		result.pixels.resize(static_cast<size_t>(result.size.width) * result.size.height);
 		for (int y = 0; y < result.size.height; ++y)
 			std::memcpy(result.pixels.data() + static_cast<size_t>(y) * result.size.width, surface->pixels_line(y),
-				static_cast<size_t>(result.size.width) * sizeof(std::uint32_t));
-		result.hasAlpha = std::ranges::any_of(result.pixels, [](std::uint32_t p)
-		{
-			return core::get_a(p) != 0xff;
-		});
+			            static_cast<size_t>(result.size.width) * sizeof(std::uint32_t));
+		result.hasAlpha = std::ranges::any_of(result.pixels, [](std::uint32_t p) { return core::get_a(p) != 0xff; });
 		if (!result.hasAlpha)
 			for (auto& p : result.pixels) p |= 0xff000000;
 		return result;
@@ -1392,26 +1564,32 @@ namespace iw::platform
 		return true;
 	}
 
-	bool queue_work(WorkQueue q, std::function<void()> work) { return work && serial_queue(q).push(std::move(work)); }
+	bool queue_work(WorkQueue q, std::function<void()> work)
+	{
+		return work && serial_queue(q).push(std::move(work));
+	}
 
-	std::stop_token exit_token() { return exit_request().get_token(); }
+	std::stop_token exit_token()
+	{
+		return exit_request().get_token();
+	}
 
 	void shutdown_runtime()
 	{
 		exit_request().request_stop();
 		for (const auto q : {WorkQueue::image, WorkQueue::thumbnail, WorkQueue::metadata, WorkQueue::folder,
-		         WorkQueue::shell, WorkQueue::task})
+		                     WorkQueue::shell, WorkQueue::task})
 			serial_queue(q).stop();
 	}
 
 	int compare_ordinal_ignore_case(std::wstring_view l, std::wstring_view r)
 	{
-		const int v =
-			CompareStringOrdinal(l.data(), static_cast<int>(l.size()), r.data(), static_cast<int>(r.size()), TRUE);
+		const int v = CompareStringOrdinal(l.data(), static_cast<int>(l.size()), r.data(), static_cast<int>(r.size()),
+		                                   TRUE);
 		return v == 0 ? 0 : v - CSTR_EQUAL;
 	}
 
- // StrCmpLogicalW needs null-terminated input; reuse per-thread buffers to keep sorting allocation free.
+	// StrCmpLogicalW needs null-terminated input; reuse per-thread buffers to keep sorting allocation free.
 	int compare_file_names(std::wstring_view l, std::wstring_view r)
 	{
 		thread_local std::wstring a, b;
@@ -1430,8 +1608,9 @@ namespace iw::platform
 	std::optional<std::filesystem::path> choose_open_file(const WindowFramePtr&, const OpenFileOptions& o)
 	{
 		std::vector<core::file_path> selected;
-		const std::vector<::platform::file_dialog_filter> filters{
-			{::core::utf16_to_utf8(o.filterName), ::core::utf16_to_utf8(o.filterPattern)}, {"All files", "*.*"}};
+		const std::vector<::platform::file_dialog_filter> filters{{::core::utf16_to_utf8(o.filterName),
+		                                                           ::core::utf16_to_utf8(o.filterPattern)},
+		                                                          {"All files", "*.*"}};
 		if (!::platform::prompt_for_open_paths(selected, filters, false) || selected.empty()) return {};
 		return ::platform::to_stream_path(selected.front());
 	}
@@ -1457,8 +1636,8 @@ namespace iw::platform
 	void write_integer_settings(std::wstring_view section, std::span<const IntegerSetting> values)
 	{
 		for (const auto& value : values)
-			settings_store()->write(
-				::core::utf16_to_utf8(section), ::core::utf16_to_utf8(value.key), std::to_string(value.value));
+			settings_store()->write(::core::utf16_to_utf8(section), ::core::utf16_to_utf8(value.key),
+			                        std::to_string(value.value));
 	}
 
 	std::wstring read_text_setting(std::wstring_view section, std::wstring_view key, std::wstring_view fallback)
@@ -1472,13 +1651,13 @@ namespace iw::platform
 	void write_text_settings(std::wstring_view section, std::span<const TextSetting> values)
 	{
 		for (const auto& value : values)
-			settings_store()->write(
-				::core::utf16_to_utf8(section), ::core::utf16_to_utf8(value.key), ::core::utf16_to_utf8(value.value));
+			settings_store()->write(::core::utf16_to_utf8(section), ::core::utf16_to_utf8(value.key),
+			                        ::core::utf16_to_utf8(value.value));
 	}
 
- // The shared INI API intentionally writes through and does not expose a
- // destructive section delete.  Clear the bounded list keys used by 3.0;
- // empty values preserve the portable file and make stale rows invisible.
+	// The shared INI API intentionally writes through and does not expose a
+	// destructive section delete.  Clear the bounded list keys used by 3.0;
+	// empty values preserve the portable file and make stale rows invisible.
 	void clear_settings_section(std::wstring_view section)
 	{
 		const auto s = ::core::utf16_to_utf8(section);
@@ -1488,8 +1667,8 @@ namespace iw::platform
 			settings_store()->write(s, "Collection" + std::to_string(i), std::string_view{});
 		}
 		for (const auto key : {"WholeCollection", "CollectionCount", "WindowLeft", "WindowTop", "WindowWidth",
-		         "WindowHeight", "Maximized", "ShowFolderTree", "FolderTreeWidth", "ThumbnailSize", "ViewMode",
-		         "FitImage", "PasteImageFormat"})
+		                       "WindowHeight", "Maximized", "ShowFolderTree", "FolderTreeWidth", "ThumbnailSize",
+		                       "ViewMode", "FitImage", "PasteImageFormat"})
 			settings_store()->write(s, key, std::string_view{});
 	}
 
@@ -1541,8 +1720,8 @@ namespace iw::platform
 		if (!result.files.empty())
 		{
 			result.operation = c->files_description().preferred_drop_effect == ::platform::drop_effect::move
-				? FileOperation::move
-				: FileOperation::copy;
+			                       ? FileOperation::move
+			                       : FileOperation::copy;
 			return result;
 		}
 		if (auto image = read_clipboard_image(::iw::platform::win32::owner_window(owner)))
@@ -1551,7 +1730,7 @@ namespace iw::platform
 	}
 
 	bool perform_file_operation(const WindowFramePtr&, FileOperation op, std::span<const std::filesystem::path> sources,
-		const std::filesystem::path& destination)
+	                            const std::filesystem::path& destination)
 	{
 		if (sources.empty()) return false;
 		std::vector<core::file_path> files;
@@ -1559,7 +1738,7 @@ namespace iw::platform
 		if (op == FileOperation::recycle) return ::platform::delete_items(files, {}, true).success();
 		if (destination.empty()) return false;
 		return ::platform::move_or_copy(files, {}, desktop::folder_path(destination), op == FileOperation::move, false)
-			.success();
+		    .success();
 	}
 
 	bool delete_permanently(std::span<const std::filesystem::path> paths, std::error_code& error)
@@ -1587,7 +1766,8 @@ namespace iw::platform
 		{
 		public:
 			DesktopAppHandler(::platform::open_with_entry e, std::wstring n) : entry_(std::move(e)), name_(std::move(n))
-			{}
+			{
+			}
 
 			const std::wstring& name() const override { return name_; }
 
@@ -1604,116 +1784,114 @@ namespace iw::platform
 			std::wstring name_;
 		};
 
-		class NativeTextInput final : public TextInput
+		// An edit inside the one-pixel edge a native edit drew around itself.
+		class EditField final : public ::ui::element
 		{
 		public:
-			NativeTextInput(const WindowFramePtr& owner, TextInputOptions options) : options_(std::move(options))
+			explicit EditField(::ui::edit_ptr edit) : edit_(std::move(edit)) {}
+
+			void layout(render::measure_context& mc, const core::recti bounds_in) override
 			{
-				const auto parent = win32::owner_window(owner);
-				if (!parent) return;
-				hwnd_ = CreateWindowExW(0, L"EDIT", options_.text.c_str(), WS_CHILD | WS_BORDER | ES_AUTOHSCROLL, 0, 0,
-					0, 0, parent, nullptr, GetModuleHandleW(nullptr), nullptr);
-				if (!hwnd_) return;
-				parent_ = parent;
-				SetWindowSubclass(hwnd_, subclass_proc, 1, reinterpret_cast<DWORD_PTR>(this));
-				SetWindowSubclass(
-					parent_, parent_proc, reinterpret_cast<UINT_PTR>(this), reinterpret_cast<DWORD_PTR>(this));
-				if (!options_.cueBanner.empty())
-					SendMessageW(hwnd_, EM_SETCUEBANNER, FALSE, reinterpret_cast<LPARAM>(options_.cueBanner.c_str()));
-				SendMessageW(hwnd_, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
-				if (options_.folderCompletion) SHAutoComplete(hwnd_, SHACF_FILESYSTEM | SHACF_FILESYS_ONLY);
+				bounds = bounds_in;
+				edit_->layout(mc, bounds_in.inflate(-1));
 			}
 
-			~NativeTextInput() override
+			void render(render::draw_context& dc, const core::pointi element_offset) const override
 			{
-				if (parent_) RemoveWindowSubclass(parent_, parent_proc, reinterpret_cast<UINT_PTR>(this));
-				if (hwnd_)
-				{
-					RemoveWindowSubclass(hwnd_, subclass_proc, 1);
-					DestroyWindow(hwnd_);
-				}
+				dc.draw_rect(bounds.offset(element_offset), core_color(system_color(SystemColor::shadow)));
+				render_children(dc, element_offset);
 			}
 
-			void set_bounds(app::recti r) override
+			void visit_children(const std::function<void(const ::ui::element_ptr&)>& visit) const override
 			{
-				if (hwnd_) SetWindowPos(hwnd_, nullptr, r.x, r.y, r.width, r.height, SWP_NOZORDER | SWP_NOACTIVATE);
-			}
-
-			void show(bool v) override
-			{
-				if (hwnd_) ShowWindow(hwnd_, v ? SW_SHOW : SW_HIDE);
-			}
-
-			void set_focus() override
-			{
-				if (hwnd_) SetFocus(hwnd_);
-			}
-
-			bool has_focus() const override { return hwnd_ && GetFocus() == hwnd_; }
-
-			std::wstring text() const override
-			{
-				if (!hwnd_) return {};
-				const int n = GetWindowTextLengthW(hwnd_);
-				std::wstring r(static_cast<size_t>(n) + 1, L'\0');
-				GetWindowTextW(hwnd_, r.data(), n + 1);
-				r.resize(static_cast<size_t>(n));
-				return r;
-			}
-
-			void set_text(std::wstring_view v) override
-			{
-				if (hwnd_) SetWindowTextW(hwnd_, std::wstring(v).c_str());
-			}
-
-			void set_font(const FontPtr&) override
-			{
-				if (hwnd_)
-					SendMessageW(hwnd_, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+				visit(edit_);
 			}
 
 		private:
-			static void notify_changed(NativeTextInput* self)
-			{
-				if (self && self->options_.changed) self->options_.changed(self->text());
-			}
+			::ui::edit_ptr edit_;
+		};
 
-			static LRESULT CALLBACK parent_proc(HWND hwnd, UINT message, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data)
-			{
-				auto* self = reinterpret_cast<NativeTextInput*>(data);
-				if (self && message == WM_COMMAND && HIWORD(wp) == EN_CHANGE &&
-					reinterpret_cast<HWND>(lp) == self->hwnd_)
-					notify_changed(self);
-				return DefSubclassProc(hwnd, message, wp, lp);
-			}
+		class DrawnTextInput final : public TextInput, public std::enable_shared_from_this<DrawnTextInput>
+		{
+		public:
+			explicit DrawnTextInput(TextInputOptions options) : options_(std::move(options)) {}
 
-			static LRESULT CALLBACK subclass_proc(
-				HWND hwnd, UINT message, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data)
+			void attach(const WindowFramePtr& owner)
 			{
-				auto* self = reinterpret_cast<NativeTextInput*>(data);
-				if (message == WM_KEYDOWN)
+				const std::weak_ptr<DrawnTextInput> weak = weak_from_this();
+				::ui::edit_styles styles;
+				styles.cue = ::core::utf16_to_utf8(options_.cueBanner);
+				styles.file_system_auto_complete = options_.folderCompletion;
+				if (options_.font && *options_.font)
+					styles.font = static_cast<render::font_face>(options_.font->native_handle());
+				styles.capture_key_down = [weak](const char32_t key, const ::platform::key_state keys)
 				{
-					if (wp == VK_RETURN)
-					{
-						if (self && self->options_.accepted) self->options_.accepted();
-						return 0;
-					}
-					if (wp == VK_ESCAPE)
-					{
-						if (self && self->options_.escaped) self->options_.escaped();
-						return 0;
-					}
-					if (wp == VK_TAB)
-					{
-						if (self && self->options_.tabbed) self->options_.tabbed(GetKeyState(VK_SHIFT) < 0);
-						return 0;
-					}
+					const auto self = weak.lock();
+					return self && self->key(key, keys);
+				};
+				edit_ = ::ui::make_edit(styles, ::core::utf16_to_utf8(options_.text), [weak](const std::string& text)
+				{
+					const auto self = weak.lock();
+					if (!self || !self->options_.changed) return;
+					const auto changed = self->options_.changed;
+					changed(::core::utf8_to_utf16(text));
+				});
+				field_ = std::make_shared<EditField>(edit_);
+				// Its owner shows it once it has laid the field out.
+				field_->is_visible(false);
+				element_ = add_frame_element(owner, field_);
+			}
+
+			void set_bounds(const app::recti r) override
+			{
+				if (element_) element_->set_bounds(r);
+			}
+
+			void show(const bool v) override
+			{
+				// A hidden edit keeps no keyboard, or typing would land where nothing shows it.
+				if (!v)
+					if (const auto input = edit_->input(); input && input->focused() == edit_) input->clear_focus();
+				if (element_) element_->show(v);
+				else field_->is_visible(v);
+			}
+
+			void set_focus() override { edit_->focus(); }
+
+			bool has_focus() const override { return edit_->has_focus(); }
+
+			std::wstring text() const override { return ::core::utf8_to_utf16(edit_->window_text()); }
+
+			void set_text(const std::wstring_view v) override { edit_->window_text(::core::utf16_to_utf8(v)); }
+
+			::ui::control_ptr control() const override { return edit_; }
+
+		private:
+			bool key(const char32_t key, const ::platform::key_state keys) const
+			{
+				if (keys.alt) return false;
+				if (key == ::platform::keys::RETURN)
+				{
+					if (const auto accepted = options_.accepted) accepted();
+					return true;
 				}
-				return DefSubclassProc(hwnd, message, wp, lp);
+				if (key == ::platform::keys::ESCAPE)
+				{
+					if (const auto escaped = options_.escaped) escaped();
+					return true;
+				}
+				if (key == ::platform::keys::TAB)
+				{
+					if (const auto tabbed = options_.tabbed) tabbed(keys.shift);
+					return true;
+				}
+				return false;
 			}
 
 			TextInputOptions options_;
-			HWND parent_{}, hwnd_{};
+			::ui::edit_ptr edit_;
+			::ui::element_ptr field_;
+			FrameElementPtr element_;
 		};
 	}
 
@@ -1736,7 +1914,9 @@ namespace iw::platform
 
 	TextInputPtr create_text_input(const WindowFramePtr& owner, TextInputOptions options)
 	{
-		return std::make_shared<NativeTextInput>(owner, std::move(options));
+		auto input = std::make_shared<DrawnTextInput>(std::move(options));
+		input->attach(owner);
+		return input;
 	}
 
 	Runtime::Runtime(RuntimeMode mode) : mode_(mode)
@@ -1755,7 +1935,7 @@ namespace iw::platform
 	void show_error(std::wstring_view message, std::wstring_view title, const WindowFramePtr&)
 	{
 		::platform::message_box(nullptr, ::core::utf16_to_utf8(message), ::core::utf16_to_utf8(title),
-			{::platform::message_box_buttons::ok, ::platform::message_box_icon::error});
+		                        {::platform::message_box_buttons::ok, ::platform::message_box_icon::error});
 	}
 
 	void write_diagnostic(std::wstring_view text)
@@ -1789,9 +1969,18 @@ namespace iw::platform
 		return r;
 	}
 
-	bool has_sse2() { return imaging::has_sse2(); }
+	bool has_sse2()
+	{
+		return imaging::has_sse2();
+	}
 
-	bool has_avx2() { return imaging::has_avx2(); }
+	bool has_avx2()
+	{
+		return imaging::has_avx2();
+	}
 
-	void open_uri(std::wstring_view uri) { ::platform::open(::core::utf16_to_utf8(uri)); }
+	void open_uri(std::wstring_view uri)
+	{
+		::platform::open(::core::utf16_to_utf8(uri));
+	}
 }

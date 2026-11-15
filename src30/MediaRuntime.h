@@ -6,9 +6,10 @@
 #include "PlatformWin32.h"
 
 #include <mfapi.h>
-#include <mfplay.h>
+#include <mfidl.h>
 #include <mfreadwrite.h>
 #include <memory>
+#include <string>
 #include <string_view>
 #include <type_traits>
 
@@ -30,7 +31,6 @@ namespace iw::media::native
 		decltype(&::MFCreateMediaType) createMediaType{};
 		decltype(&::MFGetStrideForBitmapInfoHeader) getStride{};
 		decltype(&::MFCreateSourceReaderFromByteStream) createSourceReader{};
-		decltype(&::MFPCreateMediaPlayer) createPlayer{};
 
 	private:
 		struct ModuleCloser
@@ -40,18 +40,19 @@ namespace iw::media::native
 		using Module = std::unique_ptr<std::remove_pointer_t<HMODULE>, ModuleCloser>;
 		Module platform_;
 		Module reader_;
-		Module play_;
 	};
 
-	// The cache and each active reader/player hold shared ownership of the modules. No DLL is
+	// The cache and each active reader hold shared ownership of the modules. No DLL is
 	// unloaded while a media object or a matching MFStartup/MFShutdown pair can still use it.
 	std::shared_ptr<const Api> acquire();
 	std::wstring_view unavailable_message();
+	// Why a file did not play, for a result no more specific reason explains.
+	std::wstring playback_failure(HRESULT result);
 
 	namespace testing
 	{
 		// Suppresses new acquisitions on this thread only. Does not alter the process cache,
-		// an existing player, environment variables, installed DLLs or other worker threads.
+		// an open decoder, environment variables, installed DLLs or other worker threads.
 		class ScopedUnavailableBackend final
 		{
 		public:

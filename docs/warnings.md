@@ -1,43 +1,45 @@
 # Compiler warnings
 
-Compile the four WTL applications at `/W4` through `iw_flags`. Allow only these
-framework and language-mode suppressions:
+The four WTL applications compile at `/W4` through `iw_flags`, which allows only
+these framework and language-mode suppressions:
 
 - `C4100`, unused parameters in fixed WTL handler signatures;
-- `C4239`, legacy ATL temporary-reference binding accepted by `/permissive`;
-- `C4131`, old-style declarations in vendored BSD regex C sources;
-- `C4996`, while retained historical CRT calls are compiled deliberately.
+- `C4239`, the ATL temporary-reference binding that `/permissive` accepts;
+- `C4131`, old-style C declarations, which no current source needs;
+- `C4996`, the historical CRT calls compiled deliberately.
 
-Use `/permissive-`, `/W4` and no suppressions for ImageWalker 3.0.
-Apply that same policy to modern shared imaging sources. Limit the historical
-compatibility warning exceptions to their object source list, not their
-consumers.
+ImageWalker 3.0 and the modern shared imaging sources compile with
+`/permissive-`, `/W4` and no suppressions. Keep the historical exceptions on
+`iw_flags` and the legacy test sources that need them, and never extend them to
+3.0 or the modern imaging sources.
 
 ## Policy
 
-Conversions at Win32 boundaries use the target type named by the compiler.
-Pointer-sized values are not narrowed, and C sources keep C-compatible casts.
-Both Debug and Release are compiled during validation, so configuration-specific
-diagnostics stay visible.
+Fix a warning rather than suppressing it. Conversions at Win32 boundaries use
+the target type the compiler names, pointer-sized values are never narrowed,
+and C sources keep C-compatible casts. Pass explicit character pointers, not
+`CString` objects, to variadic functions, keep assignments out of conditions,
+and remove unused locals.
 
-`dd.ps1` preserves the raw build log and groups diagnostics by warning code and
-by source file, and prints that summary after every build. Header amplification
-is judged by unique source locations, not by the number of translation units
-repeating one diagnostic.
+Test JFIF density saturation, pixel-channel rounding, large quantizer moments
+and print-range narrowing at their boundaries.
+
+## clang-tidy
+
+`.clang-tidy` enables clang-tidy's bug-finding and performance checks, less
+those that flag idioms used deliberately. Check ImageWalker 3.0 and the modern
+shared code with it, never the preserved releases: configure a build tree with
+`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` and run Visual Studio's `clang-tidy`, in
+`VC\Tools\Llvm\x64\bin`, with `-p` on that tree. Fix each finding; a
+deliberate idiom keeps a `NOLINT` or `NOLINTNEXTLINE` comment that names the
+check and gives the reason.
 
 ## Validation
 
-Pass explicit character pointers rather than `CString` objects to variadic
-functions. Keep assignments out of conditions, remove unused locals, and fix
-conversion and shadowing warnings without adding suppressions.
-
-Test JFIF density saturation, pixel-channel rounding, large quantizer moments
-and print-range narrowing at their boundaries. Preserve exception unwinding
-in file-operation and worker recovery paths: use `/EHs` in the shared codec
-backend, whose callbacks unwind through C library frames, and `/EHsc` in the
-applications. Do not propagate the backend's compatibility flags to 3.0.
-
-Run `.\dd.ps1 test` and read its grouped diagnostic summary; incremental totals
-cover only the translation units rebuilt. Track follow-up work in
-[todo.md](todo.md), and use a full Debug and Release rebuild before claiming
-that a warning family is resolved.
+After every build `dd.ps1` keeps the raw build log and prints a summary of its
+diagnostics grouped by warning code and by source file. Judge header
+amplification by unique source locations, not by the number of translation
+units repeating one diagnostic. An incremental build reports only the
+translation units it rebuilt, so rebuild Debug and Release in full before
+calling a warning family resolved; `.\dd.ps1 test` compiles both, keeping
+configuration-specific diagnostics visible.

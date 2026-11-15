@@ -9,9 +9,9 @@ namespace iw::ui
 	class ResampleCache
 	{
 	public:
-		std::span<const std::uint32_t> resample(std::span<const std::uint32_t> sourcePixels,
-		                                        app::sizei sourceSize, SampleRect sourceRect,
-		                                        app::sizei destinationSize, std::uint64_t cacheToken = 0);
+		std::span<const std::uint32_t> resample(std::span<const std::uint32_t> sourcePixels, app::sizei sourceSize,
+		                                        SampleRect sourceRect, app::sizei destinationSize,
+		                                        std::uint64_t cacheToken = 0);
 		size_t hit_count() const { return hitCount_; }
 
 	private:

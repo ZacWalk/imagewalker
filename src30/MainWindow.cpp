@@ -51,7 +51,8 @@ namespace iw
 		platform::ChoiceDefinition confirmation;
 		confirmation.title = L"Undo file task";
 		confirmation.heading = L"Undo " + history.description() + L"?";
-		confirmation.message = L"Restore the previous file state for this task's completed changes. "
+		confirmation.message =
+			L"Restore the previous file state for this task's completed changes. "
 			L"Files changed outside ImageWalker are refused, not overwritten. Recovery copies remain on disk.";
 		confirmation.buttons = {{1, L"Undo"}, {2, L"Cancel"}};
 		confirmation.defaultButton = 2;
@@ -59,7 +60,8 @@ namespace iw
 		if (platform::show_choice(frame_, confirmation) != 1) return;
 
 		undo::Report report;
-		const bool processed = platform::run_with_status(frame_, L"Undo file task", L"Restoring previous file state...", [&]
+		const bool processed = platform::run_with_status(frame_, L"Undo file task", L"Restoring previous file state...",
+		                                                 [&]
 		{
 			report = history.undo();
 			return true;
@@ -71,7 +73,11 @@ namespace iw
 			std::error_code error;
 			if (std::filesystem::is_directory(files::native_path(refresh), error) && !error) break;
 			const auto parent = parent_folder(refresh);
-			if (!parent) { refresh.clear(); break; }
+			if (!parent)
+			{
+				refresh.clear();
+				break;
+			}
 			refresh = *parent;
 		}
 		if (!refresh.empty()) open_folder(refresh, false);
@@ -79,12 +85,13 @@ namespace iw
 		if (!processed)
 		{
 			platform::show_error(L"Undo stopped with an error. Check the refreshed files and recovery data in:\n" +
-				history.root().wstring(), L"Undo file task", frame_);
+			                         history.root().wstring(),
+			                     L"Undo file task", frame_);
 			return;
 		}
 		platform::write_diagnostic(L"Undo: " + report.summary() + L"\n");
-		statusText_ = std::format(L"Undo: {} paths restored, {} conflicts, {} failures.",
-			report.restored, report.conflicts, report.failed);
+		statusText_ = std::format(L"Undo: {} paths restored, {} conflicts, {} failures.", report.restored,
+		                          report.conflicts, report.failed);
 		update_status_surface();
 		platform::DialogDefinition results;
 		results.title = L"Undo results";
@@ -96,8 +103,7 @@ namespace iw
 		platform::show_modal_dialog(frame_, std::move(results));
 	}
 
-	bool MainWindow::create(const int showCommand,
-	                        const std::filesystem::path& initialPath)
+	bool MainWindow::create(const int showCommand, const std::filesystem::path& initialPath)
 	{
 		load_settings();
 		platform::WindowOptions options;
@@ -132,8 +138,8 @@ namespace iw
 			_wdupenv_s(&profile, &profileLength, L"USERPROFILE");
 			const auto pictures = std::filesystem::path(profile ? profile : L".") / L"Pictures";
 			free(profile);
-			open_folder(
-				std::filesystem::is_directory(pictures, error) ? pictures : std::filesystem::current_path(error));
+			open_folder(std::filesystem::is_directory(pictures, error) ? pictures
+			                                                           : std::filesystem::current_path(error));
 		}
 		return true;
 	}
@@ -146,10 +152,8 @@ namespace iw
 		switch (message)
 		{
 		case platform::WindowMessage::create: return on_create() ? 0 : -1;
-		case platform::WindowMessage::close: request_exit();
-			return 0;
-		case platform::WindowMessage::dpiChanged: update_dpi(frame_->dpi());
-			return 0;
+		case platform::WindowMessage::close: request_exit(); return 0;
+		case platform::WindowMessage::dpiChanged: update_dpi(frame_->dpi()); return 0;
 		case platform::WindowMessage::focusGained:
 			// The frame itself takes no keys; the active task or the canvas does.
 			if (task_ && task_->frame()) task_->frame()->set_focus();
@@ -172,8 +176,7 @@ namespace iw
 	}
 
 	platform::MessageResult MainWindow::mouse(const platform::WindowFramePtr& frame,
-	                                          const platform::MouseMessage message,
-	                                          const platform::MouseInput& input)
+	                                          const platform::MouseMessage message, const platform::MouseInput& input)
 	{
 		if (frame == treeSplitterFrame_)
 		{
@@ -220,12 +223,11 @@ namespace iw
 	void MainWindow::paint(const platform::WindowFramePtr& frame, platform::DrawContext& draw)
 	{
 		if (frame == treeSplitterFrame_)
-			draw.fill(frame->client_rect(), platform::calc_hande_color(
-				hoveringTreeSplitter_, draggingTreeSplitter_, false));
+			draw.fill(frame->client_rect(),
+			          platform::calc_hande_color(hoveringTreeSplitter_, draggingTreeSplitter_, false));
 	}
 
-	void MainWindow::size(const platform::WindowFramePtr& frame, const app::sizei,
-	                      platform::MeasureContext&)
+	void MainWindow::size(const platform::WindowFramePtr& frame, const app::sizei, platform::MeasureContext&)
 	{
 		if (frame == treeSplitterFrame_)
 		{
@@ -254,10 +256,8 @@ namespace iw
 		if (!contentFrame_ || !modeBar_->create(contentFrame_)) return false;
 		modeBar_->set_command_handler([this](const ModeBar::Button& button) { mode_bar_command(button); });
 		modeBar_->set_remove_handler([this](const ModeBar::Button& button) { remove_shortcut(button); });
-		shellTree_ = platform::create_shell_tree(contentFrame_, {
-			                                         [this](const auto& path) { open_folder(path, true, false); },
-			                                         [this] { open_folder(folder_, false); }
-		                                         });
+		shellTree_ = platform::create_shell_tree(contentFrame_, {[this](const auto& path)
+		{ open_folder(path, true, false); }, [this] { open_folder(folder_, false); }});
 		platform::WindowOptions splitterOptions;
 		splitterOptions.className = "ImageWalker30.TreeSplitter";
 		splitterOptions.child = true;
@@ -271,7 +271,7 @@ namespace iw
 		centerOptions.eraseBackground = false;
 		centerFrame_ = contentFrame_ ? contentFrame_->create_child({}, centerOptions) : nullptr;
 		if (!chrome_ || !contentFrame_ || !shellTree_ || !treeSplitterFrame_ || !centerFrame_ ||
-			!canvas_.create(centerFrame_))
+		    !canvas_.create(centerFrame_))
 			return false;
 		canvas_.set_dpi(dpi_);
 		canvas_.set_activation_handler([this](const auto& path) { activate_item(path); });
@@ -287,20 +287,16 @@ namespace iw
 			zoomMode_ = zoomed;
 			update_visibility();
 		});
-		canvas_.set_command_handlers({
-			[this] { set_fullscreen(true); },
-			[this] { set_fullscreen(false); },
-			[this]
-			{
-				canvas_.set_file_properties_visible(!canvas_.file_properties_visible());
-				update_fullscreen_menu_checks();
-			},
-			[this]
-			{
-				canvas_.set_thumbnail_selector_visible(!canvas_.thumbnail_selector_visible());
-				update_fullscreen_menu_checks();
-			}
-		});
+		canvas_.set_command_handlers({[this] { set_fullscreen(true); }, [this] { set_fullscreen(false); },
+		                              [this]
+		{
+			canvas_.set_file_properties_visible(!canvas_.file_properties_visible());
+			update_fullscreen_menu_checks();
+		}, [this]
+		{
+			canvas_.set_thumbnail_selector_visible(!canvas_.thumbnail_selector_visible());
+			update_fullscreen_menu_checks();
+		}});
 		canvas_.set_sort_handler([this](const files::SortField field, const bool ascending)
 		{
 			collection_.set_sort(field, ascending);
@@ -309,22 +305,18 @@ namespace iw
 		});
 		canvas_.set_context_menu_handler([this](const app::pointi point) { show_file_menu(point); });
 		canvas_.set_drop_handler([this](const std::vector<std::filesystem::path>& paths)
-		{
-			import_dropped_files(paths);
-		});
+		{ import_dropped_files(paths); });
 		canvas_.set_progress_handler([this](const size_t complete, const size_t total)
 		{
 			if (!task_) update_progress(complete, total);
 		});
 		canvas_.set_load_error_handler([this](const std::filesystem::path&)
 		{
-			platform::show_error(L"ImageWalker could not decode this image. The file may be damaged or unsupported.", L"ImageWalker 3.0",
-			                     frame_);
+			platform::show_error(L"ImageWalker could not decode this image. The file may be damaged or unsupported.",
+			                     L"ImageWalker 3.0", frame_);
 		});
 		canvas_.set_information_progress_handler([this](const size_t complete, const size_t total)
-		{
-			update_information_progress(complete, total);
-		});
+		{ update_information_progress(complete, total); });
 		canvas_.set_file_drag_handler([this](auto paths)
 		{
 			if (platform::begin_file_drag(frame_, paths)) open_folder(folder_, false);
@@ -391,8 +383,8 @@ namespace iw
 			const auto context = build_command_context();
 			return context.focus == FocusTarget::canvas && context.selectionCount == 1;
 		};
-		const auto command = [](std::wstring name, std::function<void()> invoke,
-		                        platform::Shortcut shortcut = {}, std::wstring tooltip = {},
+		const auto command = [](std::wstring name, std::function<void()> invoke, platform::Shortcut shortcut = {},
+		                        std::wstring tooltip = {},
 		                        const platform::CommandBitmap bitmap = platform::CommandBitmap::none,
 		                        std::function<bool()> enabled = {}, std::function<bool()> checked = {})
 		{
@@ -412,14 +404,14 @@ namespace iw
 		const auto exit = command(L"E&xit", [this] { request_exit(); });
 		const auto copy = command(L"&Copy", [this] { copy_selected(false); }, {c, true}, L"Copy", {},
 		                          canvasHasSelection);
-		const auto cut = command(L"Cu&t", [this] { copy_selected(true); }, {x, true}, L"Cut", {},
-		                         canvasHasSelection);
+		const auto cut = command(L"Cu&t", [this] { copy_selected(true); }, {x, true}, L"Cut", {}, canvasHasSelection);
 		const auto paste = command(L"&Paste", [this] { paste_files(); }, {v, true}, L"Paste", {}, [this]
 		{
 			const auto context = build_command_context();
 			return context.hasFolder && (context.clipboardHasFiles || context.clipboardHasImage);
 		});
-		const auto selectAll = command(L"Select &all", [this]
+		const auto selectAll = command(L"Select &all",
+		                               [this]
 		{
 			canvas_.select_all();
 			update_selection_status();
@@ -428,8 +420,7 @@ namespace iw
 			const auto context = build_command_context();
 			return context.focus == FocusTarget::canvas && context.hasFolder && !context.fullscreen;
 		});
-		const auto rename = command(L"&Rename", [this] { rename_selected(); }, {f2}, {}, {},
-		                            canvasHasOneSelection);
+		const auto rename = command(L"&Rename", [this] { rename_selected(); }, {f2}, {}, {}, canvasHasOneSelection);
 		const auto deleteItem = command(L"&Delete", [this] { delete_selected(); }, {deleteKey}, {}, {},
 		                                canvasHasSelection);
 		const auto refresh = command(L"&Refresh", [this] { open_folder(folder_, false); }, {f5}, L"Refresh",
@@ -452,15 +443,15 @@ namespace iw
 			update_visibility();
 			update_toolbar_state();
 		}, {}, {}, {}, {}, [this] { return showModeBar_; });
-		const auto details = command(L"&Details", [this] { set_view_mode(ViewMode::details); }, {}, L"Details",
-		                             platform::CommandBitmap::details, {},
-		                             [this] { return viewMode_ == ViewMode::details; });
+		const auto details = command(L"&Details", [this] {
+			set_view_mode(ViewMode::details);
+		}, {}, L"Details", platform::CommandBitmap::details, {}, [this] { return viewMode_ == ViewMode::details; });
 		const auto thumbnails = command(L"&Thumbnails", [this] { set_view_mode(ViewMode::thumbnails); }, {},
 		                                L"Thumbnails", platform::CommandBitmap::thumbnails, {},
 		                                [this] { return viewMode_ == ViewMode::thumbnails; });
-		const auto matrix = command(L"&Matrix", [this] { set_view_mode(ViewMode::matrix); }, {}, L"Matrix",
-		                            platform::CommandBitmap::matrix, {},
-		                            [this] { return viewMode_ == ViewMode::matrix; });
+		const auto matrix = command(L"&Matrix", [this] {
+			set_view_mode(ViewMode::matrix);
+		}, {}, L"Matrix", platform::CommandBitmap::matrix, {}, [this] { return viewMode_ == ViewMode::matrix; });
 		const auto fullscreenProperties = command(L"Full screen file &properties", [this]
 		{
 			canvas_.set_file_properties_visible(!canvas_.file_properties_visible());
@@ -475,26 +466,28 @@ namespace iw
 		{
 			collection_.set_photos_only(!collection_.photos_only());
 			apply_collection_view();
-		}, {}, L"Show photos only", platform::CommandBitmap::photosOnly, {},
-		   [this] { return collection_.photos_only(); });
+		}, {}, L"Show photos only", platform::CommandBitmap::photosOnly, {}, [this] {
+			return collection_.photos_only();
+		});
 		photosOnly->toolbarText = [this]
 		{
 			return std::format(L"{} images", collection_.photo_count());
 		};
 		const auto sortName = command(L"&Name", [this] { set_sort_field(files::SortField::name); }, {}, {}, {}, {},
 		                              [this] { return collection_.sort_field() == files::SortField::name; });
-		const auto sortModified = command(L"Date &modified", [this] { set_sort_field(files::SortField::modified); },
-		                                  {}, {}, {}, {},
-		                                  [this] { return collection_.sort_field() == files::SortField::modified; });
+		const auto sortModified = command(L"Date &modified", [this] {
+			set_sort_field(files::SortField::modified);
+		}, {}, {}, {}, {}, [this] { return collection_.sort_field() == files::SortField::modified; });
 		const auto sortType = command(L"&Type", [this] { set_sort_field(files::SortField::type); }, {}, {}, {}, {},
 		                              [this] { return collection_.sort_field() == files::SortField::type; });
 		const auto sortSize = command(L"&Size", [this] { set_sort_field(files::SortField::size); }, {}, {}, {}, {},
 		                              [this] { return collection_.sort_field() == files::SortField::size; });
-		const auto sortDimensions = command(L"&Dimensions", [this] { set_sort_field(files::SortField::dimensions); },
-		                                    {}, {}, {}, {},
-		                                    [this] { return collection_.sort_field() == files::SortField::dimensions; });
-		const auto sortDuration = command(L"D&uration", [this] { set_sort_field(files::SortField::duration); },
-			{}, {}, {}, {}, [this] { return collection_.sort_field() == files::SortField::duration; });
+		const auto sortDimensions = command(L"&Dimensions", [this] {
+			set_sort_field(files::SortField::dimensions);
+		}, {}, {}, {}, {}, [this] { return collection_.sort_field() == files::SortField::dimensions; });
+		const auto sortDuration = command(L"D&uration", [this] {
+			set_sort_field(files::SortField::duration);
+		}, {}, {}, {}, {}, [this] { return collection_.sort_field() == files::SortField::duration; });
 		const auto thumbnail64 = command(L"&Small (64 px)", [this] { set_thumbnail_size(64); }, {}, {}, {}, {},
 		                                 [this] { return thumbnailSize_ == 64; });
 		const auto thumbnail128 = command(L"&Medium (128 px)", [this] { set_thumbnail_size(128); }, {}, {}, {}, {},
@@ -503,38 +496,32 @@ namespace iw
 		                                  [this] { return thumbnailSize_ == 256; });
 		const auto options = command(L"&Options...", [this] { show_options(); }, {f6});
 		const auto undoCommand = command(L"&Undo", [this] { undo_last_action(); }, {z, true},
-			L"Undo the current photo draft or the last completed file task", platform::CommandBitmap::none,
-			[this] { return can_undo_last_action(); });
+		                                 L"Undo the current photo draft or the last completed file task",
+		                                 platform::CommandBitmap::none, [this] { return can_undo_last_action(); });
 		const auto convert = command(L"&Convert or Resize...", [this] { open_convert_task(); }, {}, {}, {},
 		                             [this] { return !task_active() && has_photo_selection(); });
 		const auto batchRename = command(L"&Batch Rename...", [this] { open_rename_task(); }, {f7}, {}, {},
-		                                 [this]
-		                                 {
-			                                 return !task_active() && canvas_.selection_count() > 0;
-		                                 });
+		                                 [this] { return !task_active() && canvas_.selection_count() > 0; });
 		const auto synchronize = command(L"&Synchronize...", [this] { open_sync_task(); }, {}, {}, {},
 		                                 [this] { return !task_active(); });
 		const auto editPhoto = command(L"&Edit photo", [this] { open_edit_task(); }, {f12}, {}, {},
 		                               [this] { return !task_active() && !editable_photo().empty(); });
-		const auto copyTo = command(L"Cop&y to folder...", [this] { copy_or_move_to_folder(false); },
-		                            {c, true, true}, {}, {}, canvasHasSelection);
-		const auto moveTo = command(L"&Move to folder...", [this] { copy_or_move_to_folder(true); },
-		                            {x, true, true}, {}, {}, canvasHasSelection);
-		const auto openWith = command(L"Open &with...", [this] { open_with_chooser(); },
-			{enterKey, true}, {}, {}, canvasHasSelection);
+		const auto copyTo = command(L"Cop&y to folder...", [this] { copy_or_move_to_folder(false); }, {c, true, true},
+		                            {}, {}, canvasHasSelection);
+		const auto moveTo = command(L"&Move to folder...", [this] { copy_or_move_to_folder(true); }, {x, true, true},
+		                            {}, {}, canvasHasSelection);
+		const auto openWith = command(L"Open &with...", [this] { open_with_chooser(); }, {enterKey, true}, {}, {},
+		                              canvasHasSelection);
 		const auto openWithMenu = command(L"Open with apps and tools", [this]
-		{
-			show_open_with_menu(frame_->client_to_screen({0, 0}));
-		}, {}, {}, {}, canvasHasSelection);
-		const auto back = command(L"Back", [this] { navigate_history(-1); }, {}, L"Back",
-		                          platform::CommandBitmap::back, [this] { return history_.can_go_back(); });
+		{ show_open_with_menu(frame_->client_to_screen({0, 0})); }, {}, {}, {}, canvasHasSelection);
+		const auto back = command(L"Back", [this] { navigate_history(-1); }, {}, L"Back", platform::CommandBitmap::back,
+		                          [this] { return history_.can_go_back(); });
 		const auto forward = command(L"Forward", [this] { navigate_history(1); }, {}, L"Forward",
 		                             platform::CommandBitmap::forward, [this] { return history_.can_go_forward(); });
 		const auto up = command(L"Up one level", [this]
 		{
 			if (const auto parent = parent_folder(folder_)) open_folder(*parent);
-		}, {}, L"Up one level", platform::CommandBitmap::parent,
-		   [this] { return parent_folder(folder_).has_value(); });
+		}, {}, L"Up one level", platform::CommandBitmap::parent, [this] { return parent_folder(folder_).has_value(); });
 		const auto openFolder = command(L"Open folder", [this] { open_folder_picker(); }, {}, L"Open folder",
 		                                platform::CommandBitmap::openFolder);
 		const auto userGuide = command(L"&User guide", [this] { platform::show_help(frame_); }, {f1});
@@ -560,11 +547,13 @@ namespace iw
 			default: return std::wstring(L"By dimensions");
 			}
 		};
+		// clang-format off
 		for (const auto& item : {
 			open, copy, cut, paste, selectAll, rename, deleteItem, refresh, fit, zoomIn, zoomOut,
 			details, thumbnails, matrix, fullscreenProperties, fullscreenThumbnails, photosOnly,
 			sortName, sortModified, sortType, sortSize, sortDimensions, sortDuration, thumbnail64, thumbnail128,
 			thumbnail256, copyTo, moveTo, openWith, openWithMenu, back, forward, up, openFolder, sortMenu})
+		// clang-format on
 		{
 			item->enabled = [this, enabled = item->enabled]
 			{
@@ -572,67 +561,41 @@ namespace iw
 			};
 		}
 		using platform::MenuItem;
-		const std::vector sortItems{
-			MenuItem::action(sortName), MenuItem::action(sortModified),
-			MenuItem::action(sortType), MenuItem::action(sortSize),
-			MenuItem::action(sortDimensions), MenuItem::action(sortDuration)
-		};
-		chrome_->set_menu({
-			{
-				L"&File", {
-					MenuItem::action(open), MenuItem::action(openWith), MenuItem::action(openWithMenu),
-					MenuItem::separator(),
-					MenuItem::action(copyTo), MenuItem::action(moveTo), MenuItem::separator(),
-					MenuItem::action(exit)
-				}
-			},
-			{
-				L"&Edit", {
-					MenuItem::action(undoCommand), MenuItem::separator(),
-					MenuItem::action(copy), MenuItem::action(cut), MenuItem::action(paste),
-					MenuItem::separator(), MenuItem::action(selectAll), MenuItem::action(rename),
-					MenuItem::action(deleteItem)
-				}
-			},
-			{
-				L"&View", {
-					MenuItem::action(refresh), MenuItem::action(fit), MenuItem::action(zoomIn),
-					MenuItem::action(zoomOut), MenuItem::separator(), MenuItem::action(tree),
-					MenuItem::action(modeStrip),
-					MenuItem::separator(), MenuItem::action(details), MenuItem::action(thumbnails),
-					MenuItem::action(matrix), MenuItem::separator(),
-					MenuItem::action(fullscreenProperties), MenuItem::action(fullscreenThumbnails),
-					MenuItem::action(photosOnly),
-					MenuItem::submenu(L"S&ort by", sortItems),
-					MenuItem::submenu(L"Thumbnail si&ze", {
-						                  MenuItem::action(thumbnail64), MenuItem::action(thumbnail128),
-						                  MenuItem::action(thumbnail256)
-					                  }),
-					MenuItem::separator(), MenuItem::action(options)
-				}
-			},
-			{
-				L"&Tools", {
-					MenuItem::action(editPhoto), MenuItem::separator(),
-					MenuItem::action(convert), MenuItem::action(batchRename), MenuItem::separator(),
-					MenuItem::action(synchronize)
-				}
-			},
-			{L"&Help", {MenuItem::action(userGuide), MenuItem::action(toolConfiguration),
-				MenuItem::separator(), MenuItem::action(about)}}
-		});		chrome_->set_toolbar({
-			platform::ToolbarItem::action(back), platform::ToolbarItem::action(forward),
-			platform::ToolbarItem::action(up), platform::ToolbarItem::action(refresh),
-			platform::ToolbarItem::action(tree), platform::ToolbarItem::action(openFolder),
-			platform::ToolbarItem::action(about)
-		});
-		chrome_->set_status_toolbar({
-			platform::ToolbarItem::action(photosOnly),
-			platform::ToolbarItem::menu(sortMenu, sortItems),
-			platform::ToolbarItem::separator(),
-			platform::ToolbarItem::action(details), platform::ToolbarItem::action(thumbnails),
-			platform::ToolbarItem::action(matrix)
-		});
+		const std::vector sortItems{MenuItem::action(sortName),       MenuItem::action(sortModified),
+		                            MenuItem::action(sortType),       MenuItem::action(sortSize),
+		                            MenuItem::action(sortDimensions), MenuItem::action(sortDuration)};
+		chrome_->set_menu(
+			{{L"&File",
+		      {MenuItem::action(open), MenuItem::action(openWith), MenuItem::action(openWithMenu),
+		       MenuItem::separator(), MenuItem::action(copyTo), MenuItem::action(moveTo), MenuItem::separator(),
+		       MenuItem::action(exit)}},
+		     {L"&Edit",
+		      {MenuItem::action(undoCommand), MenuItem::separator(), MenuItem::action(copy), MenuItem::action(cut),
+		       MenuItem::action(paste), MenuItem::separator(), MenuItem::action(selectAll), MenuItem::action(rename),
+		       MenuItem::action(deleteItem)}},
+		     {L"&View",
+		      {MenuItem::action(refresh), MenuItem::action(fit), MenuItem::action(zoomIn), MenuItem::action(zoomOut),
+		       MenuItem::separator(), MenuItem::action(tree), MenuItem::action(modeStrip), MenuItem::separator(),
+		       MenuItem::action(details), MenuItem::action(thumbnails), MenuItem::action(matrix), MenuItem::separator(),
+		       MenuItem::action(fullscreenProperties), MenuItem::action(fullscreenThumbnails),
+		       MenuItem::action(photosOnly), MenuItem::submenu(L"S&ort by", sortItems),
+		       MenuItem::submenu(L"Thumbnail si&ze", {MenuItem::action(thumbnail64), MenuItem::action(thumbnail128),
+		                                              MenuItem::action(thumbnail256)}),
+		       MenuItem::separator(), MenuItem::action(options)}},
+		     {L"&Tools",
+		      {MenuItem::action(editPhoto), MenuItem::separator(), MenuItem::action(convert),
+		       MenuItem::action(batchRename), MenuItem::separator(), MenuItem::action(synchronize)}},
+		     {L"&Help",
+		      {MenuItem::action(userGuide), MenuItem::action(toolConfiguration), MenuItem::separator(),
+		       MenuItem::action(about)}}});
+		chrome_->set_toolbar({platform::ToolbarItem::action(back), platform::ToolbarItem::action(forward),
+		                      platform::ToolbarItem::action(up), platform::ToolbarItem::action(refresh),
+		                      platform::ToolbarItem::action(tree), platform::ToolbarItem::action(openFolder),
+		                      platform::ToolbarItem::action(about)});
+		chrome_->set_status_toolbar({platform::ToolbarItem::action(photosOnly),
+		                             platform::ToolbarItem::menu(sortMenu, sortItems),
+		                             platform::ToolbarItem::separator(), platform::ToolbarItem::action(details),
+		                             platform::ToolbarItem::action(thumbnails), platform::ToolbarItem::action(matrix)});
 		chrome_->set_thumbnail_size(thumbnailSize_, [this](const int size) { set_thumbnail_size(size); });
 		chrome_->set_dpi(dpi_);
 	}
@@ -658,8 +621,8 @@ namespace iw
 		const int maximumTreeWidth = (std::max)(0, available - scale_metric(260) - splitterWidth);
 		const int minimumTreeWidth = (std::min)(scale_metric(140), maximumTreeWidth);
 		const int treeWidth = showTreePane
-			                      ? std::clamp(scale_metric(folderTreeWidth_), minimumTreeWidth, maximumTreeWidth)
-			                      : 0;
+		                          ? std::clamp(scale_metric(folderTreeWidth_), minimumTreeWidth, maximumTreeWidth)
+		                          : 0;
 		const int centerLeft = modeWidth + treeWidth + splitterWidth;
 		if (shellTree_) shellTree_->set_bounds({modeWidth, 0, treeWidth, paneHeight});
 		treeSplitterFrame_->move({modeWidth + treeWidth, 0, splitterWidth, paneHeight});
@@ -669,9 +632,9 @@ namespace iw
 		if (task_) update_toolbar_state();
 	}
 
-	bool MainWindow::open_folder(const std::filesystem::path& path, const bool addHistory,
-	                             const bool synchronizeTree)
+	bool MainWindow::open_folder(const std::filesystem::path& path, const bool addHistory, const bool synchronizeTree)
 	{
+		// NOLINTNEXTLINE(performance-unnecessary-copy-initialization): path may alias state that close_task() changes.
 		const auto requested = path;
 		if (task_ && (addHistory || !paths::equal(requested, folder_)) && !close_task()) return false;
 		std::error_code error;
@@ -711,18 +674,18 @@ namespace iw
 			auto items = files::scan_folder_items(folder, cancellation.get_token(),
 			                                      [this, weak, generation, &cancellation](const size_t entries,
 			                                                                              const size_t images)
-			                                      {
-				                                      if (generation != folderScanGeneration_)
-				                                      {
-					                                      cancellation.request_stop();
-					                                      return;
-				                                      }
-				                                      platform::queue_ui([weak, generation, entries, images]
-				                                      {
-					                                      if (const auto self = weak.lock())
-						                                      self->report_scan_progress(generation, entries, images);
-				                                      });
-			                                      }, &scanError);
+			{
+				if (generation != folderScanGeneration_)
+				{
+					cancellation.request_stop();
+					return;
+				}
+				platform::queue_ui([weak, generation, entries, images]
+				{
+					if (const auto self = weak.lock()) self->report_scan_progress(generation, entries, images);
+				});
+			},
+			                                      &scanError);
 			if (cancellation.stop_requested()) return;
 			platform::queue_ui([weak, generation, folder, scanError, items = std::move(items)]() mutable
 			{
@@ -821,7 +784,8 @@ namespace iw
 		};
 		const auto weak = weak_from_this();
 		// Small chunks on the metadata queue let a selection's properties interleave with the probe.
-		platform::queue_work(platform::WorkQueue::metadata, [weak, generation, paths = std::move(paths), offset]() mutable
+		platform::queue_work(platform::WorkQueue::metadata,
+		                     [weak, generation, paths = std::move(paths), offset]() mutable
 		{
 			constexpr size_t chunk = 16;
 			const size_t end = (std::min)(offset + chunk, paths.size());
@@ -833,7 +797,9 @@ namespace iw
 				{
 					if (files::read_dimensions(paths[index], width, height)) found.push_back({index, width, height});
 				}
-				catch (...) {}
+				catch (...)
+				{
+				}
 			}
 			platform::queue_ui([weak, generation, paths = std::move(paths), end, found = std::move(found)]() mutable
 			{
@@ -864,11 +830,9 @@ namespace iw
 		context.hasFolder = !folder_.empty();
 		context.fullscreen = fullscreen_;
 		context.taskActive = task_ != nullptr;
-		context.focus = canvas_.frame() && canvas_.frame()->has_focus()
-			                ? FocusTarget::canvas
-			                : shellTree_ && shellTree_->has_focus()
-			                ? FocusTarget::tree
-			                : FocusTarget::none;
+		context.focus = canvas_.frame() && canvas_.frame()->has_focus() ? FocusTarget::canvas
+		                : shellTree_ && shellTree_->has_focus()         ? FocusTarget::tree
+		                                                                : FocusTarget::none;
 		// A task owns the surface, so nothing that acts on the Items selection may fire under it.
 		if (context.taskActive) context.selectionCount = 0;
 		return context;
@@ -916,12 +880,11 @@ namespace iw
 
 	void MainWindow::open_file_picker()
 	{
-		const auto path = platform::choose_open_file(frame_, {
-			                                             L"Images, video and audio",
-			                                             L"*.bmp;*.dib;*.gif;*.ico;*.jpg;*.jpeg;*.png;*.tif;*.tiff;*.wdp;*.webp;"
-			                                             L"*.avi;*.m4v;*.mkv;*.mov;*.mp4;*.mpeg;*.mpg;*.wmv;*.webm;*.mts;*.m2ts;*.asf;*.3gp;*.3g2;*.ts;"
-			                                             L"*.aac;*.flac;*.m4a;*.mp3;*.ogg;*.wav;*.wma;*.opus;*.aif;*.aiff"
-		                                             });
+		const auto path = platform::choose_open_file(
+			frame_, {L"Images, video and audio",
+		             L"*.bmp;*.dib;*.gif;*.ico;*.jpg;*.jpeg;*.png;*.tif;*.tiff;*.wdp;*.webp;"
+		             L"*.avi;*.m4v;*.mkv;*.mov;*.mp4;*.mpeg;*.mpg;*.wmv;*.webm;*.mts;*.m2ts;*.asf;*.3gp;*.3g2;*.ts;"
+		             L"*.aac;*.flac;*.m4a;*.mp3;*.ogg;*.wav;*.wma;*.opus;*.aif;*.aiff"});
 		if (!path) return;
 		if (open_folder(path->parent_path())) open_image(*path);
 	}
@@ -938,12 +901,18 @@ namespace iw
 		website.id = 1;
 		website.kind = platform::DialogFieldKind::action;
 		website.label = L"&Visit https://imagewalker.com/";
-		website.invoke = [] { platform::open_uri(L"https://imagewalker.com/"); };
+		website.invoke = []
+		{
+			platform::open_uri(L"https://imagewalker.com/");
+		};
 		platform::DialogField song;
 		song.id = 2;
 		song.kind = platform::DialogFieldKind::action;
 		song.label = L"&Theme song: \"Ordinary\" by Alex Warren";
-		song.invoke = [] { platform::open_uri(L"https://www.youtube.com/watch?v=u2ah9tWTkmk"); };
+		song.invoke = []
+		{
+			platform::open_uri(L"https://www.youtube.com/watch?v=u2ah9tWTkmk");
+		};
 		platform::DialogDefinition definition;
 		definition.title = L"About ImageWalker";
 		definition.message =
@@ -967,8 +936,7 @@ namespace iw
 			current /= component;
 			breadcrumbParts_.push_back({current, component.wstring()});
 		}
-		if (chrome_)
-			chrome_->set_breadcrumbs(breadcrumbParts_, [this](const auto& path) { open_folder(path); });
+		if (chrome_) chrome_->set_breadcrumbs(breadcrumbParts_, [this](const auto& path) { open_folder(path); });
 		update_toolbar_state();
 	}
 
@@ -1028,8 +996,8 @@ namespace iw
 		{
 			const auto found = values.find(dialogPasteImageFormat);
 			return found != values.end() && std::get_if<std::int64_t>(&found->second)
-				       ? std::nullopt
-				       : std::optional<std::wstring>(L"Select an image format.");
+			           ? std::nullopt
+			           : std::optional<std::wstring>(L"Select an image format.");
 		};
 		const auto values = platform::show_modal_dialog(frame_, std::move(definition));
 		if (!values) return;
@@ -1053,11 +1021,9 @@ namespace iw
 	void MainWindow::set_view_mode(const ViewMode mode)
 	{
 		viewMode_ = mode;
-		const auto canvasMode = mode == ViewMode::details
-			                        ? ImageCanvas::ItemMode::details
-			                        : mode == ViewMode::thumbnails
-			                        ? ImageCanvas::ItemMode::thumbnails
-			                        : ImageCanvas::ItemMode::matrix;
+		const auto canvasMode = mode == ViewMode::details      ? ImageCanvas::ItemMode::details
+		                        : mode == ViewMode::thumbnails ? ImageCanvas::ItemMode::thumbnails
+		                                                       : ImageCanvas::ItemMode::matrix;
 		canvas_.set_mode(canvasMode);
 		if (chrome_) chrome_->refresh();
 		layout_center();
@@ -1082,7 +1048,7 @@ namespace iw
 		{
 			const auto message = collection_.load_error().message();
 			statusText_ = std::format(L"Could not read {}: {}", folder_.wstring(),
-				std::wstring(message.begin(), message.end()));
+			                          std::wstring(message.begin(), message.end()));
 			update_status_surface();
 			return;
 		}
@@ -1096,9 +1062,8 @@ namespace iw
 			else if (item.kind == files::ItemKind::folder) ++folders;
 		}
 		const size_t otherFiles = collection_.visible_items().size() - images - folders;
-		statusText_ = selected
-			              ? format::selection_count(selected, images, folders, otherFiles)
-			              : format::item_count(images, folders, otherFiles);
+		statusText_ = selected ? format::selection_count(selected, images, folders, otherFiles)
+		                       : format::item_count(images, folders, otherFiles);
 		update_status_surface();
 	}
 
@@ -1123,11 +1088,11 @@ namespace iw
 		savedSplitterPosition_ = read(L"SplitterPosition", -1);
 		const int savedViewMode = read(L"ViewMode", 1);
 		viewMode_ = savedViewMode >= 0 && savedViewMode <= static_cast<int>(ViewMode::matrix)
-			            ? static_cast<ViewMode>(savedViewMode)
-			            : ViewMode::thumbnails;
+		                ? static_cast<ViewMode>(savedViewMode)
+		                : ViewMode::thumbnails;
 		thumbnailSize_ = std::clamp(read(L"ThumbnailSize", 128), 64, 256);
-		pasteImageFormat_ = static_cast<files::ImageSaveFormat>(std::clamp(read(L"PasteImageFormat", 0), 0,
-			static_cast<int>(files::ImageSaveFormat::webp)));
+		pasteImageFormat_ = static_cast<files::ImageSaveFormat>(
+			std::clamp(read(L"PasteImageFormat", 0), 0, static_cast<int>(files::ImageSaveFormat::webp)));
 		collection_.set_photos_only(read(L"PhotosOnly", 1) != 0);
 		collection_.set_sort_field(static_cast<files::SortField>(std::clamp(read(L"SortField", 0), 0, 5)));
 		showModeBar_ = read(L"ShowModeBar", 1) != 0;
@@ -1139,24 +1104,23 @@ namespace iw
 	{
 		if (!frame_) return;
 		const auto placement = frame_->placement();
-		const std::array values{
-			platform::IntegerSetting{L"WindowLeft", placement.normalBounds.x},
-			platform::IntegerSetting{L"WindowTop", placement.normalBounds.y},
-			platform::IntegerSetting{L"WindowWidth", placement.normalBounds.width},
-			platform::IntegerSetting{L"WindowHeight", placement.normalBounds.height},
-			platform::IntegerSetting{L"Maximized", placement.maximized},
-			platform::IntegerSetting{L"ShowFolderTree", showTree_},
-			platform::IntegerSetting{L"FolderTreeWidth", folderTreeWidth_},
-			platform::IntegerSetting{L"FitImage", canvas_.fit()},
-			platform::IntegerSetting{L"ViewMode", static_cast<int>(viewMode_)},
-			platform::IntegerSetting{L"ThumbnailSize", thumbnailSize_},
-			platform::IntegerSetting{L"PasteImageFormat", static_cast<int>(pasteImageFormat_)},
-			platform::IntegerSetting{L"PhotosOnly", collection_.photos_only()},
-			platform::IntegerSetting{L"SortField", static_cast<int>(collection_.sort_field())},
-			platform::IntegerSetting{L"SplitterPosition", canvas_.splitter_position()},
-			platform::IntegerSetting{L"ShowModeBar", showModeBar_},
-			platform::IntegerSetting{L"OpenDestinationAfterTransfer", openDestinationAfterTransfer_}
-		};
+		const std::array values{platform::IntegerSetting{L"WindowLeft", placement.normalBounds.x},
+		                        platform::IntegerSetting{L"WindowTop", placement.normalBounds.y},
+		                        platform::IntegerSetting{L"WindowWidth", placement.normalBounds.width},
+		                        platform::IntegerSetting{L"WindowHeight", placement.normalBounds.height},
+		                        platform::IntegerSetting{L"Maximized", placement.maximized},
+		                        platform::IntegerSetting{L"ShowFolderTree", showTree_},
+		                        platform::IntegerSetting{L"FolderTreeWidth", folderTreeWidth_},
+		                        platform::IntegerSetting{L"FitImage", canvas_.fit()},
+		                        platform::IntegerSetting{L"ViewMode", static_cast<int>(viewMode_)},
+		                        platform::IntegerSetting{L"ThumbnailSize", thumbnailSize_},
+		                        platform::IntegerSetting{L"PasteImageFormat", static_cast<int>(pasteImageFormat_)},
+		                        platform::IntegerSetting{L"PhotosOnly", collection_.photos_only()},
+		                        platform::IntegerSetting{L"SortField", static_cast<int>(collection_.sort_field())},
+		                        platform::IntegerSetting{L"SplitterPosition", canvas_.splitter_position()},
+		                        platform::IntegerSetting{L"ShowModeBar", showModeBar_},
+		                        platform::IntegerSetting{L"OpenDestinationAfterTransfer",
+		                                                 openDestinationAfterTransfer_}};
 		platform::write_integer_settings(L"ImageWalker30", values);
 		const std::array text{platform::TextSetting{L"LastTransferFolder", lastTransferFolder_}};
 		platform::write_text_settings(L"ImageWalker30", text);

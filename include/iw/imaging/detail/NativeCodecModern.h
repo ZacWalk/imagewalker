@@ -11,15 +11,19 @@
 #include <string_view>
 #include <cstdint>
 
-namespace iw::imaging { struct DecodeOptions; struct DecodeResult; }
+namespace iw::imaging
+{
+	struct DecodeOptions;
+	struct DecodeResult;
+}
 
 namespace iw::imaging::detail
 {
 	bool modern_native_supports_extension(std::wstring_view extension);
 	bool modern_is_preview_only(std::wstring_view extension);
 	DecodeResult modern_decode_native(const std::filesystem::path& path, const DecodeOptions& options);
-	DecodeResult modern_decode_native(std::span<const std::uint8_t> bytes,
-	                                 std::wstring_view extension, const DecodeOptions& options);
+	DecodeResult modern_decode_native(std::span<const std::uint8_t> bytes, std::wstring_view extension,
+	                                  const DecodeOptions& options);
 	bool modern_native_dimensions(const std::filesystem::path& path, int& width, int& height);
 }
 
@@ -60,23 +64,20 @@ namespace iw::imaging::detail
 			if (narrow.empty()) return {};
 			const auto type = libfiles::file_type_from_extension(narrow);
 			const auto format = libfiles::info(type).image;
-			return format == libfiles::image_format::unknown ? std::nullopt :
-				std::optional{format};
+			return format == libfiles::image_format::unknown ? std::nullopt : std::optional{format};
 		}
 
 		inline libfiles::image_format identify_format(libfiles::reader& input, const std::wstring_view extension)
 		{
 			const auto scanned = libfiles::scan(input);
 			if (scanned.format != libfiles::image_format::unknown) return scanned.format;
-			if (const auto by_extension = format_from_extension(extension))
-				return *by_extension;
+			if (const auto by_extension = format_from_extension(extension)) return *by_extension;
 			return libfiles::image_format::unknown;
 		}
 
 		inline bool cancelled(const DecodeOptions& options)
 		{
-			return options.stop.stop_requested() ||
-				(options.cancelled && options.cancelled());
+			return options.stop.stop_requested() || (options.cancelled && options.cancelled());
 		}
 
 		class BgraSink final : public libfiles::image_sink
@@ -97,7 +98,7 @@ namespace iw::imaging::detail
 			{
 				frame = value;
 				if (value.width == 0 || value.height == 0 ||
-					static_cast<std::uint64_t>(value.width) * value.height > options_.maximumBytes / 4)
+				    static_cast<std::uint64_t>(value.width) * value.height > options_.maximumBytes / 4)
 					return {};
 				try
 				{
@@ -112,7 +113,7 @@ namespace iw::imaging::detail
 					return {};
 				}
 				return {reinterpret_cast<std::uint8_t*>(image.pixels.data()),
-					static_cast<std::size_t>(value.width) * sizeof(std::uint32_t)};
+				        static_cast<std::size_t>(value.width) * sizeof(std::uint32_t)};
 			}
 
 			bool cancelled() override { return native_codec_detail::cancelled(options_); }
@@ -121,8 +122,8 @@ namespace iw::imaging::detail
 			const DecodeOptions& options_;
 		};
 
-		inline DecodeResult map_decode_result(const libfiles::decode_result& decoded,
-		                              BgraSink& sink, const DecodeOptions& options)
+		inline DecodeResult map_decode_result(const libfiles::decode_result& decoded, BgraSink& sink,
+		                                      const DecodeOptions& options)
 		{
 			DecodeResult result;
 			result.orientation = decoded.frame.orientation;
@@ -153,11 +154,9 @@ namespace iw::imaging::detail
 				if (result.message.empty()) result.message = L"The image could not be decoded.";
 				return result;
 			}
-			for (const auto& warning : decoded.warnings)
-				result.warnings.emplace_back(warning.begin(), warning.end());
-			if (options.applyOrientation && !decoded.frame.transformed &&
-				result.orientation >= 2 && result.orientation <= 8 &&
-				!orient_upright(result.image, result.orientation))
+			for (const auto& warning : decoded.warnings) result.warnings.emplace_back(warning.begin(), warning.end());
+			if (options.applyOrientation && !decoded.frame.transformed && result.orientation >= 2 &&
+			    result.orientation <= 8 && !orient_upright(result.image, result.orientation))
 			{
 				result.image = {};
 				result.error = ImageError::read_failed;
@@ -165,13 +164,13 @@ namespace iw::imaging::detail
 				return result;
 			}
 			result.reduced = result.image.width != result.image.originalWidth ||
-				result.image.height != result.image.originalHeight;
+			                 result.image.height != result.image.originalHeight;
 			if (options.progress) options.progress(result.image.height, result.image.height);
 			return result;
 		}
 
 		inline DecodeResult decode_reader(libfiles::reader& input, const std::wstring_view extension,
-		                           const DecodeOptions& options)
+		                                  const DecodeOptions& options)
 		{
 			DecodeResult result;
 			if (cancelled(options))
@@ -181,7 +180,7 @@ namespace iw::imaging::detail
 				return result;
 			}
 			if (options.maximumBytes == 0 || options.maximumWidth < 0 || options.maximumHeight < 0 ||
-				(options.thumbnail && (options.maximumWidth == 0 || options.maximumHeight == 0)))
+			    (options.thumbnail && (options.maximumWidth == 0 || options.maximumHeight == 0)))
 			{
 				result.error = ImageError::invalid_input;
 				result.message = L"Invalid image decode request.";
@@ -190,11 +189,10 @@ namespace iw::imaging::detail
 
 			const auto scanned = libfiles::scan(input);
 			const auto format = scanned.format != libfiles::image_format::unknown
-				? scanned.format
-				: format_from_extension(extension).value_or(
-					libfiles::image_format::unknown);
+			                        ? scanned.format
+			                        : format_from_extension(extension).value_or(libfiles::image_format::unknown);
 			if (format == libfiles::image_format::unknown ||
-				(!libfiles::can_decode(format) && !libfiles::can_decode_document(format)))
+			    (!libfiles::can_decode(format) && !libfiles::can_decode_document(format)))
 			{
 				result.error = ImageError::unsupported;
 				result.message = L"No native-storage decoder recognizes this image.";
@@ -212,17 +210,20 @@ namespace iw::imaging::detail
 				decode_options.source_format = format;
 				const auto decoded = libfiles::decode(input, sink, decode_options);
 				result = map_decode_result(decoded, sink, options);
-				if (!result && decoded.error.empty() && decoded.refused)
-					result.error = ImageError::resource_limit;
+				if (!result && decoded.error.empty() && decoded.refused) result.error = ImageError::resource_limit;
 				return result;
 			}
 
 			libfiles::document_options document_options;
 			document_options.thumbnail_width = options.thumbnail ? static_cast<std::uint32_t>(options.maximumWidth) : 0;
-			document_options.thumbnail_height = options.thumbnail ? static_cast<std::uint32_t>(options.maximumHeight) : 0;
+			document_options.thumbnail_height = options.thumbnail ? static_cast<std::uint32_t>(options.maximumHeight)
+			                                                      : 0;
 			document_options.maximum_working_bytes = options.maximumBytes;
 			document_options.maximum_retained_bytes = options.maximumBytes;
-			document_options.cancelled = [&options] { return cancelled(options); };
+			document_options.cancelled = [&options]
+			{
+				return cancelled(options);
+			};
 			document_options.progress = [&options](const std::uint32_t current, const std::uint32_t total)
 			{
 				if (options.progress) options.progress(current, total);
@@ -258,14 +259,11 @@ namespace iw::imaging::detail
 			result.image.width = static_cast<int>(frame.width);
 			result.image.height = static_cast<int>(frame.height);
 			result.orientation = scanned.orientation.value_or(1);
-			result.image.originalWidth = scanned.width
-				? static_cast<int>(scanned.width) : result.image.width;
-			result.image.originalHeight = scanned.height
-				? static_cast<int>(scanned.height) : result.image.height;
+			result.image.originalWidth = scanned.width ? static_cast<int>(scanned.width) : result.image.width;
+			result.image.originalHeight = scanned.height ? static_cast<int>(scanned.height) : result.image.height;
 			result.image.pixels.resize(static_cast<std::size_t>(frame.width) * frame.height);
 			libfiles::copy_bgra(frame.rows(), result.image.pixels, frame.width, false);
-			if (options.applyOrientation && result.orientation >= 2 &&
-				result.orientation <= 8)
+			if (options.applyOrientation && result.orientation >= 2 && result.orientation <= 8)
 			{
 				if (!orient_upright(result.image, result.orientation))
 				{
@@ -276,19 +274,19 @@ namespace iw::imaging::detail
 				}
 				result.orientation = 1;
 				if (result.image.originalWidth != result.image.width ||
-					result.image.originalHeight != result.image.height)
+				    result.image.originalHeight != result.image.height)
 				{
 					// orient_upright swaps the stored original dimensions for
 					// sideways EXIF values; keep the logical upright source size.
 					if (result.image.originalWidth == static_cast<int>(scanned.width) &&
-						result.image.originalHeight == static_cast<int>(scanned.height))
+					    result.image.originalHeight == static_cast<int>(scanned.height))
 						std::swap(result.image.originalWidth, result.image.originalHeight);
 				}
 			}
 			else if (result.orientation >= 5 && result.orientation <= 8)
 				std::swap(result.image.originalWidth, result.image.originalHeight);
 			result.reduced = result.image.width != result.image.originalWidth ||
-				result.image.height != result.image.originalHeight;
+			                 result.image.height != result.image.originalHeight;
 			return result;
 		}
 	}
@@ -304,15 +302,13 @@ namespace iw::imaging::detail
 	{
 		using namespace native_codec_detail;
 		std::wstring lower(extension);
-		std::ranges::transform(lower, lower.begin(), [](const wchar_t value)
-		{
-			return static_cast<wchar_t>(std::towlower(value));
-		});
+		std::ranges::transform(lower, lower.begin(),
+		                       [](const wchar_t value) { return static_cast<wchar_t>(std::towlower(value)); });
 		return lower == L".ppt" || lower == L".pps" || lower == L".vsd";
 	}
 
 	inline DecodeResult modern_decode_native(const std::span<const std::uint8_t> bytes,
-	                                  const std::wstring_view extension, const DecodeOptions& options)
+	                                         const std::wstring_view extension, const DecodeOptions& options)
 	{
 		using namespace native_codec_detail;
 		if (bytes.empty() || bytes.size() > INT_MAX)
@@ -351,8 +347,7 @@ namespace iw::imaging::detail
 		if (scanned.width == 0 || scanned.height == 0) return false;
 		width = static_cast<int>(scanned.width);
 		height = static_cast<int>(scanned.height);
-		if (scanned.orientation && *scanned.orientation >= 5 && *scanned.orientation <= 8)
-			std::swap(width, height);
+		if (scanned.orientation && *scanned.orientation >= 5 && *scanned.orientation <= 8) std::swap(width, height);
 		return true;
 	}
 }

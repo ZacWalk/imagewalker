@@ -13,7 +13,13 @@
 
 namespace iw
 {
-	enum class LoadState { empty, loading, ready, failed };
+	enum class LoadState
+	{
+		empty,
+		loading,
+		ready,
+		failed
+	};
 
 	class CollectionState
 	{
@@ -49,10 +55,7 @@ namespace iw
 			filter();
 		}
 
-		void set_sort_field(const files::SortField field)
-		{
-			set_sort(field, sortAscending_);
-		}
+		void set_sort_field(const files::SortField field) { set_sort(field, sortAscending_); }
 
 		void set_sort(const files::SortField field, const bool ascending)
 		{
@@ -80,9 +83,7 @@ namespace iw
 		bool set_dimensions(const std::filesystem::path& path, const int width, const int height)
 		{
 			const auto match = std::ranges::find_if(items_, [&path](const files::FolderItem& item)
-			{
-				return paths::equal(item.path, path);
-			});
+			{ return paths::equal(item.path, path); });
 			if (match == items_.end() || (match->width == width && match->height == height)) return false;
 			match->width = width;
 			match->height = height;
@@ -110,10 +111,10 @@ namespace iw
 		void sort()
 		{
 			files::sort_items(items_, sortField_, sortAscending_);
-			photoCount_ = static_cast<size_t>(std::ranges::count(items_, files::ItemKind::image,
-			                                                     &files::FolderItem::kind));
-			folderCount_ = static_cast<size_t>(std::ranges::count(items_, files::ItemKind::folder,
-			                                                      &files::FolderItem::kind));
+			photoCount_ = static_cast<size_t>(
+				std::ranges::count(items_, files::ItemKind::image, &files::FolderItem::kind));
+			folderCount_ = static_cast<size_t>(
+				std::ranges::count(items_, files::ItemKind::folder, &files::FolderItem::kind));
 		}
 
 		void filter()

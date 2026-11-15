@@ -16,8 +16,16 @@ namespace iw::ui
 	class ZoomModel
 	{
 	public:
-		enum class ScaleMode { fit, explicitScale };
-		struct SourcePoint { double x{0.5}; double y{0.5}; };
+		enum class ScaleMode
+		{
+			fit,
+			explicitScale
+		};
+		struct SourcePoint
+		{
+			double x{0.5};
+			double y{0.5};
+		};
 
 		ScaleMode mode() const { return mode_; }
 		bool is_fit() const { return mode_ == ScaleMode::fit; }
@@ -35,8 +43,7 @@ namespace iw::ui
 
 		double fit_scale(const app::recti viewport, const bool enlarge = false) const
 		{
-			if (source_.width <= 0 || source_.height <= 0 || viewport.width <= 0 || viewport.height <= 0)
-				return 1.0;
+			if (source_.width <= 0 || source_.height <= 0 || viewport.width <= 0 || viewport.height <= 0) return 1.0;
 			const double scale = (std::min)(static_cast<double>(viewport.width) / source_.width,
 			                                static_cast<double>(viewport.height) / source_.height);
 			return enlarge ? scale : (std::min)(1.0, scale);
@@ -61,10 +68,9 @@ namespace iw::ui
 			const double magnitude = std::abs(static_cast<double>(pointerOffset));
 			const double accelerated = magnitude + magnitude * magnitude / ramp;
 			const double signedOffset = std::copysign(accelerated, static_cast<double>(pointerOffset));
-			return static_cast<int>(std::clamp(
-				std::lround(signedOffset),
-				static_cast<long>((std::numeric_limits<int>::min)()),
-				static_cast<long>((std::numeric_limits<int>::max)())));
+			return static_cast<int>(std::clamp(std::lround(signedOffset),
+			                                   static_cast<long>((std::numeric_limits<int>::min)()),
+			                                   static_cast<long>((std::numeric_limits<int>::max)())));
 		}
 
 		app::recti destination(const app::recti viewport) const
@@ -80,10 +86,8 @@ namespace iw::ui
 		SourcePoint source_at(const app::recti viewport, const app::pointi point) const
 		{
 			const app::recti current = destination(viewport);
-			return {
-				std::clamp((point.x - current.x) / static_cast<double>((std::max)(1, current.width)), 0.0, 1.0),
-				std::clamp((point.y - current.y) / static_cast<double>((std::max)(1, current.height)), 0.0, 1.0)
-			};
+			return {std::clamp((point.x - current.x) / static_cast<double>((std::max)(1, current.width)), 0.0, 1.0),
+			        std::clamp((point.y - current.y) / static_cast<double>((std::max)(1, current.height)), 0.0, 1.0)};
 		}
 
 		void set_fit()
@@ -128,11 +132,9 @@ namespace iw::ui
 			const int height = scaled_extent(source_.height, explicitScale_);
 			const double viewportCenterX = viewport.x + viewport.width / 2.0;
 			const double viewportCenterY = viewport.y + viewport.height / 2.0;
-			if (width > viewport.width)
-				centerX_ = std::clamp((viewportCenterX - (current.x + x)) / width, 0.0, 1.0);
+			if (width > viewport.width) centerX_ = std::clamp((viewportCenterX - (current.x + x)) / width, 0.0, 1.0);
 			else centerX_ = 0.5;
-			if (height > viewport.height)
-				centerY_ = std::clamp((viewportCenterY - (current.y + y)) / height, 0.0, 1.0);
+			if (height > viewport.height) centerY_ = std::clamp((viewportCenterY - (current.y + y)) / height, 0.0, 1.0);
 			else centerY_ = 0.5;
 		}
 
@@ -151,9 +153,7 @@ namespace iw::ui
 			if (direction > 0)
 			{
 				const auto next = std::ranges::find_if(stops, [current](const double value)
-				{
-					return value > current + 1e-9;
-				});
+				{ return value > current + 1e-9; });
 				if (next != stops.end()) target = *next;
 			}
 			else
@@ -180,7 +180,7 @@ namespace iw::ui
 		}
 
 		app::recti destination(const app::recti viewport, const double scale, const double centerX,
-		                  const double centerY) const
+		                       const double centerY) const
 		{
 			const int width = scaled_extent(source_.width, scale);
 			const int height = scaled_extent(source_.height, scale);
@@ -195,17 +195,14 @@ namespace iw::ui
 
 		static std::vector<double> ladder(const double fitScale)
 		{
-			constexpr std::array fixed{
-				0.05, 0.07, 0.10, 0.15, 0.20, 0.25, 0.33, 0.50, 0.67, 0.75,
-				1.00, 1.50, 2.00, 3.00, 4.00, 6.00, 8.00, 12.00, 16.00
-			};
+			constexpr std::array fixed{0.05, 0.07, 0.10, 0.15, 0.20, 0.25, 0.33, 0.50,  0.67, 0.75,
+			                           1.00, 1.50, 2.00, 3.00, 4.00, 6.00, 8.00, 12.00, 16.00};
 			std::vector<double> result(fixed.begin(), fixed.end());
 			result.push_back(fitScale);
 			std::ranges::sort(result);
 			result.erase(std::unique(result.begin(), result.end(), [](const double left, const double right)
-			{
-				return std::abs(left - right) < 1e-9;
-			}), result.end());
+			{ return std::abs(left - right) < 1e-9; }),
+			             result.end());
 			return result;
 		}
 

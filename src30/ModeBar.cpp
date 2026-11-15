@@ -110,17 +110,15 @@ namespace iw
 		case Glyph::browse:
 			for (int row = 0; row < 2; ++row)
 				for (int column = 0; column < 2; ++column)
-					renderer.fill({
-						              bounds.x + column * (unit * 4 + unit), bounds.y + row * (unit * 4 + unit),
-						              unit * 3, unit * 3
-					              }, value);
+					renderer.fill({bounds.x + column * (unit * 4 + unit), bounds.y + row * (unit * 4 + unit), unit * 3,
+					               unit * 3},
+					              value);
 			break;
 
 		case Glyph::folders:
 		case Glyph::folder:
 			renderer.fill({bounds.x, bounds.y + unit, unit * 3, unit}, value);
-			renderer.outline({bounds.x, bounds.y + unit * 2, bounds.width, bounds.height - unit * 3}, value,
-			                 thin);
+			renderer.outline({bounds.x, bounds.y + unit * 2, bounds.width, bounds.height - unit * 3}, value, thin);
 			break;
 
 		case Glyph::convert:
@@ -165,24 +163,19 @@ namespace iw
 	{
 		const int captionHeight = (std::max)(metric(12), renderer.measure_text(L"Wg").height);
 		const int glyphEdge = metric(24);
-		if (hot || button.checked)
-			renderer.fill(bounds, platform::calc_hande_color(hot, false, button.checked));
-		if (button.checked)
-			renderer.outline(bounds, platform::system_color(platform::SystemColor::highlight));
-		const app::recti glyph{
-			bounds.x + (bounds.width - glyphEdge) / 2,
-			bounds.y + (bounds.height - captionHeight - glyphEdge) / 2, glyphEdge, glyphEdge
-		};
-		const color foreground = button.enabled
-			                         ? platform::system_color(platform::SystemColor::buttonText)
-			                         : platform::system_color(platform::SystemColor::grayText);
+		if (hot || button.checked) renderer.fill(bounds, platform::calc_hande_color(hot, false, button.checked));
+		if (button.checked) renderer.outline(bounds, platform::system_color(platform::SystemColor::highlight));
+		const app::recti glyph{bounds.x + (bounds.width - glyphEdge) / 2,
+		                       bounds.y + (bounds.height - captionHeight - glyphEdge) / 2, glyphEdge, glyphEdge};
+		const color foreground = button.enabled ? platform::system_color(platform::SystemColor::buttonText)
+		                                        : platform::system_color(platform::SystemColor::grayText);
 		draw_glyph(renderer, button.glyph, glyph, foreground);
-		renderer.text(button.caption, {
-			              bounds.x + metric(2), bounds.bottom() - captionHeight - metric(4),
-			              bounds.width - metric(4), captionHeight
-		              }, foreground,
+		renderer.text(button.caption,
+		              {bounds.x + metric(2), bounds.bottom() - captionHeight - metric(4), bounds.width - metric(4),
+		               captionHeight},
+		              foreground,
 		              platform::TextFormat::center | platform::TextFormat::singleLine |
-		              platform::TextFormat::endEllipsis);
+		                  platform::TextFormat::endEllipsis);
 	}
 
 	void ModeBar::paint(const platform::WindowFramePtr& frame, platform::DrawContext& draw)
@@ -219,29 +212,28 @@ namespace iw
 		return nullptr;
 	}
 
-	platform::MessageResult ModeBar::mouse(const platform::WindowFramePtr& frame,
-	                                       const platform::MouseMessage message,
+	platform::MessageResult ModeBar::mouse(const platform::WindowFramePtr& frame, const platform::MouseMessage message,
 	                                       const platform::MouseInput& input)
 	{
 		if (frame != frame_) return 0;
 		switch (message)
 		{
 		case platform::MouseMessage::move:
+		{
+			if (!trackingMouse_)
 			{
-				if (!trackingMouse_)
-				{
-					trackingMouse_ = true;
-					frame_->track_mouse_leave();
-				}
-				const auto* button = button_at(input.point);
-				const int hot = button && button->enabled ? button->id : 0;
-				if (hot != hotId_)
-				{
-					hotId_ = hot;
-					invalidate();
-				}
-				break;
+				trackingMouse_ = true;
+				frame_->track_mouse_leave();
 			}
+			const auto* button = button_at(input.point);
+			const int hot = button && button->enabled ? button->id : 0;
+			if (hot != hotId_)
+			{
+				hotId_ = hot;
+				invalidate();
+			}
+			break;
+		}
 
 		case platform::MouseMessage::leave:
 			trackingMouse_ = false;
@@ -270,8 +262,7 @@ namespace iw
 			}
 			break;
 
-		default:
-			break;
+		default: break;
 		}
 		return 0;
 	}

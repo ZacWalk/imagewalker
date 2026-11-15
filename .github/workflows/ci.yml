@@ -27,6 +27,20 @@ jobs:
       - name: Check declared toolchain
         run: .\dd.ps1 doctor --json
 
+      - name: Build Release and Debug past dd's time limit
+        # dd stops a build after ten minutes, and building all five releases and their libraries from nothing
+        # takes a hosted runner longer. The trees are built here with dd's presets and compiler environment;
+        # dd test then finds them current.
+        run: |
+          $environment = (pwsh -NoProfile -File dd.ps1 env --json --non-interactive | ConvertFrom-Json).data.environment
+          foreach ($name in $environment.PSObject.Properties.Name) { Set-Item "env:$name" $environment.$name }
+          foreach ($preset in 'x64-release', 'x64-debug') {
+            cmake --preset $preset
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            cmake --build --preset $preset --parallel
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+
       - name: Build, test and smoke-test Debug and Release
         run: |
           $env:TEMP = $env:RUNNER_TEMP

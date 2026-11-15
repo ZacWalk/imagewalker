@@ -25,8 +25,7 @@ namespace iw::ui
 	class CanvasRenderer
 	{
 	public:
-		CanvasRenderer(platform::DrawContext& draw, platform::FontPtr font = {})
-			: draw_(draw), font_(std::move(font))
+		CanvasRenderer(platform::DrawContext& draw, platform::FontPtr font = {}) : draw_(draw), font_(std::move(font))
 		{
 		}
 
@@ -36,8 +35,7 @@ namespace iw::ui
 		void fill(app::recti rect, color value) const;
 		void blend_fill(app::recti rect, color value) const;
 		void text(std::wstring_view value, app::recti rect, color textColor, std::uint32_t format) const;
-		app::sizei measure_text(std::wstring_view value,
-		                   std::uint32_t format = platform::TextFormat::singleLine) const;
+		app::sizei measure_text(std::wstring_view value, std::uint32_t format = platform::TextFormat::singleLine) const;
 		void image(const ArgbImage& image, app::recti destination) const;
 		void focus(app::recti rect) const;
 		void outline(app::recti rect, color value, int width = 1) const;

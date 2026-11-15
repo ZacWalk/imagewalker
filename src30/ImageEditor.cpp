@@ -35,8 +35,8 @@ namespace iw::edits
 
 	bool PreviewSource::update(const files::DecodedImage& source, const app::sizei pane)
 	{
-		if (!imaging::valid_pixels(source.width, source.height, source.pixels.size()) ||
-			pane.width <= 0 || pane.height <= 0)
+		if (!imaging::valid_pixels(source.width, source.height, source.pixels.size()) || pane.width <= 0 ||
+		    pane.height <= 0)
 		{
 			reset();
 			return false;

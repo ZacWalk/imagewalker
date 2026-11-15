@@ -4,11 +4,38 @@
 #include "Platform.h"
 
 #include <algorithm>
+#include <cwctype>
 #include <memory>
 #include <vector>
 
 namespace iw::platform
 {
+	std::wstring toolbar_label(const Command& command)
+	{
+		if (command.toolbarText) return command.toolbarText();
+
+		const auto& name = command.name;
+		std::wstring label;
+		label.reserve(name.size());
+		for (size_t i = 0; i < name.size(); ++i)
+		{
+			if (name[i] == L'&' && i + 1 < name.size())
+			{
+				const auto next = name[i + 1];
+				if (next == L'&')
+				{
+					label += L'&';
+					++i;
+					continue;
+				}
+				// A marker begins a word, as in "&Refresh" and "Folder &tree"; "R&B" keeps its ampersand.
+				if ((i == 0 || !std::iswalnum(name[i - 1])) && std::iswalnum(next)) continue;
+			}
+			label += name[i];
+		}
+		return label;
+	}
+
 	MenuItem MenuItem::action(CommandPtr command)
 	{
 		MenuItem result;
@@ -76,8 +103,7 @@ namespace iw::platform
 		public:
 			explicit ChromeReactor(std::weak_ptr<ChromeSurface> owner) : owner_(std::move(owner)) {}
 
-			MessageResult mouse(const WindowFramePtr& frame, MouseMessage message,
-			                    const MouseInput& input) override;
+			MessageResult mouse(const WindowFramePtr& frame, MouseMessage message, const MouseInput& input) override;
 			void paint(const WindowFramePtr& frame, DrawContext& draw) override;
 			void size(const WindowFramePtr&, app::sizei, MeasureContext&) override {}
 
@@ -93,8 +119,7 @@ namespace iw::platform
 			std::filesystem::path breadcrumb;
 		};
 
-		class ChromeSurface final : public CommandSurface,
-		                            public std::enable_shared_from_this<ChromeSurface>
+		class ChromeSurface final : public CommandSurface, public std::enable_shared_from_this<ChromeSurface>
 		{
 		public:
 			explicit ChromeSurface(WindowFramePtr owner) : owner_(std::move(owner)) {}
@@ -182,8 +207,8 @@ namespace iw::platform
 				}
 				const int menuHeight = menus_.empty() ? 0 : scale_metric(24, dpi_);
 				const int topHeight = (std::min)(scale_metric(36, dpi_), (std::max)(0, client.height - menuHeight));
-				const int statusHeight = (std::min)(
-					scale_metric(28, dpi_), (std::max)(0, client.height - menuHeight - topHeight));
+				const int statusHeight = (std::min)(scale_metric(28, dpi_),
+				                                    (std::max)(0, client.height - menuHeight - topHeight));
 				top_->move({client.x, client.y + menuHeight, client.width, topHeight});
 				statusFrame_->move({client.x, client.bottom() - statusHeight, client.width, statusHeight});
 				top_->show(true);
@@ -215,8 +240,7 @@ namespace iw::platform
 				else if (frame == statusFrame_) paint_status(draw);
 			}
 
-			MessageResult mouse(const WindowFramePtr& frame, const MouseMessage message,
-			                    const MouseInput& input)
+			MessageResult mouse(const WindowFramePtr& frame, const MouseMessage message, const MouseInput& input)
 			{
 				if (message != MouseMessage::leftButtonDown && message != MouseMessage::move) return 0;
 				auto& hits = frame == top_ ? topHits_ : statusHits_;
@@ -224,16 +248,20 @@ namespace iw::platform
 				{
 					const auto hit = hit_test(hits, input.point);
 					const auto command = hit ? hit->command : CommandPtr{};
-					if (command != hoverCommand_) { hoverCommand_ = command; frame->invalidate(); }
+					if (command != hoverCommand_)
+					{
+						hoverCommand_ = command;
+						frame->invalidate();
+					}
 					return 0;
 				}
 				const auto hit = hit_test(hits, input.point);
 				if (!hit) return 0;
 				if (frame == statusFrame_ && !hit->command && thumbnailChanged_)
 				{
-					const int value = std::clamp(
-						64 + (input.point.x - hit->bounds.x) * (256 - 64) /
-							(std::max)(1, hit->bounds.width), 64, 256);
+					const int value = std::clamp(64 + (input.point.x - hit->bounds.x) * (256 - 64) /
+					                                      (std::max)(1, hit->bounds.width),
+					                             64, 256);
 					thumbnailSize_ = value;
 					thumbnailChanged_(value);
 					frame->invalidate();
@@ -289,18 +317,14 @@ namespace iw::platform
 				if (statusFrame_) statusFrame_->invalidate();
 			}
 
-			const std::vector<ToolbarItem>& active_toolbar() const
-			{
-				return taskActive_ ? taskToolbar_ : toolbar_;
-			}
+			const std::vector<ToolbarItem>& active_toolbar() const { return taskActive_ ? taskToolbar_ : toolbar_; }
 
 			int command_width(DrawContext& draw, const CommandPtr& command) const
 			{
 				if (!command) return scale_metric(8, dpi_);
-				const auto text = command->toolbarText ? command->toolbarText() : command->name;
-				return (std::max)(scale_metric(56, dpi_),
-				                  draw.measure_text(text, TextFormat::singleLine, font_).width +
-				                  scale_metric(20, dpi_));
+				const auto text = toolbar_label(*command);
+				return (std::max)(scale_metric(56, dpi_), draw.measure_text(text, TextFormat::singleLine, font_).width +
+				                                              scale_metric(20, dpi_));
 			}
 
 			void paint_top(DrawContext& draw)
@@ -325,10 +349,11 @@ namespace iw::platform
 					if (checked) draw.fill(hit, chromeChecked);
 					else if (hovered) draw.fill(hit, chromeHover);
 					if (!enabled) draw.fill(hit, chromeBackground);
-					const auto text = item.command->toolbarText ? item.command->toolbarText() : item.command->name;
+					const auto text = toolbar_label(*item.command);
 					draw.text(text, hit, enabled ? chromeText : chromeDisabled,
 					          TextFormat::center | TextFormat::verticalCenter | TextFormat::singleLine |
-					          TextFormat::endEllipsis, font_);
+					              TextFormat::endEllipsis,
+					          font_);
 					topHits_.push_back({hit, item.command, item.menuItems, {}});
 					x += width;
 				}
@@ -337,12 +362,13 @@ namespace iw::platform
 					x += scale_metric(8, dpi_);
 					for (const auto& breadcrumb : breadcrumbs_)
 					{
-						const auto width = draw.measure_text(
-							breadcrumb.label, TextFormat::singleLine, font_).width + scale_metric(18, dpi_);
+						const auto width = draw.measure_text(breadcrumb.label, TextFormat::singleLine, font_).width +
+						                   scale_metric(18, dpi_);
 						const app::recti hit{x, 0, width, bounds.height};
 						draw.text(breadcrumb.label, hit, chromeText,
 						          TextFormat::center | TextFormat::verticalCenter | TextFormat::singleLine |
-						          TextFormat::endEllipsis, font_);
+						              TextFormat::endEllipsis,
+						          font_);
 						topHits_.push_back({hit, {}, {}, breadcrumb.path});
 						x += width;
 					}
@@ -354,19 +380,21 @@ namespace iw::platform
 				const auto bounds = statusFrame_->client_rect();
 				draw.fill(bounds, chromeBackground);
 				statusHits_.clear();
-				draw.text(statusInfo_.text, {scale_metric(7, dpi_), 0, bounds.width - scale_metric(180, dpi_),
-				                         bounds.height}, chromeText,
+				draw.text(statusInfo_.text,
+				          {scale_metric(7, dpi_), 0, bounds.width - scale_metric(180, dpi_), bounds.height}, chromeText,
 				          TextFormat::left | TextFormat::verticalCenter | TextFormat::singleLine |
-				          TextFormat::endEllipsis, font_);
+				              TextFormat::endEllipsis,
+				          font_);
 				if (!statusInfo_.scanning && statusInfo_.progressPercent < 100)
 				{
 					const int width = scale_metric(140, dpi_);
-					const app::recti bar{bounds.width - width - scale_metric(10, dpi_), scale_metric(6, dpi_),
-					                width, bounds.height - scale_metric(12, dpi_)};
+					const app::recti bar{bounds.width - width - scale_metric(10, dpi_), scale_metric(6, dpi_), width,
+					                     bounds.height - scale_metric(12, dpi_)};
 					draw.outline(bar, chromeBorder);
 					draw.fill({bar.x + 1, bar.y + 1,
 					           (std::max)(0, (bar.width - 2) * std::clamp(statusInfo_.progressPercent, 0, 100) / 100),
-					           (std::max)(0, bar.height - 2)}, chromeChecked);
+					           (std::max)(0, bar.height - 2)},
+					          chromeChecked);
 				}
 				const int sliderWidth = scale_metric(150, dpi_);
 				int x = bounds.width - sliderWidth - scale_metric(8, dpi_);
@@ -384,10 +412,10 @@ namespace iw::platform
 					const bool enabled = !item.command->enabled || item.command->enabled();
 					const bool checked = item.command->checked && item.command->checked();
 					if (checked) draw.fill(hit, chromeChecked);
-					draw.text(item.command->toolbarText ? item.command->toolbarText() : item.command->name,
-					          hit, enabled ? chromeText : chromeDisabled,
+					draw.text(toolbar_label(*item.command), hit, enabled ? chromeText : chromeDisabled,
 					          TextFormat::center | TextFormat::verticalCenter | TextFormat::singleLine |
-					          TextFormat::endEllipsis, font_);
+					              TextFormat::endEllipsis,
+					          font_);
 					statusHits_.push_back({hit, item.command, item.menuItems, {}});
 				}
 				const app::recti slider{bounds.width - sliderWidth, 0, sliderWidth, bounds.height};

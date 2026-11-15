@@ -17,20 +17,28 @@
 
 namespace iw::imaging
 {
-	inline bool has_sse2() noexcept { return ::core::has_sse2(); }
-	inline bool has_avx2() noexcept { return ::core::has_avx2(); }
+	inline bool has_sse2() noexcept
+	{
+		return ::core::has_sse2();
+	}
+	inline bool has_avx2() noexcept
+	{
+		return ::core::has_avx2();
+	}
 
 	using PixelBackend = ::core::pixel_backend;
 
 	inline void blend_constant_bgra(const std::span<std::uint32_t> pixels, const color foreground,
-		const PixelBackend backend = PixelBackend::automatic)
+	                                const PixelBackend backend = PixelBackend::automatic)
 	{
-		::core::blend_constant_bgra(pixels, ::core::rgba(foreground.r, foreground.g, foreground.b, foreground.a), backend);
+		::core::blend_constant_bgra(pixels, ::core::rgba(foreground.r, foreground.g, foreground.b, foreground.a),
+		                            backend);
 	}
 
 	inline void interpolate_bgra(const std::span<const std::uint32_t> first,
-		const std::span<const std::uint32_t> second, const std::span<std::uint32_t> destination,
-		const std::uint16_t fraction, const PixelBackend backend = PixelBackend::automatic)
+	                             const std::span<const std::uint32_t> second,
+	                             const std::span<std::uint32_t> destination, const std::uint16_t fraction,
+	                             const PixelBackend backend = PixelBackend::automatic)
 	{
 		::core::interpolate_bgra(first, second, destination, fraction, backend);
 	}
