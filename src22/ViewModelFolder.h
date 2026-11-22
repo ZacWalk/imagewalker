@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <atomic>
 
 
 class FolderState
@@ -31,8 +32,8 @@ public:
 
 	bool _bAscending;
 	int _nSortOrder;
-	volatile bool IsSearchMode;
-	volatile bool IsSearching;
+	std::atomic_bool IsSearchMode;
+	std::atomic_bool IsSearching;
 	volatile bool IsThumbnailing;
 
 	FolderState(Coupling *pCoupling, bool initializeFolder = true) :
@@ -82,8 +83,9 @@ public:
 	{
 		IW::CAutoLockCS lock(_cs);
 		_pCoupling->StopLoadingThumbs();
-		_pCoupling->StartSearching();
+		_dwRefreshFolder = ULONG_MAX;
 		_pFolder->DeleteAllThumbs();
+		_pCoupling->StartSearching();
 		_pCoupling->StartSearchThread(type, ss);
 	}
 
@@ -241,19 +243,13 @@ public:
 
 	void OpenDefaultFolder()
 	{
-		IW::CShellItem item;
-
+		IW::CShellItem remembered;
 		if (!App.Settings.DefaultFolder.IsEmpty())
-			item.Open(App.Settings.DefaultFolder);
+			remembered.Open(App.Settings.DefaultFolder);
 
-		if (item.IsNull())
-			item.Open(IW::GetMainWindow(), CSIDL_MYPICTURES);
-
-		if (item.IsNull())
-			item.Open(IW::GetMainWindow(), CSIDL_PERSONAL);
-
-		if (!OpenFolder(item))
-			OpenFolder(IW::CShellDesktopItem());
+		if (!IW::OpenStartupFolder(IW::GetMainWindow(), remembered,
+			[this](const IW::CShellItem& item) { return OpenFolder(item); }))
+			IW::Logging::Error(_T("Failed to open a startup folder"));
 	}	
 
 

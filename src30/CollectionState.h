@@ -129,7 +129,7 @@ namespace iw
 		std::vector<files::FolderItem> visibleItems_;
 		size_t photoCount_{};
 		size_t folderCount_{};
-		bool photosOnly_{true};
+		bool photosOnly_{};
 		bool sortAscending_{true};
 		files::SortField sortField_{files::SortField::name};
 		LoadState loadState_{LoadState::empty};

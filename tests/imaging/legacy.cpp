@@ -711,6 +711,51 @@ IW_TEST(TemporaryOutputCannotRecoverAfterAFailedWrite)
 	IW_CHECK(!output.Close(IW::CNullStatus::Instance));
 }
 
+IW_TEST(TemporaryOutputDoesNotClobberLateArrivalsAndKeepsVerifiedOriginals)
+{
+	const auto root = std::filesystem::temp_directory_path();
+	const auto path = iw::publication::temporary_sibling(root / L"placeholder", L"iw-publication-test-");
+	IW_CHECK(!path.empty());
+	if (path.empty()) return;
+	const auto backup = path.parent_path() / (path.stem().wstring() + L"-original" + path.extension().wstring());
+	struct Cleanup
+	{
+		const std::filesystem::path& path;
+		const std::filesystem::path& backup;
+		~Cleanup()
+		{
+			DeleteFileW(path.c_str());
+			DeleteFileW(backup.c_str());
+		}
+	} cleanup{path, backup};
+	const auto read = [](const std::filesystem::path& name)
+	{
+		std::ifstream input(name, std::ios::binary);
+		return std::string(std::istreambuf_iterator<char>(input), {});
+	};
+	const char edited[] = "edit";
+	IW::CFileTemp output;
+	IW::CFileWriteStatus status;
+	const CString name(path.c_str());
+	IW_CHECK(output.OpenForWrite(name) && output.Write(edited, 4));
+	std::ofstream(path, std::ios::binary) << "original";
+	IW_CHECK(!output.Close(&status) && read(path) == "original");
+
+	const auto stamp = iw::publication::stamp(path);
+	IW_CHECK(stamp.has_value());
+	if (!stamp) return;
+	IW_CHECK(output.OpenForReplace(name, *stamp) && output.Write(edited, 4));
+	std::ofstream(path, std::ios::binary) << "changed";
+	IW_CHECK(!output.Close(&status) && read(path) == "changed");
+	IW_CHECK(!std::filesystem::exists(backup));
+
+	const auto reviewed = iw::publication::stamp(path);
+	IW_CHECK(reviewed.has_value());
+	if (!reviewed) return;
+	IW_CHECK(output.OpenForReplace(name, *reviewed) && output.Write(edited, 4));
+	IW_CHECK(output.Close(&status) && read(path) == "edit" && read(backup) == "changed");
+}
+
 IW_TEST(IndexedTransparencySurvivesNativePngAndGifEncoding)
 {
 	for (const auto format : {IW::PixelFormat::PF8, IW::PixelFormat::PF8Alpha})

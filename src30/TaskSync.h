@@ -14,8 +14,7 @@ namespace iw::sync
 		ignore,
 		copyToRemote,
 		copyToLocal,
-		deleteLocal,
-		deleteRemote
+		keepExisting
 	};
 
 	struct Options
@@ -26,8 +25,6 @@ namespace iw::sync
 		std::vector<std::filesystem::path> collection;
 		bool toRemote{true};
 		bool toLocal{};
-		bool deleteLocal{};
-		bool deleteRemote{};
 	};
 
 	using FileState = files::FileSnapshot;
@@ -60,9 +57,6 @@ namespace iw::sync
 	               const tasks::ProgressFunction& progress = {});
 	tasks::RunOptions run_options(const std::shared_ptr<const Review>& review);
 	std::wstring summarize(const tasks::TaskPlan& plan);
-	platform::ChoiceDefinition deletion_confirmation(const tasks::TaskPlan& plan);
-	bool confirm_deletions(const tasks::TaskPlan& plan,
-	                       const std::function<int(const platform::ChoiceDefinition&)>& confirm);
 	std::vector<std::filesystem::path> affected_folders(const tasks::TaskPlan& plan);
 }
 
@@ -79,7 +73,6 @@ namespace iw
 		void remove_collection_folder(size_t index);
 		void set_options(sync::Options options);
 		const sync::Options& options() const { return options_; }
-		void start_run() override;
 
 	protected:
 		std::wstring run_label() const override { return L"Synchronize"; }
@@ -100,7 +93,6 @@ namespace iw
 		sync::Options options_;
 		std::wstring settingsSection_;
 		std::shared_ptr<sync::Review> review_;
-		bool confirming_{};
 		size_t collectionSelection_{};
 	};
 }

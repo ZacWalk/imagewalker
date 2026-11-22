@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "MediaEdit.h"
+
 #include "PlatformWin32.h"
 #include "Media.h"
 #include "PlatformMedia.h"
@@ -27,8 +29,7 @@ namespace iw::tests
 			const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(image);
 			if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0) return false;
 			const auto* header = reinterpret_cast<const IMAGE_NT_HEADERS*>(image + dos->e_lfanew);
-			if (header->Signature != IMAGE_NT_SIGNATURE ||
-			    header->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
+			if (header->Signature != IMAGE_NT_SIGNATURE || header->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR_MAGIC)
 				return false;
 			const auto size = header->OptionalHeader.SizeOfImage;
 			const auto directory = header->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
@@ -81,19 +82,30 @@ namespace iw::tests
 			return !file.fail();
 		}
 
-		inline Bytes wave()
+		inline Bytes wave(const bool voiced = false)
 		{
 			Bytes format;
-			u16(format, 1);
+			// A companded tone exercises compressed decode as well as output-rate conversion.
+			u16(format, voiced ? 7 : 1);
 			u16(format, 1);
 			u32(format, 8000);
-			u32(format, 16000);
-			u16(format, 2);
-			u16(format, 16);
+			u32(format, voiced ? 8000 : 16000);
+			u16(format, voiced ? 1 : 2);
+			u16(format, voiced ? 8 : 16);
 			Bytes contents;
 			tag(contents, "WAVE");
+			if (voiced) u16(format, 0);
 			chunk(contents, "fmt ", format);
-			chunk(contents, "data", Bytes(16000, 0));
+			if (voiced)
+			{
+				Bytes fact;
+				u32(fact, 8000);
+				chunk(contents, "fact", fact);
+				Bytes tone(8000);
+				for (size_t i = 0; i < tone.size(); ++i) tone[i] = i % 20 < 10 ? 0xb4 : 0x34;
+				chunk(contents, "data", tone);
+			}
+			else chunk(contents, "data", Bytes(16000, 0));
 			Bytes file;
 			chunk(file, "RIFF", contents);
 			return file;
@@ -209,15 +221,13 @@ namespace iw::tests
 		}
 		reporter.check(!media::native::acquire(), L"nested availability override restores its prior state");
 		const auto info = media::probe(video);
-		reporter.check(!info.hasVideo && !info.hasAudio && !info.hasDuration &&
-		                   info.error.find(L"Media Feature Pack") != std::wstring::npos,
-		               L"missing media components produce an actionable explanation, not fabricated metadata");
-		reporter.check(media::poster(video, 8, 8).pixels.empty(),
-		               L"unavailable media poster decoding returns safely without resolving an entry point");
+		reporter.check(info.hasVideo && !info.hasAudio && info.duration == media::ticksPerSecond,
+		               L"media metadata works without Media Foundation");
+		reporter.check(media::poster(video, 8, 8).pixels.size() == 64,
+		               L"the bundled decoder produces video posters without Media Foundation");
 		const auto properties = files::read_metadata(video);
-		reporter.check(properties.hasSize && !properties.hasDuration &&
-		                   properties.mediaError.find(L"Media Feature Pack") != std::wstring::npos,
-		               L"file properties retain filesystem information when media support is absent");
+		reporter.check(properties.hasSize && properties.hasDuration && properties.mediaError.empty(),
+		               L"file properties still report the media duration without Media Foundation");
 
 		const files::DecodedImage image{2, 2, {0xff112233, 0xff224466, 0xff335577, 0xff446688}, 2, 2};
 		reporter.check(files::save_image(image, imagePath, files::ImageSaveFormat::png),
@@ -226,9 +236,8 @@ namespace iw::tests
 		reporter.check(decoded.width == 2 && decoded.height == 2 && decoded.pixels == image.pixels,
 		               L"ordinary PNG images still decode when the media backend is unavailable");
 		const auto scanned = files::scan_folder_items(root, {});
-		reporter.check(scanned.size() == 4 &&
-		                   std::ranges::none_of(scanned, [](const auto& item) { return item.hasDuration; }),
-		               L"folder browsing survives absent media components without inventing durations");
+		reporter.check(scanned.size() == 4 && std::ranges::count(scanned, true, &files::FolderItem::hasDuration) == 2,
+		               L"folder browsing still sorts media durations without Media Foundation");
 
 		platform::WindowOptions options;
 		options.className = "ImageWalker30.UnavailableMediaTests";
@@ -256,9 +265,9 @@ namespace iw::tests
 		reporter.check(player != nullptr, L"the playback UI can exist without loading optional media DLLs");
 		if (!player) return;
 		player->open(video);
-		reporter.check(latest.state == media::PlaybackState::error &&
-		                   latest.error.find(L"Media Feature Pack") != std::wstring::npos && !latest.hasVideo,
-		               L"playback reports missing OS support visibly rather than failing process startup");
+		reporter.check(media_fixtures::wait_until([&] { return latest.hasVideo && player->picture(); },
+		                                          std::chrono::seconds(3)),
+		               L"the transport no longer refuses a supported clip when Windows codecs are unavailable");
 		player->play();
 		player->pause();
 		player->stop();
@@ -266,9 +275,8 @@ namespace iw::tests
 		player->close();
 		const auto closedCallbacks = callbacks;
 		media_fixtures::wait_until([] { return false; }, std::chrono::milliseconds(150));
-		reporter
-			.check(player->status().state == media::PlaybackState::closed && callbacks == closedCallbacks,
-		           L"unavailable transport commands and shutdown never call unresolved functions or post stale events");
+		reporter.check(player->status().state == media::PlaybackState::closed && callbacks == closedCallbacks,
+		               L"closing bundled playback drops stale reports and releases the session");
 	}
 
 	template <class Reporter>
@@ -324,8 +332,8 @@ namespace iw::tests
 		{
 			media::native::testing::ScopedUnavailableBackend unavailable;
 			media::Decoder absent;
-			reporter.check(!absent.open(frames) && absent.error().find(L"Media Feature Pack") != std::wstring::npos,
-			               L"the playback decoder explains missing Windows media components");
+			reporter.check(absent.open(frames) && absent.has_video(),
+			               L"the playback decoder opens a supported video without Windows media components");
 		}
 	}
 
@@ -424,6 +432,81 @@ namespace iw::tests
 		player->close();
 	}
 
+	template <class Reporter>
+	void test_media_edits(Reporter& reporter, const std::filesystem::path& audio, const std::filesystem::path& video,
+	                      const std::filesystem::path& broken, const std::filesystem::path& root)
+	{
+		reporter.section(L"Packet-copy media editor and guarded publication");
+		const auto resultPath = root / L"cut-\u00e9.wav";
+		const auto aviCopy = root / L"copied.avi";
+		const auto movCopy = root / L"turned.mov";
+		const auto cancelledPath = root / L"cancelled.wav";
+		const auto original = files::file_digest(audio);
+		const auto originalBackup = root / L"cut-\u00e9-original.wav";
+		struct Cleanup
+		{
+			std::array<std::filesystem::path, 5> owned;
+			~Cleanup()
+			{
+				std::error_code error;
+				for (const auto& path : owned) std::filesystem::remove(path, error);
+			}
+		} cleanup{{resultPath, aviCopy, movCopy, cancelledPath, originalBackup}};
+		const auto info = media::edit::inspect(audio, L".wav");
+		reporter.check(info.error.empty() && info.audio && !info.video && info.sameFormat &&
+		                   info.duration == media::ticksPerSecond,
+		               L"FFmpeg identifies a one-second PCM input without using Windows playback");
+		media::edit::Draft trim;
+		trim.last = media::ticksPerSecond / 2;
+		media::edit::Result copy;
+		const auto write = [&](const std::filesystem::path& in, const std::filesystem::path& destination,
+		                       const files::FileSnapshot& expected, const media::edit::Draft& draft,
+		                       const std::stop_token& stop = {})
+		{
+			return files::write_staged_file(destination, expected, [&](const files::StagedStream& stream)
+			{
+				copy = media::edit::copy(in, destination.extension().wstring(), draft, true, stream, stop);
+				if (!copy) platform::write_diagnostic(copy.error + L"\n");
+				return static_cast<bool>(copy);
+			}, [&] { return !stop.stop_requested(); });
+		};
+		const auto written = write(audio, resultPath, {}, trim);
+		const auto trimmed = media::edit::inspect(resultPath, L".wav");
+		reporter.check(!written && trimmed.audio && trimmed.duration >= media::ticksPerSecond / 2 &&
+		                   trimmed.duration < 3 * media::ticksPerSecond / 4 && original == files::file_digest(audio),
+		               L"trim produces a shorter playable PCM copy and leaves source bytes untouched");
+		const auto copiedDigest = files::file_digest(resultPath);
+		reporter.check(copiedDigest && write(audio, resultPath, {}, {}) &&
+		                   files::file_digest(resultPath) == copiedDigest,
+		               L"Save As refuses an occupied name without changing its bytes");
+		std::stop_source cancelled;
+		cancelled.request_stop();
+		reporter.check(write(audio, cancelledPath, {}, trim, cancelled.get_token()) &&
+		                   !std::filesystem::exists(cancelledPath),
+		               L"a cancelled media save publishes no file");
+		reporter.check(write(broken, cancelledPath, {}, {}) && !std::filesystem::exists(cancelledPath),
+		               L"unreadable media does not publish an apparent successful copy");
+		reporter.check(!write(video, aviCopy, {}, {}) && media::edit::inspect(aviCopy, L".avi").video &&
+		                   files::file_digest(video).has_value(),
+		               L"video packets survive a complete AVI rebuild without an encoder");
+		media::edit::Draft turn;
+		turn.turn = 1;
+		const auto movieWritten = write(video, movCopy, {}, turn);
+		std::ifstream movie(movCopy, std::ios::binary);
+		const std::string atoms((std::istreambuf_iterator<char>(movie)), {});
+		reporter.check(!movieWritten && media::edit::inspect(movCopy, L".mov").video &&
+		                   atoms.find("moov") < atoms.find("mdat") && atoms.find("mdat") != std::string::npos,
+		               L"the staged movie can be reopened after the index-first rotation copy");
+		const auto snapshot = files::snapshot_file(resultPath);
+		if (snapshot && snapshot->exists)
+		{
+			reporter.check(!write(audio, resultPath, *snapshot, {}) &&
+			                   files::file_digest(originalBackup) == copiedDigest &&
+			                   media::edit::inspect(resultPath, L".wav").duration == info.duration,
+			               L"explicit replacement keeps a verified byte-for-byte original beside it");
+		}
+	}
+
 	template <class Reporter> void test_media(Reporter& reporter)
 	{
 		reporter.section(L"Media metadata, posters, duration sorting, decoding and headless playback");
@@ -460,27 +543,23 @@ namespace iw::tests
 		const auto broken = root / L"broken.mp4";
 		const auto still = root / L"still.png";
 		const auto frames = root / L"frames.avi";
+		const auto tone = root / L"voiced.wav";
 		struct Cleanup
 		{
-			std::filesystem::path audio, video, broken, still, frames, root;
+			std::filesystem::path audio, video, broken, still, frames, tone, root;
 			~Cleanup()
 			{
 				std::error_code error;
-				for (const auto& path : {audio, video, broken, still, frames, root})
+				for (const auto& path : {audio, video, broken, still, frames, tone, root})
 					std::filesystem::remove(path, error);
 			}
-		} cleanup{audio, video, broken, still, frames, root};
+		} cleanup{audio, video, broken, still, frames, tone, root};
 		reporter.check(media_fixtures::save(audio, media_fixtures::wave()) &&
 		                   media_fixtures::save(video, media_fixtures::avi()) &&
 		                   media_fixtures::save(broken, {0, 1, 2, 3}),
 		               L"native PCM and uncompressed video fixtures are written");
+		test_media_edits(reporter, audio, video, broken, root);
 		test_media_unavailable(reporter, root, video, still);
-		if (!media::native::acquire())
-		{
-			platform::write_diagnostic(
-				L"[ SKIP ] Native media fixture decoding requires Windows Media Feature Pack.\n");
-			return;
-		}
 		const auto original = files::snapshot_file(video);
 		const auto sound = media::probe(audio);
 		reporter.check(sound.error.empty() && sound.hasAudio && !sound.hasVideo && sound.hasDuration &&
@@ -539,6 +618,21 @@ namespace iw::tests
 		reporter.check(media_fixtures::save(frames, media_fixtures::avi(media_fixtures::numbered_pixel)),
 		               L"a video fixture with numbered frames is written");
 		test_media_decoder(reporter, frames, audio, broken);
+		reporter.check(media_fixtures::save(tone, media_fixtures::wave(true)), L"a voiced G.711 test file is written");
+		{
+			media::native::testing::ScopedUnavailableBackend unavailable;
+			media::Decoder speech;
+			const media::AudioFormat format{48000, 2, 3, media::SampleFormat::float32};
+			media::AudioBlock block;
+			const auto initialized = speech.open(tone) && speech.decode_audio(format);
+			reporter.check(initialized && speech.read_audio(block) == media::ReadResult::sample &&
+			                   std::ranges::any_of(block.samples, [](const auto value) { return value != 0; }),
+			               L"bundled decode converts compressed audio to nonzero interleaved output PCM");
+			const bool sought = initialized && speech.seek(media::ticksPerSecond / 2);
+			reporter.check(sought && speech.read_audio(block) == media::ReadResult::sample &&
+			                   block.time >= media::ticksPerSecond / 2 && block.time < 3 * media::ticksPerSecond / 4,
+			               L"seeking compressed audio drops the old resampler state and resumes at the requested time");
+		}
 
 		platform::WindowOptions options;
 		options.className = "ImageWalker30.MediaTests";
@@ -560,6 +654,11 @@ namespace iw::tests
 		auto player = media::create_player(window, [&callbacks](const auto&) { ++callbacks; });
 		reporter.check(player != nullptr, L"a player attaches to its owner window");
 		if (!player) return;
+		player->open(video, false);
+		reporter.check(media_fixtures::wait_until([&] { return player->picture() != nullptr; },
+		                                          std::chrono::seconds(3)) &&
+		                   player->status().state == media::PlaybackState::ready && player->status().position == 0,
+		               L"entering an edit previews the first frame without starting playback");
 		player->open(broken);
 		const bool failed = media_fixtures::wait_until([&]
 		{ return player->status().state == media::PlaybackState::error; }, std::chrono::seconds(5));
@@ -584,6 +683,6 @@ namespace iw::tests
 		               L"the same transport safely reopens after cancellation and shutdown");
 		player->close();
 
-		test_media_playback(reporter, window, frames, audio);
+		test_media_playback(reporter, window, frames, tone);
 	}
 }

@@ -561,12 +561,17 @@ public:
 			{
 				IW::FolderPtr pFolder = pThumb->GetFolder();
 
-				if (!pItemHandeler->StartFolder(pFolder, pStatus))
+				if (!pFolder)
 				{
-					return false;
+					pStatus->SetContext(pThumb->GetFileName());
+					pStatus->SetError(_T("Could not read this folder."));
 				}
-
-				pItemHandeler->EndFolder();
+				else
+				{
+					if (!pItemHandeler->StartFolder(pFolder, pStatus))
+						return false;
+					pItemHandeler->EndFolder();
+				}
 			}
 			else
 			{
@@ -723,11 +728,10 @@ class FolderStreamOut : public CFileTemp
 public:
 	FolderStreamOut(const FolderItem *pItem)
 	{
-		CString strPath = pItem->GetFilePath();
-
-		if (!CFileTemp::OpenForWrite(strPath))
+		const CString path = CFileTemp::RotatedCopyPath(pItem->GetFilePath());
+		if (path.IsEmpty() || !CFileTemp::OpenForWrite(path))
 		{
-			throw std::exception();
+			throw std::runtime_error("A new filename could not be reserved for the rotated copy.");
 		}
 	}
 };

@@ -4,6 +4,7 @@
 #pragma once
 #include <iw/imaging/Codec.h>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -93,6 +94,8 @@ namespace iw::files
 
 	std::optional<FileSnapshot> snapshot_file(const std::filesystem::path& path);
 	bool matches_snapshot(const std::filesystem::path& path, const FileSnapshot& snapshot);
+	std::optional<std::array<unsigned char, 32>> file_digest(const std::filesystem::path& path,
+	                                                         const std::stop_token& stop = {});
 
 	using imaging::native_path;
 	bool is_supported_image(const std::filesystem::path& path);
@@ -128,11 +131,26 @@ namespace iw::files
 	using imaging::image_save_format_name;
 	using imaging::image_save_extension;
 
+	std::wstring in_place_edit_block_reason(const std::filesystem::path& path, ImageSaveFormat outputFormat);
+
 	// Returns an empty path when the bounded search finds no unused name.
 	std::filesystem::path next_image_path(const std::filesystem::path& folder, ImageSaveFormat format);
 	bool save_image(const DecodedImage& image, const std::filesystem::path& path, ImageSaveFormat format,
-	                const SaveOptions& options = {}, bool overwrite = true,
-	                const std::function<bool()>& beforeCommit = {});
+	                const SaveOptions& options = {}, bool overwrite = false,
+	                const std::function<bool()>& beforeCommit = {}, const std::optional<FileSnapshot>& expected = {},
+	                std::filesystem::path* originalLocation = nullptr);
+
+	struct StagedStream
+	{
+		std::function<std::int64_t()> size;
+		std::function<bool(std::int64_t, std::span<std::uint8_t>)> read;
+		std::function<bool(std::int64_t, std::span<const std::uint8_t>)> write;
+	};
+
+	std::error_code write_staged_file(const std::filesystem::path& path, const FileSnapshot& expected,
+	                                 const std::function<bool(const StagedStream&)>& writer,
+	                                 const std::function<bool()>& beforeCommit,
+	                                 std::filesystem::path* originalLocation = nullptr);
 
 	// Companion files that must move, copy, and rename with their primary. Only existing ones.
 	std::vector<std::filesystem::path> sidecar_paths(const std::filesystem::path& primary);

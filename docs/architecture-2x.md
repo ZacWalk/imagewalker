@@ -45,5 +45,6 @@ product versions `2.0.0.0`, `2.2.0.0` and `2.3.0.0`. Take each public label from
 `APP_VERSION_NAME` in that application's `Ver.h`, and test it against the
 compiled version resource and About dialog.
 
-Keep Delete mapped to the Recycle Bin, F2 to Rename and F7 to Move To, and
-validate the compiled accelerator tables, not just the resource source.
+Keep Delete mapped to the Recycle Bin, F2 to Rename, and Ctrl+Shift+C and
+Ctrl+Shift+X to Copy and Move To. Verify the compiled accelerator tables,
+not just the resource sources; see [keyboard shortcuts](versions.md#keyboard-shortcuts).

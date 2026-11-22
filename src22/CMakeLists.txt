@@ -38,13 +38,6 @@ set(IW22_SOURCES
     ViewSpellEdit.cpp
 )
 
-# CMake's RelWithDebInfo downgrades /O2's implied /Ob2 to /Ob1, which limits
-# inlining to functions the source marked inline. The preset builds
-# RelWithDebInfo, so this is the release config.
-# Replaced rather than appended: appending /Ob2 leaves both on the command line
-# and every compile then reports D9025. Directory scope, so 2.2 only.
-string(REPLACE "/Ob1" "/Ob2" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
-
 add_executable(imagewalker22 WIN32 ${IW22_SOURCES} ImageWalker.rc)
 target_include_directories(imagewalker22 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(imagewalker22 PRIVATE UNICODE _UNICODE)

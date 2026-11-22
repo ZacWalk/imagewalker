@@ -252,6 +252,16 @@ namespace iw::platform
 		return result->create() ? result : ShellTreePtr{};
 	}
 
+	std::optional<std::vector<Breadcrumb>> child_folders(const std::filesystem::path& path)
+	{
+		const auto children = list_subfolders(path, exit_token());
+		if (!children) return std::nullopt;
+		std::vector<Breadcrumb> result;
+		result.reserve(children->size());
+		for (const auto& child : *children) result.push_back({child.path, child.label});
+		return result;
+	}
+
 	bool begin_file_drag(const WindowFramePtr&, std::span<const std::filesystem::path> paths)
 	{
 		if (paths.empty()) return false;

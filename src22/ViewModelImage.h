@@ -64,6 +64,7 @@ public:
 			if (loader.Read(IW::Path::FindExtension(_path), &file, image, pStatus) && !image.IsEmpty())
 			{						
 				_image = image;
+				_stamp = file.CaptureEditStamp(pStatus);
 				return true;										
 			}
 		}
@@ -73,12 +74,14 @@ public:
 
 	CString _path;
 	IW::Image _image;
+	std::optional<IW::EditFileStamp> _stamp;
 
 	bool _bSignalEvent;
 	long _nStartItem;
 	long _nLoadItem;
 	long _nDirection;
 	bool _bWasStopped;	
+	uint64_t _loadGeneration = 0;
 
 private:
 };
@@ -118,6 +121,8 @@ public:
 		  return _strAction;
 	  }
 
+	  void MarkDirty() { _bDirty = true; }
+
 	  virtual ~CUndo() 
 	  {
 	  }
@@ -144,6 +149,8 @@ class ImageState
 private:
 
 	bool _bDirty;		
+	std::optional<IW::EditFileStamp> _loadedStamp;
+	CString _savedKey;
 
 	ImageEditMode::Mode _editMode;
 
@@ -158,7 +165,7 @@ private:
 	IW::Image _image;	
 	IW::Image _imageRendered;	
 	IW::Image _imageThumbnail;
-	bool _bStopped;
+	uint64_t _loadGeneration = 0;
 
 	// True while what is on screen is the items pane's thumbnail standing in for
 	// a file the loader thread has not finished decoding, and the size that
@@ -180,7 +187,6 @@ public:
 			_pCoupling(coupling),
 			_bDirty(false),
 			_pItems(pItems),
-			_bStopped(false),
 			_loaders(loaders),
 			IsLoading(false),
 			_editMode(ImageEditMode::None)
@@ -225,6 +231,7 @@ public:
 	  }
 
 	  CString GetImageFileName() const { return _path; };
+	  const std::optional<IW::EditFileStamp> &GetLoadedStamp() const { return _loadedStamp; }
 	  const IW::Image &GetImage() const { return _image; }; 
 	  const IW::Image &GetThumbnailImage() const { return _imageThumbnail; };
 	  const IW::Image &GetRenderImage() const { return _imageRendered.IsEmpty() ? _image : _imageRendered; }; 
@@ -247,10 +254,18 @@ public:
 	  // operation or a folder change does not land an image nobody asked for.
 	  void StopLoading()
 	  {
+		  ++_loadGeneration;
 		  _pCoupling->SetStopLoading();	
-		  _bStopped = true;
 	  }
 
+private:
+	  void QueueLoad(CImageLoad *pInfo)
+	  {
+		  pInfo->_loadGeneration = ++_loadGeneration;
+		  _pCoupling->ShowImage(pInfo);
+	  }
+
+public:
 	  // Stands the items pane's thumbnail in for a file the loader thread is
 	  // about to decode. Not called with unsaved edits on screen: the prompt for
 	  // those belongs to OnLoadComplete, and it has not been asked yet.
@@ -281,20 +296,36 @@ public:
 
 	  bool CanDisplayNewImage(const CString &strNewImageName);
 
+	  bool ImportBitmap(HGLOBAL bitmap)
+	  {
+		  IW::Image image;
+		  if (!bitmap || !image.Copy(bitmap) || image.IsEmpty())
+			  return false;
+
+		  // A modal save prompt can dispatch a queued viewer completion.
+		  StopLoading();
+		  if (!_pCoupling->CanChangeImage() || !QuerySave())
+			  return false;
+
+		  SetImage(image, g_szEmptyString);
+		  UpdateStatusText();
+		  return true;
+	  }
+
 	  void OnLoadComplete(CImageLoad *pInfo)
 	  {
-		  if (!pInfo->_bWasStopped && !_bStopped)
+		  // Cancellation on the worker cannot change a result already posted.
+		  if (!pInfo->_bWasStopped && pInfo->_loadGeneration == _loadGeneration)
 		  {
 			  if (pInfo->WasImageLoaded())
 			  {
 				  // False means the user declined to leave the current image, or
 				  // an autosave failed. Stopping the walk is the point:
 				  // continuing would re-prompt on every frame of the show.
-				  if (!CanDisplayNewImage(pInfo->_path))
+				  if (!CanDisplayNewImage(pInfo->_path) || pInfo->_loadGeneration != _loadGeneration)
 					  return;
 
-				  ResetHistory();
-				  SetImage(pInfo->_image, pInfo->_path);				
+				  SetImage(pInfo->_image, pInfo->_path, pInfo->_stamp);
 
 				  if (pInfo->_bSignalEvent)
 				  {
@@ -319,14 +350,12 @@ public:
 
 	  void LoadImage(int nItem, bool bSignalEvent)
 	  {
-		  _bStopped = false;
-
 		  try
 		  {
 			  IW::RefPtr<CImageLoad> pNextInfo = new CImageLoad(_pItems->GetItemPath(nItem), 
 				  bSignalEvent, nItem, nItem, 0);		
 
-			  _pCoupling->ShowImage(pNextInfo);
+			  QueueLoad(pNextInfo);
 		  }
 		  catch (std::exception &)
 		  {
@@ -339,7 +368,7 @@ public:
 	  {
 		  const bool bWasLoaded = pInfo->WasImageLoaded();
 
-		  if (pInfo->_bWasStopped || _bStopped || bWasLoaded || pInfo->_nDirection == 0)
+		  if (pInfo->_bWasStopped || pInfo->_loadGeneration != _loadGeneration || bWasLoaded || pInfo->_nDirection == 0)
 			  return;
 
 		  const long nCount = _pItems->GetItemCount();
@@ -357,13 +386,13 @@ public:
 		  IW::RefPtr<CImageLoad> pNextInfo = new CImageLoad(_pItems->GetItemPath(nSeek), 
 			  pInfo->_bSignalEvent, pInfo->_nStartItem, nSeek, pInfo->_nDirection);		
 
-		  _pCoupling->ShowImage(pNextInfo);
+		  QueueLoad(pNextInfo);
 	  }
 
 	  void LoadNextImage(int nStep)
 	  {
+		  StopLoading();
 		  CLoadAny loader(_loaders);
-		  _bStopped = false;
 
 		  long nCount = _pItems->GetItemCount();
 		  int nSeek = _pItems->GetFocusItem() + nStep;
@@ -374,6 +403,7 @@ public:
 			  if (nSeek >= nCount) nSeek = 0;				  
 
 			  CImageLoad info(_pItems->GetItemPath(nSeek), true, nSeek, nSeek, nStep);
+			  info._loadGeneration = _loadGeneration;
 
 			  if (info.Load(loader, IW::CNullStatus::Instance))
 			  {
@@ -387,14 +417,15 @@ public:
 
 	  void Reload()
 	  {
+		  // The folder refresh already asked about unsaved edits. Keep the
+		  // current image and history if reading the replacement fails.
 		  CLoadAny loader(_loaders);
-		  CImageLoad info(_path, true, 0, 0, 0);
+		  CImageLoad info(_path, false, 0, 0, 0);
 			
 		  if (info.Load(loader, IW::CNullStatus::Instance))
 		  {
-			  _bStopped = false;
-			  OnLoadComplete(&info);
-			  return;
+			  SetImage(info._image, info._path, info._stamp);
+			  UpdateStatusText();
 		  }
 	  }
 
@@ -403,13 +434,13 @@ public:
 	  void ResetHistory()
 	  {
 		  _bDirty = false;
+		  _loadedStamp.reset();
+		  _savedKey.Empty();
 		  _arUndo.RemoveAll();
 	  }	
 
 	  void StepImage(int nStep)
 	  {
-		  _bStopped = false;
-
 		  const long nCount = _pItems->GetItemCount();
 
 		  if (nCount)
@@ -419,7 +450,7 @@ public:
 			  if (nSeek >= nCount) nSeek = 0;
 
 			  IW::RefPtr<CImageLoad> pNextInfo = new CImageLoad(_pItems->GetItemPath(nSeek), true, nSeek, nSeek, nStep);
-			  _pCoupling->ShowImage(pNextInfo);
+			  QueueLoad(pNextInfo);
 		  }
 	  }
 
@@ -470,34 +501,39 @@ public:
 
 	  void SetImage(IW::Image &image, const CString &strImageFileName)
 	  {
-		  ResetHistory();
-
-		  if (IW::GetMainWindow())
-		  {
-			  // Re-centring the scroll offset is exactly the bump the placeholder
-			  // exists to avoid, so replacing one keeps the offset it had. The
-			  // fade still runs -- it is what turns the blurred stand-in into the
-			  // real picture, and it interrupts the one already on screen.
-			  const bool bReplacingPlaceholder = _bPlaceholder &&
-				  GetImageFileName().CompareNoCase(strImageFileName) == 0;
-
-			  IW::Focus preserveFocus;
-
-			  if (App.Settings.m_bUseEffects)
-				  _pCoupling->BeginImageFade(bReplacingPlaceholder
-					                             ? FadeOverlay::quickSteps
-					                             : FadeOverlay::defaultSteps);
-
-			  _bPlaceholder = false;
-			  _bPlaceholderLoading = false;
-			  _sizeDisplay = CSize(0, 0);
-
-			  SetImage(image);
-			  UpdateFileInfo(strImageFileName);
-			  OnNewImage(!bReplacingPlaceholder);
-		  }
+		  StopLoading();
+		  SetImage(image, strImageFileName, {});
 	  }
 
+private:
+	  void SetImage(IW::Image &image, const CString &strImageFileName,
+	                const std::optional<IW::EditFileStamp> &stamp)
+	  {
+		  ResetHistory();
+		  _loadedStamp = stamp;
+		  _savedKey = image.GetLoaderName();
+
+		  // Keep the scroll offset when the real picture replaces its thumbnail.
+		  const bool bReplacingPlaceholder = _bPlaceholder &&
+			  GetImageFileName().CompareNoCase(strImageFileName) == 0;
+
+		  IW::Focus preserveFocus;
+
+		  if (IW::GetMainWindow() && App.Settings.m_bUseEffects)
+			  _pCoupling->BeginImageFade(bReplacingPlaceholder
+			                             ? FadeOverlay::quickSteps
+			                             : FadeOverlay::defaultSteps);
+
+		  _bPlaceholder = false;
+		  _bPlaceholderLoading = false;
+		  _sizeDisplay = CSize(0, 0);
+
+		  SetImage(image);
+		  UpdateFileInfo(strImageFileName);
+		  OnNewImage(!bReplacingPlaceholder);
+	  }
+
+public:
 	  void UpdateFileInfo(const CString &strImageFileName)
 	  {
 		  _path = strImageFileName;
@@ -560,12 +596,7 @@ public:
 
 			  IW::CMessageBoxIndirect mb;
 			  if (IDOK == mb.Show(IW::Format(IDS_QUERYUNDO, static_cast<LPCTSTR>(pUndo->GetAction())), MB_ICONQUESTION | MB_OKCANCEL | MB_HELP))
-			  {	
-				  pUndo->GetImageState(_image, _bDirty);
-				  _arUndo.RemoveAt(nTop);
-				  OnNewImage(false);
-				  UpdateStatusText(); 
-			  }
+				  UndoWithoutPrompt();
 		  }
 	  }
 
@@ -585,18 +616,28 @@ public:
 		  UpdateStatusText();
 	  }
 
-	  bool SaveFile(const IW::Image &image, const CString &strFileName, const CString &strType, IW::IStatus *pStatus)
+	  bool SaveFile(const CString &strFileName, const CString &strType, IW::IStatus *pStatus, bool inPlace)
 	  {
-		  bool bSucceeded = false;
-
 		  IW::CFileTemp f;
-		  if (f.OpenForWrite(strFileName))
-		  {
-			  CLoadAny loader(_loaders);
-				  bSucceeded = loader.Write(strType, &f, image, App.Settings.Codec, pStatus) && f.Close(pStatus);
-		  }	
+		  const bool opened = inPlace ? _loadedStamp && f.OpenForReplace(strFileName, *_loadedStamp)
+		                              : f.OpenForWrite(strFileName, true);
+		  if (!opened)
+			  return false;
 
-		  return bSucceeded;
+		  CLoadAny loader(_loaders);
+		  if (!loader.Write(strType, &f, GetImage(), App.Settings.Codec, pStatus) || !f.Close(pStatus))
+			  return false;
+
+		  _loadedStamp = f.CommittedStamp();
+		  _bDirty = false;
+		  // Undo now restores pixels different from the version on disk.
+		  for (int i = 0; i < _arUndo.GetSize(); ++i)
+			  _arUndo[i]->MarkDirty();
+		  _savedKey = strType;
+		  _image.SetLoaderName(strType);
+		  UpdateFileInfo(strFileName);
+		  UpdateStatusText();
+		  return true;
 	  }
 
 	  bool Save()
@@ -608,7 +649,7 @@ public:
 
 		  const CString strImageName = GetImageFileName();
 		  const IW::Image &image = GetImage();
-		  const CString strKey = image.GetLoaderName();
+		  const CString strKey = _savedKey.IsEmpty() ? image.GetLoaderName() : _savedKey;
 
 		  if (strKey.IsEmpty())
 		  {
@@ -623,10 +664,16 @@ public:
 			  }
 		  }
 
-		  return Save(strImageName, strKey);
+		  if (!_loadedStamp)
+		  {
+			  IW::CMessageBoxIndirect mb;
+			  mb.Show(_T("The original cannot be verified. Use Save As to keep it unchanged."));
+			  return false;
+		  }
+		  return Save(strImageName, strKey, true);
 	  }
 
-	  bool Save(const CString &strFilePath, const CString &strKey)
+	  bool Save(const CString &strFilePath, const CString &strKey, bool inPlace)
 	  {
 		  if (!IW::CFilePath::CheckFileName(strFilePath))
 		  {
@@ -666,17 +713,14 @@ public:
 			  return false;
 		  }
 
-		  bool bRet = SaveFile(image, strFilePath, strKey, IW::CNullStatus::Instance);
-
-		  if (bRet)
+		  IW::CFileWriteStatus status;
+		  const bool bRet = SaveFile(strFilePath, strKey, &status, inPlace);
+		  if (!bRet)
 		  {
-			  _bDirty = false;
-			  UpdateFileInfo(strFilePath);
-			  UpdateStatusText();
-		  }
-		  else
-		  {
-			  mb.ShowOsErrorWithFile(strFilePath, IDS_FAILEDTO_CREATE_FILE);
+			  if (!status.error.IsEmpty())
+				  mb.Show(status.error);
+			  else
+				  mb.Show(_T("The photo could not be saved. Check the destination or try Save As with a new filename."));
 		  }
 
 		  return bRet;
@@ -687,12 +731,18 @@ public:
 		  if (!IsImageReady())
 			  return false;
 
-		  CImageFileDialog dlg(_loaders, FALSE, NULL, GetImageFileName(), 0);
+		  CImageFileDialog dlg(_loaders, FALSE, NULL, GetImageFileName(), OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR);
 		  dlg.SetDefaults(GetImage());	
 
 		  if(dlg.DoModal() == IDOK)
 		  {
-			  return Save(dlg.m_ofn.lpstrFile, dlg.GetLoaderType());
+			  if (IW::Path::FileExists(dlg.m_ofn.lpstrFile))
+			  {
+				  IW::CMessageBoxIndirect mb;
+				  mb.Show(_T("Save As does not replace existing files. Choose a new filename."));
+				  return false;
+			  }
+			  return Save(dlg.m_ofn.lpstrFile, dlg.GetLoaderType(), false);
 		  }
 
 		  return false;

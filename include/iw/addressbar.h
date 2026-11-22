@@ -73,10 +73,12 @@ namespace IW
 			if (keyCode != VK_RETURN && keyCode != VK_ESCAPE)
 				return FALSE;
 
-			const HWND hWndFocus = ::GetFocus();
-			CEdit wndEdit = m_wndAddress.GetEditCtrl();
+			if (!m_wndAddress.IsWindow() || !pMsg->hwnd ||
+				(pMsg->hwnd != m_wndAddress && !m_wndAddress.IsChild(pMsg->hwnd)))
+				return FALSE;
 
-			if (hWndFocus != m_wndAddress && wndEdit != hWndFocus)
+			// While the list is open, Enter and Escape belong to the native combo.
+			if (m_wndAddress.GetComboCtrl().GetDroppedState())
 				return FALSE;
 
 			if (keyCode == VK_RETURN)
@@ -85,21 +87,15 @@ namespace IW
 				return TRUE;
 			}
 
-			const int nSelection = m_wndAddress.GetCurSel();
-
-			if (CB_ERR != nSelection)
-			{
-				m_wndAddress.SetCurSel(nSelection);
-				return TRUE;
-			}
-
-			return FALSE;
+			m_wndAddress.GetEditCtrl().SetWindowText(m_addressText);
+			return TRUE;
 		}
 
 		// Show a folder without navigating to it - the frame calls this when the
 		// folder changed for some other reason.
 		void SetAddress(LPCTSTR szName, int nIcon)
 		{
+			m_addressText = szName;
 			COMBOBOXEXITEM cbi = {0};
 
 			cbi.mask = CBEIF_IMAGE | CBEIF_SELECTEDIMAGE | CBEIF_TEXT;
@@ -272,7 +268,11 @@ namespace IW
 			// ::CString - 2.2 declares an IW::CString of its own, which shadows
 			// ATL's for unqualified lookup inside this namespace.
 			::CString strEntered;
-			m_wndAddress.GetWindowText(strEntered);
+			m_wndAddress.GetEditCtrl().GetWindowText(strEntered);
+			strEntered.Trim();
+			if (strEntered.GetLength() >= 2 && strEntered[0] == _T('"') &&
+				strEntered[strEntered.GetLength() - 1] == _T('"'))
+				strEntered = strEntered.Mid(1, strEntered.GetLength() - 2);
 
 			if (strEntered.IsEmpty())
 				return;
@@ -295,7 +295,7 @@ namespace IW
 			// parsed the typed text twice.
 			::CString strCurrent;
 
-			if (!itemCurrent.IsNull() && itemCurrent.GetPath(strCurrent))
+			if (::PathIsRelative(strEntered) && !itemCurrent.IsNull() && itemCurrent.GetPath(strCurrent))
 			{
 				TCHAR szCombined[MAX_PATH] = {0};
 
@@ -311,12 +311,23 @@ namespace IW
 		}
 
 	private:
+		::CString m_addressText;
+
 		bool NavigateToPath(LPCTSTR szPath)
 		{
 			CShellItem item;
 
 			if (!item.Open(szPath))
 				return false;
+			if (!item.IsDesktop())
+			{
+				SHFILEINFO info{};
+				info.dwAttributes = SFGAO_FOLDER;
+				if (!::SHGetFileInfo(reinterpret_cast<LPCTSTR>(item.GetItem()), 0, &info, sizeof(info),
+				                     SHGFI_PIDL | SHGFI_ATTRIBUTES | SHGFI_ATTR_SPECIFIED) ||
+					!(info.dwAttributes & SFGAO_FOLDER))
+					return false;
+			}
 
 			static_cast<T*>(this)->AddressNavigate(item);
 			return true;

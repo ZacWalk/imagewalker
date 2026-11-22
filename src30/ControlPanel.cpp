@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <format>
+#include <utility>
 
 namespace iw::ui
 {
@@ -75,11 +76,49 @@ namespace iw::ui
 	{
 		const int lineHeight = (std::max)(metric(16), renderer.measure_text(L"Wg").height);
 		int y = bounds.y;
-		for (auto& control : controls_)
+		size_t rowEnd = 0;
+		for (size_t i = 0; i < controls_.size(); ++i)
 		{
-			const int left = bounds.x + control.indent * metric(indentStep);
-			const int width = (std::max)(metric(40), bounds.right() - left);
+			auto& control = controls_[i];
+			control.valueHit = {};
+			if (!control.visible)
+			{
+				control.bounds = control.hit = {};
+				continue;
+			}
+			int left = bounds.x + control.indent * metric(indentStep);
+			int width = (std::max)(0, bounds.right() - left);
+			if (compact_ && control.kind == ControlKind::button && control.buttonRow && i >= rowEnd)
+			{
+				rowEnd = i + 1;
+				int widest = renderer.measure_text(control.label).width;
+				while (rowEnd < controls_.size() && controls_[rowEnd].visible &&
+				       controls_[rowEnd].kind == ControlKind::button &&
+				       controls_[rowEnd].buttonRow == control.buttonRow)
+				{
+					widest = (std::max)(widest, renderer.measure_text(controls_[rowEnd].label).width);
+					++rowEnd;
+				}
+				if ((widest + metric(12)) * static_cast<int>(rowEnd - i) > width) rowEnd = i + 1;
+				else if (rowEnd > i + 1)
+				{
+					const int columns = static_cast<int>(rowEnd - i);
+					const int cell = width / columns;
+					while (i < rowEnd)
+					{
+						auto& button = controls_[i++];
+						button.bounds = button.hit = {left, y, cell - metric(4), metric(27)};
+						left += cell;
+					}
+					--i;
+					y += metric(32);
+					continue;
+				}
+			}
 			int height = lineHeight;
+			const int valueWidth = compact_ && control.showValue ? (std::min)(metric(48), width / 2) : 0;
+			const int labelWidth = (std::max)(metric(96), renderer.measure_text(control.label).width + metric(8));
+			const bool inlineSlider = compact_ && width - labelWidth - valueWidth >= metric(76);
 			switch (control.kind)
 			{
 			case ControlKind::heading: height = lineHeight + metric(4); break;
@@ -91,13 +130,16 @@ namespace iw::ui
 			}
 			case ControlKind::checkBox:
 			case ControlKind::radio: height = (std::max)(lineHeight, metric(checkSize)); break;
-			case ControlKind::slider: height = lineHeight + metric(sliderHeight); break;
+			case ControlKind::slider:
+				height = inlineSlider ? (std::max)(metric(24), lineHeight) : lineHeight + metric(sliderHeight);
+				break;
 			case ControlKind::choice:
 			case ControlKind::folder:
 			case ControlKind::text: height = lineHeight + metric(fieldHeight); break;
 			case ControlKind::button: height = metric(buttonHeight); break;
 			case ControlKind::link: height = lineHeight; break;
 			case ControlKind::separator: height = metric(rowSpacing) * 2; break;
+			case ControlKind::custom: height = metric(98); break;
 			}
 			control.bounds = {left, y, width, height};
 			switch (control.kind)
@@ -105,8 +147,15 @@ namespace iw::ui
 			case ControlKind::checkBox:
 			case ControlKind::radio:
 			case ControlKind::link:
-			case ControlKind::button: control.hit = control.bounds; break;
-			case ControlKind::slider: control.hit = {left, y + lineHeight, width, metric(sliderHeight)}; break;
+			case ControlKind::button:
+			case ControlKind::custom: control.hit = control.bounds; break;
+			case ControlKind::slider:
+				control.hit = inlineSlider ? app::recti{left + labelWidth, y, width - labelWidth - valueWidth, height}
+				                           : app::recti{left, y + lineHeight, width - valueWidth, metric(sliderHeight)};
+				if (valueWidth > 0)
+					control.valueHit = {control.hit.right() + metric(4), control.hit.y, valueWidth - metric(4),
+					                    control.hit.height};
+				break;
 			case ControlKind::choice: control.hit = {left, y + lineHeight, width, metric(fieldHeight)}; break;
 			case ControlKind::folder:
 			{
@@ -117,7 +166,7 @@ namespace iw::ui
 			case ControlKind::text: control.hit = {left, y + lineHeight, width, metric(fieldHeight)}; break;
 			default: control.hit = {}; break;
 			}
-			y += height + metric(rowSpacing);
+			y += height + metric(compact_ ? (control.kind == ControlKind::slider ? 3 : 7) : rowSpacing);
 		}
 		contentHeight_ = y - bounds.y;
 	}
@@ -143,14 +192,17 @@ namespace iw::ui
 
 		for (const auto& control : controls_)
 		{
+			if (!control.visible) continue;
 			const bool enabled = interactive_ && control.enabled;
 			const color foreground = enabled ? text : disabled;
 			const bool hot = enabled && control.id == hotId_;
 			switch (control.kind)
 			{
 			case ControlKind::heading:
-				renderer.text(control.label, control.bounds, foreground,
-				              platform::TextFormat::left | platform::TextFormat::singleLine);
+				renderer.text(control.badge.empty() ? control.label : control.badge + L"  " + control.label,
+				              control.bounds, foreground,
+				              platform::TextFormat::left | platform::TextFormat::singleLine |
+				                  platform::TextFormat::endEllipsis);
 				renderer.outline({control.bounds.x, control.bounds.bottom() - 1, control.bounds.width, 1}, shadow);
 				break;
 
@@ -192,23 +244,48 @@ namespace iw::ui
 
 			case ControlKind::slider:
 			{
+				const auto number = control.readout ? control.readout(control.value) : std::to_wstring(control.value);
 				const auto readout = control.showValue ? std::format(L"{}{}{}", control.label.empty() ? L"" : L" ",
-				                                                     control.value, control.suffix)
+				                                                     number, control.suffix)
 				                                       : std::wstring{};
-				renderer.text(control.label + readout,
-				              {control.bounds.x, control.bounds.y, control.bounds.width, lineHeight}, foreground,
-				              platform::TextFormat::left | platform::TextFormat::singleLine);
+				const bool inlineSlider = control.hit.y == control.bounds.y;
+				const auto labelBounds = inlineSlider ? app::recti{control.bounds.x, control.bounds.y,
+				                                                   control.hit.x - control.bounds.x, control.hit.height}
+				                                      : app::recti{control.bounds.x, control.bounds.y,
+				                                                   control.bounds.width, lineHeight};
+				renderer.text(compact_ ? control.label : control.label + readout, labelBounds, foreground,
+				              platform::TextFormat::left | platform::TextFormat::verticalCenter |
+				                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
+				if (compact_ && control.showValue)
+				{
+					renderer.outline(control.valueHit, hot ? highlight : shadow);
+					renderer.text(number + control.suffix, control.valueHit, foreground,
+					              platform::TextFormat::center | platform::TextFormat::verticalCenter |
+					                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
+				}
 				const app::recti track{control.hit.x, control.hit.y + control.hit.height / 2 - metric(2),
 				                       control.hit.width, metric(4)};
-				renderer.fill(track, face);
-				renderer.outline(track, shadow);
+				renderer.fill(track, compact_ ? shadow : face);
+				if (!compact_) renderer.outline(track, shadow);
 				const auto span = (std::max)(1LL, static_cast<long long>(control.maximum) - control.minimum);
 				const int travel = (std::max)(0, control.hit.width - metric(10));
 				const int offset = static_cast<int>(
 					travel * std::clamp(static_cast<long long>(control.value) - control.minimum, 0LL, span) / span);
 				const app::recti thumb{control.hit.x + offset, control.hit.y + metric(2), metric(10),
 				                       control.hit.height - metric(4)};
-				renderer.fill(thumb, platform::calc_hande_color(hot, dragging_ && control.id == pressedId_, false));
+				if (compact_ && enabled)
+				{
+					const int zero = control.minimum < 0 && control.maximum > 0
+					                     ? static_cast<int>(travel * -static_cast<long long>(control.minimum) / span)
+					                     : 0;
+					renderer.fill({track.x + (std::min)(zero, offset) + metric(5), track.y, std::abs(offset - zero),
+					               track.height},
+					              highlight);
+				}
+				renderer.fill(thumb,
+				              compact_ && enabled
+				                  ? (hot ? highlight : foreground)
+				                  : platform::calc_hande_color(hot, dragging_ && control.id == pressedId_, false));
 				renderer.outline(thumb, enabled ? shadow : disabled);
 				break;
 			}
@@ -263,11 +340,18 @@ namespace iw::ui
 			}
 
 			case ControlKind::button:
-				renderer.fill(control.hit, platform::calc_hande_color(hot, control.id == pressedId_, false));
-				renderer.outline(control.hit, enabled ? shadow : disabled);
+				if (hot || !compact_)
+				{
+					renderer.fill(control.hit, platform::calc_hande_color(hot, control.id == pressedId_, false));
+					renderer.outline(control.hit, enabled ? shadow : disabled);
+				}
 				renderer.text(control.label, control.hit, foreground,
 				              platform::TextFormat::center | platform::TextFormat::verticalCenter |
-				                  platform::TextFormat::singleLine);
+				                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
+				break;
+
+			case ControlKind::custom:
+				if (control.draw) control.draw(renderer, control.bounds);
 				break;
 
 			case ControlKind::link:
@@ -285,8 +369,8 @@ namespace iw::ui
 		if (!interactive_) return nullptr;
 		for (auto& control : controls_)
 		{
-			if (!control.enabled || control.hit.width <= 0) continue;
-			if (control.hit.contains(point)) return &control;
+			if (!control.visible || !control.enabled || control.hit.width <= 0) continue;
+			if (control.hit.contains(point) || control.valueHit.contains(point)) return &control;
 		}
 		return nullptr;
 	}
@@ -309,8 +393,9 @@ namespace iw::ui
 
 	bool ControlPanel::focusable(const Control& control)
 	{
-		return control.enabled && control.id != 0 && control.kind != ControlKind::heading &&
-		       control.kind != ControlKind::label && control.kind != ControlKind::separator;
+		return control.enabled && control.visible && control.id != 0 && control.kind != ControlKind::heading &&
+		       control.kind != ControlKind::label && control.kind != ControlKind::separator &&
+		       control.kind != ControlKind::custom;
 	}
 
 	void ControlPanel::notify_changed(const Control& control) const
@@ -444,7 +529,9 @@ namespace iw::ui
 		if (dragging_)
 		{
 			auto* control = find(pressedId_);
-			if (interactive_ && control && control->enabled && control->kind == ControlKind::slider)
+			if (interactive_ && control && control->enabled && control->kind == ControlKind::custom && control->mouse)
+				control->mouse(platform::MouseMessage::move, control->bounds, point);
+			else if (interactive_ && control && control->enabled && control->kind == ControlKind::slider)
 			{
 				const int value = slider_value_at(*control, point.x);
 				if (value != control->value)
@@ -485,7 +572,13 @@ namespace iw::ui
 
 		case ControlKind::slider:
 		{
+			if (control->valueHit.contains(point))
+			{
+				if (const auto activate = activate_) activate(*control);
+				return true;
+			}
 			dragging_ = true;
+			dragValue_ = control->value;
 			const int value = slider_value_at(*control, point.x);
 			if (value != control->value)
 			{
@@ -494,6 +587,12 @@ namespace iw::ui
 			}
 			return true;
 		}
+
+		case ControlKind::custom:
+			dragging_ = control->mouse &&
+			            control->mouse(platform::MouseMessage::leftButtonDown, control->bounds, point);
+			if (!dragging_) pressedId_ = 0;
+			return dragging_;
 
 		case ControlKind::choice:
 		case ControlKind::folder:
@@ -512,13 +611,42 @@ namespace iw::ui
 		}
 	}
 
-	bool ControlPanel::mouse_up(const app::pointi)
+	bool ControlPanel::mouse_up(const app::pointi point)
 	{
 		const bool wasDragging = dragging_ || pressedId_ != 0;
+		const auto id = std::exchange(pressedId_, 0);
+		const bool captured = dragging_;
 		dragging_ = false;
-		pressedId_ = 0;
+		if (auto* control = find(id); captured && control && control->kind == ControlKind::custom && control->mouse)
+			control->mouse(platform::MouseMessage::leftButtonUp, control->bounds, point);
 		if (invalidate_) invalidate_();
 		return wasDragging;
+	}
+
+	bool ControlPanel::cancel_drag()
+	{
+		if (!dragging_) return false;
+		const auto id = std::exchange(pressedId_, 0);
+		dragging_ = false;
+		if (auto* control = find(id))
+		{
+			if (control->kind == ControlKind::custom && control->mouse)
+				control->mouse(platform::MouseMessage::leave, control->bounds, {});
+			else if (control->value != dragValue_)
+			{
+				control->value = dragValue_;
+				notify_changed(*control);
+			}
+		}
+		if (invalidate_) invalidate_();
+		return true;
+	}
+
+	bool ControlPanel::double_click(const app::pointi point)
+	{
+		auto* control = control_at(point);
+		if (!control || control->kind != ControlKind::custom || !control->mouse) return false;
+		return control->mouse(platform::MouseMessage::leftButtonDoubleClick, control->bounds, point);
 	}
 
 	void ControlPanel::mouse_leave()

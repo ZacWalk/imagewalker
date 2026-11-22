@@ -21,57 +21,19 @@
 #include <stdio.h>
 #include <tchar.h>
 
-#include <atlbase.h>
-#include <atlstr.h>
-
-// The Vista menu path in atlctrlw.h owner-draws through a bitmap it builds per
-// item; the other four apps all turn it off, and the command bar is custom-drawn
-// here as well.
-#define _WTL_CMDBAR_VISTA_MENUS 0
-
-#include <atlapp.h>
-
-extern CAppModule _Module;
-
-#include <atlwin.h>
-#include <atlframe.h>
-#include <atlsplit.h>
-#include <atlctrls.h>
-#include <atlctrlw.h>
-#include <atlctrlx.h>
-#include <atldlgs.h>
-#include <atlgdi.h>
-#include <atluser.h>
-#include <atlmisc.h>
-#include <atlcrack.h>
-
-// atlapp.h drags in atlres.h, which claims ID_EDIT_DELETE and ID_VIEW_REFRESH
-// for the standard WTL command ids. ImageWalker 1.0's resource.h assigns its own values
-// to both, and its menus and accelerators are built against those.
-#undef ID_EDIT_DELETE
-#undef ID_VIEW_REFRESH
-
-#include <wininet.h>
+#include "SdkUi.h"
 #include <shlobj.h>
 #include <shlwapi.h>
-#include <commctrl.h>
+#include <objbase.h>
 
-// The diagnostics the 1998 sources use, over the ones the CRT and ATL supply.
 #ifndef ASSERT
-#define ASSERT(expr) ATLASSERT(expr)
+#define ASSERT(expr) assert(expr)
 #endif
 #ifndef VERIFY
-#ifdef _DEBUG
-#define VERIFY(expr) ATLASSERT(expr)
-#else
 #define VERIFY(expr) ((void)(expr))
 #endif
-#endif
-#ifndef TRACE
-#define TRACE ATLTRACE
-#endif
 #ifndef ASSERT_VALID
-#define ASSERT_VALID(p) ATLASSERT((p) != NULL)
+#define ASSERT_VALID(p) assert((p) != nullptr)
 #endif
 
 // MFC's leak-tracking allocator; the CRT debug heap covers this now.
@@ -81,6 +43,8 @@ extern CAppModule _Module;
 #ifndef SHGDN_INCLUDE_NONFILESYS
 #define SHGDN_INCLUDE_NONFILESYS 0x2000
 #endif
+
+using CString = CText;
 
 #include "Error.h"
 #include "Settings.h"

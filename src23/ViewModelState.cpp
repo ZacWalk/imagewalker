@@ -44,14 +44,11 @@ bool ImageState::QuerySave()
 		CString str = IW::Format(IDS_SAVE_CHANGES, IW::Path::FindFileName(GetImageFileName()), static_cast<LPCTSTR>(GetChangesList()));
 		CYesNoDlg dlg(GetImage(), str);
 		int nRet = static_cast<int>(dlg.DoModal());
-		if (nRet == IDCANCEL)
-		{
-			return false;
-		}
 		if (nRet == IDYES)
 		{
 			return Save();
 		}
+		return nRet == IDNO;
 	}
 
 	return true;

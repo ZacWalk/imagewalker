@@ -25,7 +25,7 @@
 #include "iw/legacy/MetadataExif.h"
 #include "iw/legacy/ImagingBlitter.h"
 #include "ViewRenderSurface.h"
-#include "ViewRenameDlg.h"
+#include "iw/legacy/ViewRenameDlg.h"
 #include "ViewAboutDlg.h"
 
 #include "iw/commontests.h"

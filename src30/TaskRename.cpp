@@ -39,7 +39,6 @@ namespace iw
 			{
 			case 1: return tasks::CollisionPolicy::skip;
 			case 2: return tasks::CollisionPolicy::autoRename;
-			case 3: return tasks::CollisionPolicy::replace;
 			default: return tasks::CollisionPolicy::block;
 			}
 		}
@@ -100,6 +99,8 @@ namespace iw::rename
 			std::vector<Snapshot> sourceState;
 			std::vector<Snapshot> destinationState;
 			std::filesystem::path parent;
+			std::optional<files::FileSnapshot> parentState;
+			bool direct{};
 		};
 
 		std::filesystem::path canonical_parent(const std::filesystem::path& path)
@@ -305,9 +306,7 @@ namespace iw::rename
 		const auto destinations = bundle(row, row.destination);
 		const auto reviewed = std::static_pointer_cast<const Reviewed>(row.context);
 		std::vector<std::pair<std::filesystem::path, std::filesystem::path>> moved;
-		std::vector<std::filesystem::path> replaced;
 		moved.reserve(sources.size());
-		replaced.reserve(sources.size());
 		try
 		{
 			// Stage all occupied members before moving any part of this logical row.
@@ -330,23 +329,13 @@ namespace iw::rename
 						throw std::runtime_error("A name exchange could not be staged.");
 					continue;
 				}
-				const bool approved = reviewed ? reviewed->destinationState[index].exists && row.replace
-				                               : index == 0 && row.replace;
-				if (approved && reviewed && !reviewed->destinationState[index].same(current))
-					throw std::runtime_error("The approved replacement changed after Review.");
-				if (!approved)
+				if (index == 0)
 				{
-					if (index == 0)
-					{
-						row.state = tasks::RowState::skipped;
-						row.change = L"Skipped - the name was taken after review";
-						return;
-					}
-					throw std::runtime_error("A companion destination was taken after review.");
+					row.state = tasks::RowState::skipped;
+					row.change = L"Skipped - the name was taken after review";
+					return;
 				}
-				if (!current.writable_item() || current.directory || !staging.stage(target, mutatedPaths))
-					throw std::runtime_error("The approved replacement could not be staged.");
-				replaced.push_back(staging.actual(target));
+				throw std::runtime_error("A companion destination was taken after review.");
 			}
 			for (size_t index = 0; index < sources.size(); ++index)
 			{
@@ -359,7 +348,13 @@ namespace iw::rename
 					if (paths::equal(source, sources[index])) mutatedPaths->push_back(sources[index]);
 					mutatedPaths->push_back(destinations[index]);
 				}
-				if (const auto failure = files::move_file_to(source, destinations[index], false))
+				const auto expected = Snapshot::read(source);
+				if (reviewed &&
+				    (!expected.valid || !expected.exists || expected.volume != reviewed->sourceState[index].volume ||
+				     expected.index != reviewed->sourceState[index].index))
+					throw std::runtime_error("A source or companion changed before it could be renamed.");
+				if (const auto failure = files::move_file_to(source, destinations[index], false,
+				                                             [&] { return expected.same(Snapshot::read(source)); }))
 				{
 					moved.pop_back();
 					throw std::runtime_error(index ? "A companion file could not be renamed." : failure.message());
@@ -383,22 +378,13 @@ namespace iw::rename
 			throw;
 		}
 		for (const auto& [destination, source] : moved) staging.settled(source);
-		for (const auto& backup : replaced)
-		{
-			std::error_code error;
-			if (std::filesystem::remove(files::native_path(backup), error)) staging.settled(backup);
-			else
-			{
-				staging.settled(backup);
-				row.detail += std::format(L" Previous destination retained at {}.", backup.wstring());
-			}
-		}
 		row.change = row.destination.filename().wstring();
 	}
 
-	tasks::TaskPlan analyze(const std::vector<std::filesystem::path>& sources, const std::wstring_view templateText,
-	                        const int start, const tasks::CollisionPolicy policy, const std::stop_token& stop,
-	                        const tasks::ProgressFunction& progress)
+	static tasks::TaskPlan make_plan(const std::vector<std::filesystem::path>& sources,
+	                                 const std::wstring_view templateText, const int start,
+	                                 const tasks::CollisionPolicy policy, const std::stop_token& stop,
+	                                 const tasks::ProgressFunction& progress, const bool direct)
 	{
 		tasks::TaskPlan plan;
 		if (templateText.empty())
@@ -424,6 +410,8 @@ namespace iw::rename
 			if (!directory) row.sidecars = files::sidecar_paths(row.source);
 			auto review = std::make_shared<Reviewed>();
 			review->parent = parent;
+			review->parentState = files::snapshot_file(parent);
+			review->direct = direct;
 			review->sources.push_back(row.source);
 			review->sources.insert(review->sources.end(), row.sidecars.begin(), row.sidecars.end());
 			for (const auto& source : review->sources)
@@ -434,11 +422,18 @@ namespace iw::rename
 					row.state = tasks::RowState::blocked;
 					row.change = L"A selected item or companion belongs to more than one row.";
 				}
-				if (!review->sourceState.back().writable_item() || parent.empty())
+				const auto& state = review->sourceState.back();
+				if (!state.valid || !state.exists || state.reparse || (direct && !state.writable_item()) ||
+				    !review->parentState || !review->parentState->directory || review->parentState->reparse)
 				{
 					row.state = tasks::RowState::blocked;
 					row.change = L"A source or companion is missing, read-only, or not a local regular item.";
 				}
+			}
+			if (directory && !direct)
+			{
+				row.state = tasks::RowState::blocked;
+				row.change = L"Batch Rename makes file copies. Use Rename for a single folder.";
 			}
 			const auto metadata = files::read_metadata(row.source);
 			const auto name = expand_name(templateText, metadata, row.source, start + static_cast<int>(index),
@@ -472,103 +467,68 @@ namespace iw::rename
 					row.change = L"Rename a selected folder separately from items inside it.";
 				}
 
-		// Removing a skipped source can turn an apparent cycle into an ordinary collision. Iterate
-		// until every row still advertised as moving really vacates its source.
-		for (size_t pass = 0; pass <= plan.rows.size(); ++pass)
+		PathSet claimed;
+		for (size_t index = 0; index < plan.rows.size(); ++index)
 		{
-			PathSet active;
-			for (const auto& row : plan.rows)
+			auto& row = plan.rows[index];
+			if (row.state == tasks::RowState::blocked || row.state == tasks::RowState::skipped) continue;
+			bool disk = false, duplicate = false, inaccessible = false;
+			const auto collision = [&](const std::filesystem::path& candidate)
 			{
-				if (row.state == tasks::RowState::blocked || row.state == tasks::RowState::skipped) continue;
-				active.insert(row.source.native());
-				for (const auto& sidecar : row.sidecars) active.insert(sidecar.native());
-			}
-			PathSet claimed;
-			bool removed = false;
-			for (size_t index = 0; index < plan.rows.size(); ++index)
+				disk = duplicate = inaccessible = false;
+				PathSet members;
+				for (const auto& target : bundle(row, candidate))
+				{
+					const auto state = Snapshot::read(target);
+					inaccessible |= !state.valid;
+					duplicate |= claimed.contains(target.native()) || !members.insert(target.native()).second;
+					disk |= state.exists || allSources.contains(target.native());
+				}
+				return disk || duplicate || inaccessible;
+			};
+			if (collision(row.destination))
 			{
-				auto& row = plan.rows[index];
-				if (row.state == tasks::RowState::blocked || row.state == tasks::RowState::skipped) continue;
-				row.destination = proposed[index];
-				row.replace = false;
-				row.change.clear();
-				bool disk = false, duplicate = false, protectedSource = false, inaccessible = false;
-				const auto collision = [&](const std::filesystem::path& candidate)
+				if (policy == tasks::CollisionPolicy::autoRename)
 				{
-					disk = duplicate = protectedSource = inaccessible = false;
-					PathSet members;
-					for (const auto& target : bundle(row, candidate))
+					const auto stem = proposed[index].stem().wstring();
+					const auto extension = proposed[index].extension().wstring();
+					bool found = false;
+					for (int suffix = 2; suffix <= 10000; ++suffix)
 					{
-						const auto state = Snapshot::read(target);
-						inaccessible |= !state.valid;
-						duplicate |= claimed.contains(target.native()) || !members.insert(target.native()).second;
-						if (!active.contains(target.native()) && state.exists)
-						{
-							disk = true;
-							protectedSource |= allSources.contains(target.native());
-							inaccessible |= !state.writable_item() || state.directory;
-						}
+						if (stop.stop_requested()) break;
+						auto candidate = proposed[index].parent_path() /
+						                 std::format(L"{} ({}){}", stem, suffix, extension);
+						if (candidate.filename().native().size() > 255) break;
+						if (collision(candidate)) continue;
+						row.destination = std::move(candidate);
+						row.change = L"Auto-renamed";
+						found = true;
+						break;
 					}
-					return disk || duplicate || inaccessible;
-				};
-				if (collision(row.destination))
-				{
-					if (policy == tasks::CollisionPolicy::autoRename)
-					{
-						const auto sourceState = Snapshot::read(row.source);
-						const bool directory = sourceState.directory;
-						const auto stem = directory ? proposed[index].filename().wstring()
-						                            : proposed[index].stem().wstring();
-						const auto extension = directory ? L"" : proposed[index].extension().wstring();
-						bool found = false;
-						for (int suffix = 2; suffix <= 10000; ++suffix)
-						{
-							if (stop.stop_requested()) break;
-							auto candidate = proposed[index].parent_path() /
-							                 std::format(L"{} ({}){}", stem, suffix, extension);
-							if (candidate.filename().native().size() > 255) break;
-							if (collision(candidate)) continue;
-							row.destination = std::move(candidate);
-							row.change = L"Auto-renamed";
-							found = true;
-							break;
-						}
-						if (!found)
-						{
-							row.state = tasks::RowState::blocked;
-							row.change = L"No free name for this item and all its companions.";
-							removed = true;
-							continue;
-						}
-					}
-					else if (policy == tasks::CollisionPolicy::skip)
-					{
-						row.state = tasks::RowState::skipped;
-						row.change = L"Skip - the item or a companion destination is occupied.";
-						removed = true;
-						continue;
-					}
-					else if (policy == tasks::CollisionPolicy::replace && !duplicate && !protectedSource &&
-					         !inaccessible)
-					{
-						row.replace = true;
-						row.change = L"Replace existing item or companion";
-					}
-					else
+					if (!found)
 					{
 						row.state = tasks::RowState::blocked;
-						row.change = duplicate         ? L"Two items or companions claim this name."
-						             : protectedSource ? L"The name belongs to an original that is not being moved."
-						             : inaccessible    ? L"A destination is inaccessible, read-only, or a folder."
-						                               : L"File or companion exists.";
-						removed = true;
+						row.change = L"No free name for this item and all its companions.";
 						continue;
 					}
 				}
-				row.state = tasks::RowState::ready;
-				for (const auto& target : bundle(row, row.destination)) claimed.insert(target.native());
+				else if (policy == tasks::CollisionPolicy::skip)
+				{
+					row.state = tasks::RowState::skipped;
+					row.change = L"Skip - the item or a companion destination is occupied.";
+					continue;
+				}
+				else
+				{
+					row.state = tasks::RowState::blocked;
+					row.change = duplicate      ? L"Two items or companions claim this name."
+					             : inaccessible ? L"A destination could not be inspected."
+					                            : L"File or companion exists.";
+					continue;
+				}
 			}
-			if (!removed) break;
+			row.state = tasks::RowState::ready;
+			for (const auto& target : bundle(row, row.destination)) claimed.insert(target.native());
 		}
 
 		for (auto& row : plan.rows)
@@ -583,8 +543,7 @@ namespace iw::rename
 			row.context = std::move(review);
 			if (row.state == tasks::RowState::blocked && plan.blockReason.empty()) plan.blockReason = row.change;
 			if (row.state == tasks::RowState::skipped) ++plan.skips;
-			if (row.replace) ++plan.replacements;
-			if (row.replace || row.change.starts_with(L"Auto-renamed") || row.change.starts_with(L"Skip -") ||
+			if (row.change.starts_with(L"Auto-renamed") || row.change.starts_with(L"Skip -") ||
 			    (row.state == tasks::RowState::blocked && !row.destination.empty()))
 				++plan.collisions;
 		}
@@ -594,9 +553,16 @@ namespace iw::rename
 		return plan;
 	}
 
+	tasks::TaskPlan analyze(const std::vector<std::filesystem::path>& sources, const std::wstring_view templateText,
+	                        const int start, const tasks::CollisionPolicy policy, const std::stop_token& stop,
+	                        const tasks::ProgressFunction& progress)
+	{
+		return make_plan(sources, templateText, start, policy, stop, progress, false);
+	}
+
 	tasks::TaskPlan direct_plan(const std::filesystem::path& source, const std::wstring_view filename)
 	{
-		auto plan = analyze({source}, L"{name}", 1, tasks::CollisionPolicy::block);
+		auto plan = make_plan({source}, L"{name}", 1, tasks::CollisionPolicy::block, {}, {}, true);
 		if (plan.rows.size() != 1 || plan.rows.front().state == tasks::RowState::blocked) return plan;
 		auto& row = plan.rows.front();
 		if (const auto problem = paths::validate_file_name(filename);
@@ -633,6 +599,90 @@ namespace iw::rename
 
 	tasks::RunOptions run_options(const tasks::TaskPlan& plan)
 	{
+		auto direct = plan.rows.size() == 1 ? std::static_pointer_cast<const Reviewed>(plan.rows.front().context)
+		                                    : nullptr;
+		if (!direct || !direct->direct)
+		{
+			const auto copied = std::make_shared<std::vector<std::filesystem::path>>();
+			const auto sameParent = [](const Reviewed& review)
+			{
+				const auto current = files::snapshot_file(review.parent);
+				return current && current->directory && !current->reparse && review.parentState &&
+				       current->volume == review.parentState->volume &&
+				       current->identity == review.parentState->identity;
+			};
+			tasks::RunOptions options;
+			options.undoLabel = L"Batch Rename copies";
+			options.undoPartial = true;
+			options.undoPaths = [](const tasks::TaskRow& row)
+			{
+				return bundle(row, row.destination);
+			};
+			options.undoMutatedPaths = [copied](const tasks::TaskRow&)
+			{
+				return *copied;
+			};
+			options.revalidate = [sameParent](tasks::TaskRow& row)
+			{
+				const auto review = std::static_pointer_cast<const Reviewed>(row.context);
+				if (review && !review->direct && !row.replace && !review->sources.empty() &&
+				    row.source == review->sources.front() && bundle(row, row.source) == review->sources &&
+				    bundle(row, row.destination) == review->destinations && sameParent(*review) &&
+				    files::sidecar_paths(row.source) == row.sidecars)
+				{
+					for (size_t index = 0; index < review->sources.size(); ++index)
+						if (review->sourceState[index].directory ||
+						    !review->sourceState[index].same(Snapshot::read(review->sources[index])))
+						{
+							row.detail = L"A photo or companion changed after Review. Analyze again.";
+							return false;
+						}
+					return true;
+				}
+				row.detail = L"The files or folder changed after Review. Analyze again.";
+				return false;
+			};
+			const bool ready = plan.can_run();
+			options.act = [copied, validate = options.revalidate, sameParent, ready](tasks::TaskRow& row)
+			{
+				copied->clear();
+				if (!ready || !validate(row))
+				{
+					row.state = tasks::RowState::failed;
+					return;
+				}
+				const auto review = std::static_pointer_cast<const Reviewed>(row.context);
+				for (size_t index = 0; index < review->destinations.size(); ++index)
+				{
+					const auto target = Snapshot::read(review->destinations[index]);
+					if (target.valid && !target.exists) continue;
+					row.state = index || !target.valid ? tasks::RowState::failed : tasks::RowState::skipped;
+					row.detail = L"A destination is occupied or cannot be inspected. All originals were kept.";
+					return;
+				}
+				copied->reserve(review->destinations.size());
+				for (size_t index = 0; index < review->sources.size(); ++index)
+				{
+					const auto& target = review->destinations[index];
+					copied->push_back(target);
+					if (const auto error = files::copy_file_to(review->sources[index], target, false, [&] {
+						return sameParent(*review) &&
+						       review->sourceState[index].same(Snapshot::read(review->sources[index]));
+					}))
+					{
+						copied->pop_back();
+						row.state = tasks::RowState::failed;
+						row.detail = L"Could not copy " + target.filename().wstring() +
+						             (copied->empty() ? L". Originals were kept."
+						                              : L". Originals and completed copies were kept.");
+						return;
+					}
+				}
+				row.change = L"Copied";
+			};
+			return options;
+		}
+
 		struct RunState
 		{
 			Staging staging;
@@ -657,7 +707,7 @@ namespace iw::rename
 			for (const auto& sidecar : row.sidecars) state->active.insert(sidecar.native());
 		}
 		tasks::RunOptions options;
-		options.undoLabel = L"Batch Rename";
+		options.undoLabel = L"Rename";
 		options.undoAllBeforeRun = true;
 		options.undoMutatedPaths = [state](const tasks::TaskRow&)
 		{
@@ -702,7 +752,10 @@ namespace iw::rename
 				return false;
 			}
 			const auto reviewed = std::static_pointer_cast<const Reviewed>(row.context);
-			bool valid = reviewed && paths::equal(reviewed->parent, canonical_parent(row.source));
+			bool valid = reviewed && reviewed->direct && !row.replace && !reviewed->sources.empty() &&
+			             row.source == reviewed->sources.front() && bundle(row, row.source) == reviewed->sources &&
+			             bundle(row, row.destination) == reviewed->destinations &&
+			             paths::equal(reviewed->parent, canonical_parent(row.source));
 			if (valid)
 			{
 				for (size_t index = 0; index < reviewed->sources.size(); ++index)
@@ -814,7 +867,7 @@ namespace iw
 		ui::Control description;
 		description.id = idDescription;
 		description.kind = ui::ControlKind::label;
-		description.label = L"Every selected item is renamed in place. Review the new names before you run.";
+		description.label = L"Create copies with new names. Originals stay where they are.";
 		panel_.add(std::move(description));
 
 		ui::Control heading;
@@ -870,7 +923,8 @@ namespace iw
 		collision.id = idCollision;
 		collision.kind = ui::ControlKind::choice;
 		collision.label = L"Existing names";
-		collision.choices = {L"Block run", L"Skip", L"Auto-rename", L"Replace"};
+		collision.choices = {L"Block run", L"Skip", L"Auto-rename"};
+		collision.value = 2;
 		collision.changed = changed;
 		panel_.add(std::move(collision));
 
@@ -959,6 +1013,15 @@ namespace iw
 		};
 		layout(templateInput_, idTemplate);
 		layout(startInput_, idStart);
+	}
+
+	void TaskRename::release_hosted_controls()
+	{
+		for (auto* input : {&templateInput_, &startInput_})
+		{
+			if (*input) (*input)->show(false);
+			input->reset();
+		}
 	}
 
 	void TaskRename::work_state_changed(const bool busy)

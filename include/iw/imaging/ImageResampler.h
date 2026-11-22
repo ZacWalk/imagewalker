@@ -117,15 +117,15 @@ namespace iw::imaging
 		using namespace resampler_detail;
 		workspace.pixels.clear();
 		if (sourceSize.cx <= 0 || sourceSize.cy <= 0 || destinationSize.cx <= 0 || destinationSize.cy <= 0) return {};
-		const size_t sourceCount = static_cast<size_t>(sourceSize.cx) * sourceSize.cy;
-		const size_t destinationCount = static_cast<size_t>(destinationSize.cx) * destinationSize.cy;
+		const auto sourceCount = static_cast<std::uint64_t>(sourceSize.cx) * sourceSize.cy;
+		const auto destinationCount = static_cast<std::uint64_t>(destinationSize.cx) * destinationSize.cy;
 		if (sourcePixels.size() < sourceCount || destinationCount > (std::numeric_limits<size_t>::max)() / 4) return {};
 		sourceRect.x = std::clamp(sourceRect.x, 0.0, static_cast<double>(sourceSize.cx));
 		sourceRect.y = std::clamp(sourceRect.y, 0.0, static_cast<double>(sourceSize.cy));
 		sourceRect.width = std::clamp(sourceRect.width, 0.0, sourceSize.cx - sourceRect.x);
 		sourceRect.height = std::clamp(sourceRect.height, 0.0, sourceSize.cy - sourceRect.y);
 		if (sourceRect.width <= 0.0 || sourceRect.height <= 0.0) return {};
-		workspace.pixels.resize(destinationCount);
+		workspace.pixels.resize(static_cast<size_t>(destinationCount));
 		auto& result = workspace.pixels;
 		const double stepX = sourceRect.width / destinationSize.cx;
 		const double stepY = sourceRect.height / destinationSize.cy;

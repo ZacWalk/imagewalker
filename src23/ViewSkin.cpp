@@ -6,8 +6,356 @@
 // For more information on ImageWalker see www.ImageWalker.com
 
 #include "stdafx.h"
+#include "ViewPaneTheme.h"
 #include "ViewSkin.h"
 #include "ViewShellMenu.h"
+
+namespace
+{
+	bool UseDarkPaneColors()
+	{
+		HIGHCONTRAST contrast = {};
+		contrast.cbSize = sizeof(contrast);
+		return App.Settings.BlackSkin &&
+			::SystemParametersInfo(SPI_GETHIGHCONTRAST, contrast.cbSize, &contrast, 0) &&
+			!(contrast.dwFlags & HCF_HIGHCONTRASTON);
+	}
+
+	struct PaneColors
+	{
+		COLORREF surface = IW::Style::Color::TaskBackground;
+		COLORREF text = IW::Style::Color::TaskText;
+		COLORREF field = IW::Average(surface, RGB(0, 0, 0));
+		COLORREF button = IW::Average(surface, field);
+		COLORREF border = IW::Average(field, text);
+		COLORREF muted = IW::Average(surface, text);
+		COLORREF accent = IW::Style::Color::Highlight;
+		COLORREF selected = IW::Average(field, accent);
+	};
+
+	bool IsControl(HWND hWnd, LPCTSTR className)
+	{
+		TCHAR name[32] = {};
+		return ::GetClassName(hWnd, name, countof(name)) != 0 && _tcsicmp(name, className) == 0;
+	}
+
+	void PaintPaneBox(CDCHandle dc, CRect rect, COLORREF fill, COLORREF border)
+	{
+		if (rect.IsRectEmpty())
+			return;
+		dc.FillSolidRect(rect, border);
+		rect.DeflateRect(1, 1);
+		if (!rect.IsRectEmpty())
+			dc.FillSolidRect(rect, fill);
+	}
+
+	void DrawPaneText(CDCHandle dc, HWND control, CRect rect, COLORREF color, UINT flags)
+	{
+		CWindow window(control);
+		CString text;
+		window.GetWindowText(text);
+		const HFONT font = window.GetFont();
+		const HFONT oldFont = font != nullptr ? dc.SelectFont(font) : nullptr;
+		const COLORREF oldColor = dc.SetTextColor(color);
+		const int oldMode = dc.SetBkMode(TRANSPARENT);
+		if (!(flags & DT_NOPREFIX) && (::SendMessage(control, WM_QUERYUISTATE, 0, 0) & UISF_HIDEACCEL))
+			flags |= DT_HIDEPREFIX;
+
+		dc.DrawText(text, text.GetLength(), rect, flags | DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+		dc.SetBkMode(oldMode);
+		dc.SetTextColor(oldColor);
+		if (oldFont != nullptr)
+			dc.SelectFont(oldFont);
+	}
+
+	void DrawPaneFocus(CDCHandle dc, HWND control, CRect rect, int inset)
+	{
+		if (::GetFocus() != control || (::SendMessage(control, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS))
+			return;
+
+		rect.DeflateRect(inset, inset);
+		if (!rect.IsRectEmpty())
+			dc.DrawFocusRect(rect);
+	}
+
+	LRESULT DrawPaneButton(const NMCUSTOMDRAW &draw, const PaneColors &colors)
+	{
+		const HWND hWnd = draw.hdr.hwndFrom;
+		const DWORD style = CWindow(hWnd).GetStyle();
+		const DWORD type = style & BS_TYPEMASK;
+		const bool checkBox = type == BS_AUTOCHECKBOX;
+		const bool toggle = type == BS_AUTORADIOBUTTON && (style & BS_PUSHLIKE);
+		if ((!checkBox && !toggle && type != BS_PUSHBUTTON && type != BS_DEFPUSHBUTTON) ||
+			draw.dwDrawStage != CDDS_PREPAINT)
+			return CDRF_DODEFAULT;
+
+		CDCHandle dc(draw.hdc);
+		const CRect rect(draw.rc);
+		const bool enabled = ::IsWindowEnabled(hWnd) != FALSE;
+		const bool checked = (checkBox || toggle) && ::SendMessage(hWnd, BM_GETCHECK, 0, 0) == BST_CHECKED;
+		const bool pressed = (draw.uItemState & CDIS_SELECTED) != 0;
+		const bool hot = (draw.uItemState & CDIS_HOT) != 0;
+		const COLORREF ink = enabled ? colors.text : colors.muted;
+		const COLORREF edge = !enabled ? IW::Average(colors.field, colors.muted) :
+			checked || type == BS_DEFPUSHBUTTON ? colors.accent : hot ? colors.text : colors.border;
+
+		if (checkBox)
+		{
+			dc.FillSolidRect(rect, colors.surface);
+			const int size = IW::Min(rect.Height() - 2, ::MulDiv(13, dc.GetDeviceCaps(LOGPIXELSX), 96));
+			if (size < 5 || rect.Width() < size + 2)
+				return CDRF_SKIPDEFAULT;
+
+			const int x = rect.left + 1;
+			const int y = rect.top + (rect.Height() - size) / 2;
+			PaintPaneBox(dc, CRect(x, y, x + size, y + size), pressed ? colors.button : colors.field, edge);
+			if (checked)
+			{
+				const POINT tick[] = {
+					{x + size / 4, y + size / 2}, {x + size * 5 / 12, y + size * 3 / 4},
+					{x + size * 4 / 5, y + size / 4}
+				};
+				CPen pen;
+				if (pen.CreatePen(PS_SOLID, IW::Max(1, size / 6), ink))
+				{
+					const HPEN oldPen = dc.SelectPen(pen);
+					dc.Polyline(tick, countof(tick));
+					dc.SelectPen(oldPen);
+				}
+			}
+
+			CRect label(rect);
+			label.left = x + size + 5;
+			DrawPaneText(dc, hWnd, label, ink, DT_LEFT);
+			DrawPaneFocus(dc, hWnd, rect, 0);
+		}
+		else
+		{
+			const COLORREF fill = !enabled || pressed ? colors.field :
+				checked ? colors.selected : hot ? colors.surface : colors.button;
+			PaintPaneBox(dc, rect, fill, edge);
+			CRect label(rect);
+			label.DeflateRect(4, 1);
+			DrawPaneText(dc, hWnd, label, ink, DT_CENTER);
+			DrawPaneFocus(dc, hWnd, rect, 3);
+		}
+		return CDRF_SKIPDEFAULT;
+	}
+
+	LRESULT DrawPaneTrackbar(const NMCUSTOMDRAW &draw, const PaneColors &colors)
+	{
+		CDCHandle dc(draw.hdc);
+		const CRect rect(draw.rc);
+		const HWND hWnd = draw.hdr.hwndFrom;
+		switch (draw.dwDrawStage)
+		{
+		case CDDS_PREPAINT:
+			dc.FillSolidRect(rect, colors.surface);
+			return CDRF_NOTIFYITEMDRAW | CDRF_NOTIFYPOSTPAINT;
+		case CDDS_POSTPAINT:
+			DrawPaneFocus(dc, hWnd, rect, 2);
+			break;
+		case CDDS_ITEMPREPAINT:
+			if (draw.dwItemSpec == TBCD_CHANNEL)
+			{
+				PaintPaneBox(dc, rect, colors.field, colors.border);
+				return CDRF_SKIPDEFAULT;
+			}
+			if (draw.dwItemSpec == TBCD_THUMB)
+			{
+				const bool enabled = ::IsWindowEnabled(hWnd) != FALSE;
+				const COLORREF fill = !enabled ? colors.muted :
+					(draw.uItemState & (CDIS_HOT | CDIS_SELECTED)) ? colors.accent : colors.text;
+				PaintPaneBox(dc, rect, fill, colors.field);
+				return CDRF_SKIPDEFAULT;
+			}
+			if (draw.dwItemSpec == TBCD_TICS)
+			{
+				// Edit uses TBS_BOTH. Get the native position of its neutral tick
+				// instead of guessing at the thumb's travel after a pane resize.
+				CRect channel, thumb;
+				CTrackBarCtrl slider(hWnd);
+				slider.GetChannelRect(channel);
+				slider.GetThumbRect(thumb);
+				const auto tick = [&](int x)
+				{
+					dc.FillSolidRect(x, thumb.top - 3, 1, 3, colors.border);
+					dc.FillSolidRect(x, thumb.bottom, 1, 3, colors.border);
+				};
+				tick(channel.left + thumb.Width() / 2);
+				tick(channel.right - thumb.Width() / 2 - 1);
+				const int ticCount = static_cast<int>(slider.GetNumTics());
+				for (int i = 0; i + 2 < ticCount; ++i)
+				{
+					const int x = slider.GetTicPos(i);
+					if (x >= 0)
+						tick(x);
+				}
+				return CDRF_SKIPDEFAULT;
+			}
+			break;
+		}
+		return CDRF_DODEFAULT;
+	}
+
+	void PaintPaneCombo(HWND combo, CDCHandle dc)
+	{
+		COMBOBOXINFO info = {};
+		info.cbSize = sizeof(info);
+		if (!::GetComboBoxInfo(combo, &info))
+			return;
+
+		const PaneColors colors;
+		CRect rect;
+		::GetClientRect(combo, rect);
+		PaintPaneBox(dc, rect, colors.field, colors.border);
+
+		CRect button(info.rcButton);
+		button.IntersectRect(button, rect);
+		if (!button.IsRectEmpty())
+		{
+			const bool pressed = (::SendMessage(combo, CB_GETDROPPEDSTATE, 0, 0) != FALSE);
+			dc.FillSolidRect(button, pressed ? colors.selected : colors.button);
+			const CPoint center = button.CenterPoint();
+			const COLORREF ink = ::IsWindowEnabled(combo) ? colors.text : colors.muted;
+			for (int i = 0; i != 4; ++i)
+				dc.FillSolidRect(center.x - 3 + i, center.y - 2 + i, 7 - i * 2, 1, ink);
+		}
+
+		CRect label(info.rcItem);
+		label.IntersectRect(label, rect);
+		label.DeflateRect(2, 0);
+		DrawPaneText(dc, combo, label, ::IsWindowEnabled(combo) ? colors.text : colors.muted, DT_LEFT | DT_NOPREFIX);
+		DrawPaneFocus(dc, combo, info.rcItem, 1);
+	}
+
+	LRESULT CALLBACK PaneComboProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR id, DWORD_PTR)
+	{
+		switch (msg)
+		{
+		case WM_NCDESTROY:
+			::RemoveWindowSubclass(hWnd, PaneComboProc, id);
+			break;
+		case WM_CTLCOLORLISTBOX:
+			// The popup can ask the combo instead of the dialog. Its selection,
+			// keyboard handling and scrollbar still belong to Windows.
+			if (UseDarkPaneColors())
+				return ::SendMessage(::GetParent(hWnd), msg, wParam, lParam);
+			break;
+		case WM_ERASEBKGND:
+			if (UseDarkPaneColors())
+				return TRUE;
+			break;
+		case WM_PAINT:
+			if (UseDarkPaneColors())
+			{
+				CPaintDC dc(hWnd);
+				PaintPaneCombo(hWnd, static_cast<HDC>(dc));
+				return 0;
+			}
+			break;
+		case WM_PRINTCLIENT:
+			if (UseDarkPaneColors())
+			{
+				PaintPaneCombo(hWnd, reinterpret_cast<HDC>(wParam));
+				return 0;
+			}
+			break;
+		case WM_SETFOCUS:
+		case WM_KILLFOCUS:
+		case WM_UPDATEUISTATE:
+		case WM_ENABLE:
+		case CB_SETCURSEL:
+		case CB_SHOWDROPDOWN:
+			// Some native state changes paint immediately, without WM_PAINT.
+			// Let Windows update its state and then repaint the closed field.
+			{
+				const LRESULT result = ::DefSubclassProc(hWnd, msg, wParam, lParam);
+				if (UseDarkPaneColors())
+					::InvalidateRect(hWnd, nullptr, FALSE);
+				return result;
+			}
+		}
+		return ::DefSubclassProc(hWnd, msg, wParam, lParam);
+	}
+}
+
+void IW::Skin::PaneTheme::AttachDropDownList(HWND combo)
+{
+	if (combo != nullptr)
+		::SetWindowSubclass(combo, PaneComboProc, 1, 0);
+}
+
+BOOL IW::Skin::PaneTheme::ProcessWindowMessage(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam,
+                                               LRESULT &result, DWORD mapId)
+{
+	if (mapId != 0)
+		return FALSE;
+
+	switch (msg)
+	{
+	case WM_SETTINGCHANGE:
+	case WM_SYSCOLORCHANGE:
+	case WM_THEMECHANGED:
+		::RedrawWindow(hWnd, nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+		return FALSE;
+	case WM_COMMAND:
+		{
+			HWND control = reinterpret_cast<HWND>(lParam);
+			const UINT code = HIWORD(wParam);
+			if ((code == CBN_SELCHANGE || code == CBN_DROPDOWN || code == CBN_CLOSEUP) &&
+				IsControl(control, WC_COMBOBOX) && UseDarkPaneColors())
+				::InvalidateRect(control, nullptr, FALSE);
+			return FALSE;
+		}
+	case WM_CTLCOLORDLG:
+	case WM_CTLCOLORSTATIC:
+	case WM_CTLCOLOREDIT:
+	case WM_CTLCOLORLISTBOX:
+		{
+			if (!UseDarkPaneColors())
+				return FALSE;
+
+			const bool field = msg == WM_CTLCOLOREDIT || msg == WM_CTLCOLORLISTBOX ||
+				(msg == WM_CTLCOLORSTATIC && IsControl(reinterpret_cast<HWND>(lParam), WC_EDIT));
+			const PaneColors colors;
+			const COLORREF fill = field ? colors.field : colors.surface;
+			CBrush &brush = field ? _fieldBrush : _surfaceBrush;
+			COLORREF &previous = field ? _fieldColor : _surfaceColor;
+			if (brush.IsNull() || previous != fill)
+			{
+				if (!brush.IsNull())
+					brush.DeleteObject();
+				if (!brush.CreateSolidBrush(fill))
+					return FALSE;
+				previous = fill;
+			}
+
+			CDCHandle dc(reinterpret_cast<HDC>(wParam));
+			dc.SetTextColor(colors.text);
+			dc.SetBkColor(fill);
+			dc.SetBkMode(field ? OPAQUE : TRANSPARENT);
+			result = reinterpret_cast<LRESULT>(static_cast<HBRUSH>(brush));
+			return TRUE;
+		}
+	case WM_NOTIFY:
+		{
+			const auto *draw = reinterpret_cast<const NMCUSTOMDRAW *>(lParam);
+			if (draw == nullptr || draw->hdr.code != NM_CUSTOMDRAW ||
+				::GetParent(draw->hdr.hwndFrom) != hWnd || !UseDarkPaneColors())
+				return FALSE;
+
+			if (IsControl(draw->hdr.hwndFrom, WC_BUTTON))
+				result = DrawPaneButton(*draw, PaneColors());
+			else if (IsControl(draw->hdr.hwndFrom, TRACKBAR_CLASS))
+				result = DrawPaneTrackbar(*draw, PaneColors());
+			else
+				return FALSE;
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
 
 void IW::Skin::DrawGradient(CDCHandle dc, const CRect& r, DWORD c1, DWORD c2)
 {

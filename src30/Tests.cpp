@@ -39,6 +39,7 @@
 #include "MediaTests.h"
 #include "FolderTreeTests.h"
 #include "PhotoOrientationTests.h"
+#include "Appearance.h"
 
 #include <array>
 #include <filesystem>
@@ -242,13 +243,15 @@ namespace iw::tests
 			host.focus_frame();
 			reporter.check(host.canvas()->focused,
 			               L"keyboard focus given to the activated frame passes on to the canvas");
-			reporter.check(host.tree->visible && host.splitter()->visible && host.modes()->visible,
+			reporter.check(host.tree->visible && host.splitter_visible() && host.modes()->visible,
 			               L"browsing initially shows the folder tree, splitter and modes");
 			host.folders();
-			reporter.check(!host.tree->visible && !host.splitter()->visible,
+			reporter.check(!host.tree->visible && !host.splitter_visible(),
 			               L"the Folders mode command hides both tree and splitter");
 			host.folders();
-			const auto originalBounds = host.center()->bounds;
+			const auto originalBounds = host.center_bounds();
+			const auto browseReactor = host.canvas()->reactor;
+			const auto childCount = host.root->children.size();
 			auto task = std::make_shared<HostedTestTask>(dispatcher);
 			task->set_mode_id(3);
 			reporter.check(host.set_task(task), L"MainWindow accepts an idle task");
@@ -259,17 +262,17 @@ namespace iw::tests
 			reporter.check(task->undoCount == 1 && host.task() == task && !host.can_undo(),
 			               L"host Undo routes to the task draft without closing it or changing file history");
 			const auto taskFrame = MainWindowAccess::record(task->frame());
-			reporter.check(!host.canvas()->visible && !host.tree->visible && !host.splitter()->visible &&
-			                   taskFrame->visible && taskFrame->focused && host.modes()->visible,
-			               L"task entry replaces Items, focuses the task and retains the mode bar");
+			reporter.check(taskFrame == host.canvas() && taskFrame->reactor == task && !host.tree->visible &&
+			                   !host.splitter_visible() && taskFrame->visible && taskFrame->focused &&
+			                   !host.modes()->visible && host.root->children.size() == childCount,
+			               L"task entry reuses the visible Items window and hides browsing sidebars");
 			taskFrame->focused = false;
-			host.canvas()->focused = false;
 			host.focus_frame();
-			reporter.check(taskFrame->focused && !host.canvas()->focused,
+			reporter.check(taskFrame->focused && taskFrame->reactor == task,
 			               L"keyboard focus given to the activated frame passes on to the active task");
 			reporter.check(host.root->title == L"Host integration - ImageWalker 3.0" &&
-			                   host.center()->bounds.width > originalBounds.width &&
-			                   rect_equals(taskFrame->bounds, host.center()->client_rect()),
+			                   host.center_bounds().width > originalBounds.width &&
+			                   rect_equals(taskFrame->bounds, host.center_bounds()),
 			               L"task entry updates the title and expands into the former tree area");
 			task->publish_status(L"Review status");
 			reporter.check(host.chrome->status.text == L"Review status",
@@ -288,7 +291,7 @@ namespace iw::tests
 			reporter.check(!host.root->maximized && maximize->toolbarText() == L"Maximize",
 			               L"Restore returns the host to its normal placement");
 			host.resize({0, 0, 780, 520});
-			reporter.check(rect_equals(taskFrame->bounds, host.center()->client_rect()),
+			reporter.check(rect_equals(taskFrame->bounds, host.center_bounds()),
 			               L"host resize resizes the active task");
 
 			task->analyze();
@@ -315,25 +318,20 @@ namespace iw::tests
 			                   !host.tree->visible && !host.modes()->visible && host.chrome->taskToolbar.empty() &&
 			                   host.chrome->fullscreenLayout,
 			               L"entering fullscreen closes the idle task, restores Items and hides browsing chrome");
-			reporter.check(taskFrame->closes == 1 && !taskFrame->reactor && !task->frame(),
-			               L"leaving a task destroys its native child and detaches its reactor");
+			reporter.check(taskFrame->closes == 0 && taskFrame->reactor == browseReactor && !task->frame(),
+			               L"leaving a task restores the Items reactor on the same window");
 			host.set_fullscreen(true);
 			reporter.check(host.root->fullscreenChanges == 1, L"reentering fullscreen is idempotent");
 			host.fullscreen();
 			reporter.check(!host.fullscreen_state() && !host.root->fullscreen && host.tree->visible &&
-			                   host.splitter()->visible && host.modes()->visible && !host.chrome->fullscreenLayout,
+			                   host.splitter_visible() && host.modes()->visible && !host.chrome->fullscreenLayout,
 			               L"leaving fullscreen restores the saved browsing panes");
 
-			host.center()->refuseChild = true;
-			reporter.check(!host.set_task(replacement) && !host.task() && host.canvas()->visible &&
-			                   host.chrome->taskToolbar.empty(),
-			               L"failed task creation leaves Items available with its toolbar");
-			host.center()->refuseChild = false;
-			reporter.check(host.set_task(replacement), L"task creation can be retried after a platform failure");
-			const auto close = host.chrome->taskToolbar.back().command;
-			close->invoke();
-			reporter.check(!host.task() && host.canvas()->visible && host.root->closes == 0,
-			               L"the task toolbar Close returns to Items without exiting the application");
+			host.canvas()->refuseChild = true;
+			reporter.check(host.set_task(replacement), L"switching tasks does not require another child window");
+			reporter.check(host.window->escape_active_view() && !host.task() && host.canvas()->visible &&
+			                   host.modes()->visible && host.root->closes == 0,
+			               L"Escape closes the task and restores Items and its sidebars without exiting");
 
 			auto cancelling = std::make_shared<HostedTestTask>(dispatcher);
 			cancelling->confirmClose = true;
@@ -411,6 +409,48 @@ namespace iw::tests
 			std::filesystem::remove_all(root, error);
 		}
 
+		void test_browser_keys(Reporter& reporter)
+		{
+			reporter.section(L"Browser shortcuts follow the focused item kind");
+			MainWindowAccess host;
+			reporter.check(host.create(), L"the keyboard test canvas is created");
+			auto& canvas = host.image_canvas();
+			const std::filesystem::path folder(L"C:\\fixture\\folder");
+			const std::filesystem::path first(L"C:\\fixture\\one.png");
+			const std::filesystem::path audio(L"C:\\fixture\\sound.wav");
+			const std::filesystem::path second(L"C:\\fixture\\two.png");
+			canvas.set_items({{folder, files::ItemKind::folder}, {first, files::ItemKind::image},
+			                  {audio, files::ItemKind::audio}, {second, files::ItemKind::image}},
+			                 4);
+			std::vector<std::filesystem::path> activation;
+			canvas.set_activation_handler([&](const auto& path) { activation.push_back(path); });
+			canvas.set_command_handlers({[&] { host.set_fullscreen(true); }, [&] { host.set_fullscreen(false); }});
+			const auto press = [&](platform::KeyCode key)
+			{
+				ImageCanvasAccess::key(canvas, host.canvas(), {.key = key});
+			};
+
+			canvas.select_index(0, false, false);
+			press(platform::KeyCode::enter);
+			reporter.check(activation == std::vector{folder} && !host.fullscreen_state(),
+			               L"Enter opens a focused folder rather than entering fullscreen");
+			canvas.select_index(1, false, false);
+			press(platform::KeyCode::space);
+			reporter.check(canvas.focused_index() == 1 && activation.size() == 1,
+			               L"Space does not advance through still images");
+			canvas.select_index(2, false, false);
+			press(platform::KeyCode::space);
+			reporter.check(activation == std::vector{folder, audio}, L"Space starts a focused audio file");
+			canvas.select_index(1, false, false);
+			canvas.load(first);
+			press(platform::KeyCode::enter);
+			reporter.check(host.fullscreen_state(), L"Enter shows a focused photo fullscreen");
+			press(platform::KeyCode::enter);
+			reporter.check(canvas.focused_index() == 3, L"Fullscreen Enter skips nonphotos and advances");
+			press(platform::KeyCode::escape);
+			reporter.check(!host.fullscreen_state() && !host.root->closes, L"Escape leaves fullscreen without quitting");
+		}
+
 		void test_folder_scan_completion(Reporter& reporter)
 		{
 			reporter.section(L"MainWindow folder scan failures");
@@ -421,6 +461,8 @@ namespace iw::tests
 			host.finish_folder_scan(1, folder, {{folder / L"retained", files::ItemKind::folder}});
 			reporter.check(host.collection_load_state() == LoadState::ready && host.collection_size() == 1,
 			               L"a successful scan publishes the reviewed folder contents");
+			reporter.check(host.remembered_folder() == folder,
+			               L"a successful scan becomes the folder restored at the next launch");
 			host.begin_folder_scan(folder, 2);
 			const auto denied = std::make_error_code(std::errc::permission_denied);
 			host.finish_folder_scan(1, folder, {}, denied);
@@ -432,11 +474,24 @@ namespace iw::tests
 					host.chrome->status.text.find(L"Could not read") != std::wstring::npos &&
 					!host.chrome->status.scanning,
 				L"a failed refresh retains known contents and reports failure instead of an empty successful scan");
-			host.begin_folder_scan(folder, 3);
-			host.finish_folder_scan(3, folder, {});
+			const auto unavailable = folder / L"unavailable";
+			host.begin_folder_scan(unavailable, 3);
+			host.finish_folder_scan(3, unavailable, {}, denied);
+			reporter.check(host.remembered_folder() == folder,
+			               L"a folder that failed to load cannot replace the last usable startup folder");
+			host.begin_folder_scan(folder, 4);
+			host.finish_folder_scan(4, folder, {});
 			reporter.check(host.collection_load_state() == LoadState::ready && host.collection_size() == 0 &&
 			                   host.chrome->status.text.find(L"Could not read") == std::wstring::npos,
 			               L"a later successful scan clears the previous failure");
+			host.set_photos_only(true);
+			const auto audio = folder / L"explicit.mp3";
+			host.begin_folder_scan(folder, 5);
+			host.finish_folder_scan(5, folder, {{audio, files::ItemKind::audio}}, {}, audio);
+			reporter.check(!host.task() && paths::equal(host.image_canvas().path(), audio) &&
+			                   host.image_canvas().selection_count() == 0,
+			               L"an explicitly opened audio file stays in Browse even with Photos Only on");
+			host.image_canvas().stop_media();
 		}
 
 		void test_sync_workflow(Reporter& reporter)
@@ -555,15 +610,18 @@ namespace iw::tests
 			const auto settingsSection = L"SyncTest-" + root.filename().wstring();
 			scope.toRemote = false;
 			scope.toLocal = true;
-			scope.deleteLocal = true;
-			scope.deleteRemote = true;
 			sync::save_options(scope, settingsSection);
+			platform::write_integer_settings(settingsSection, std::array{platform::IntegerSetting{L"DeleteLocal", 1},
+			                                                             platform::IntegerSetting{L"DeleteRemote", 1}});
 			const auto retained = sync::load_options(settingsSection);
 			reporter.check(
 				retained.wholeCollection && retained.local == scope.local && retained.remote == scope.remote &&
-					!retained.toRemote && retained.toLocal && retained.deleteLocal && retained.deleteRemote &&
-					retained.collection == scope.collection,
+					!retained.toRemote && retained.toLocal && retained.collection == scope.collection,
 				L"scope, explicit collection folders, folder choices and action options survive settings round-trip");
+			const auto oldSettings = sync::analyze(retained);
+			reporter.check(oldSettings.plan.count(tasks::RowState::ready) == 0 &&
+			                   std::filesystem::exists(scope.local / L"top.txt"),
+			               L"legacy deletion settings cannot arm a run");
 			auto restoredView = std::make_shared<TaskSync>(settingsSection);
 			reporter.check(restoredView->options().collection == scope.collection && !restoredView->busy() &&
 			                   restoredView->plan().rows.empty(),
@@ -670,39 +728,19 @@ namespace iw::tests
 			std::filesystem::last_write_time(direction.remote / L"equal.txt", time);
 			direction.toLocal = true;
 			reviewed = sync::analyze(direction);
-			reporter.check(!reviewed.plan.can_run() && reviewed.plan.rows.front().tag == sync::ignore,
-			               L"equal times and different sizes with both directions enabled are ignored");
+			reporter.check(!reviewed.plan.can_run() && reviewed.plan.rows.front().tag == sync::keepExisting &&
+			                   reviewed.plan.rows.front().change.find(L"Different versions") != std::wstring::npos,
+			               L"different sizes are reported and both existing files are kept");
 			direction.toRemote = false;
 			reviewed = sync::analyze(direction);
-			reporter.check(reviewed.plan.can_run() && reviewed.plan.rows.front().tag == sync::copyToLocal &&
-			                   reviewed.plan.rows.front().replace,
-			               L"equal times and different sizes use the sole local direction as an explicit Replace");
+			reporter.check(!reviewed.plan.can_run() && reviewed.plan.rows.front().tag == sync::keepExisting,
+			               L"selecting only the incoming direction does not authorize replacement");
 			direction.toLocal = false;
 			direction.toRemote = true;
 			reviewed = sync::analyze(direction);
-			reporter.check(reviewed.plan.can_run() && reviewed.plan.rows.front().tag == sync::copyToRemote &&
-			                   reviewed.plan.replacements == 1,
-			               L"equal times and different sizes use the sole remote direction as an explicit Replace");
-			direction.toRemote = false;
-			direction.deleteLocal = true;
-			reviewed = sync::analyze(direction);
-			reporter.check(reviewed.plan.rows.front().tag == sync::ignore,
-			               L"equal times with neither copy direction enabled are ignored, not deleted");
-			direction.toRemote = true;
-			direction.toLocal = true;
-			write(direction.remote / L"equal.txt", "other");
-			std::filesystem::last_write_time(direction.remote / L"equal.txt", time);
-			reporter.check(sync::analyze(direction).plan.rows.front().tag == sync::ignore,
-			               L"equal size and equal modified time are ignored");
 			std::filesystem::last_write_time(direction.local / L"equal.txt", time + std::chrono::seconds(1));
-			reporter.check(sync::analyze(direction).plan.rows.front().tag == sync::copyToRemote,
-			               L"a newer local file is not incorrectly treated as equal by a two-second tolerance");
-			std::filesystem::last_write_time(direction.remote / L"equal.txt", time + std::chrono::seconds(3));
-			reporter.check(sync::analyze(direction).plan.rows.front().tag == sync::copyToLocal,
-			               L"a newer remote file copies to local when enabled");
-			direction.toLocal = false;
-			reporter.check(sync::analyze(direction).plan.rows.front().tag == sync::ignore,
-			               L"a disabled newer-source direction never copies the older side over it");
+			reporter.check(sync::analyze(direction).plan.rows.front().tag == sync::keepExisting,
+			               L"a newer local file does not replace the remote version");
 
 			auto stale = pair(L"stale");
 			write(stale.local / L"a-source.txt", "reviewed source");
@@ -729,28 +767,26 @@ namespace iw::tests
 			auto replacement = pair(L"replacement");
 			write(replacement.local / L"replace.txt", "new local");
 			write(replacement.remote / L"replace.txt", "old remote");
-			std::filesystem::last_write_time(replacement.local / L"replace.txt", time + std::chrono::seconds(5));
-			std::filesystem::last_write_time(replacement.remote / L"replace.txt", time);
+			write(replacement.local / L"copy.txt", "copy");
 			snapshot = std::make_shared<sync::Review>(sync::analyze(replacement));
-			write(replacement.remote / L"replace.txt", "remote changed after review");
 			result = snapshot->plan;
+			result.rows.back().state = tasks::RowState::ready;
+			result.rows.back().tag = sync::copyToRemote;
+			result.rows.back().replace = true;
 			tasks::run_plan(result, {}, sync::run_options(snapshot));
-			reporter.check(result.count(tasks::RowState::failed) == 1 &&
-			                   read(replacement.remote / L"replace.txt") == "remote changed after review",
-			               L"Replace authority does not include a destination changed after Review");
+			reporter.check(result.count(tasks::RowState::failed) == 1 && result.count(tasks::RowState::success) == 1 &&
+			                   read(replacement.remote / L"replace.txt") == "old remote",
+			               L"execution refuses a forged replacement and still copies the missing file");
 			auto identity = pair(L"identity");
 			write(identity.local / L"a-source.txt", "old");
 			write(identity.local / L"b-target.txt", "source");
-			write(identity.remote / L"b-target.txt", "target");
 			write(identity.local / L"c-independent.txt", "independent");
 			std::filesystem::last_write_time(identity.local / L"a-source.txt", time);
 			std::filesystem::last_write_time(identity.local / L"b-target.txt", time + std::chrono::seconds(5));
-			std::filesystem::last_write_time(identity.remote / L"b-target.txt", time);
 			snapshot = std::make_shared<sync::Review>(sync::analyze(identity));
 			std::filesystem::rename(identity.local / L"a-source.txt", root / L"parked-source.txt");
 			write(identity.local / L"a-source.txt", "new");
 			std::filesystem::last_write_time(identity.local / L"a-source.txt", time);
-			std::filesystem::rename(identity.remote / L"b-target.txt", root / L"parked-target.txt");
 			write(identity.remote / L"b-target.txt", "change");
 			std::filesystem::last_write_time(identity.remote / L"b-target.txt", time);
 			result = snapshot->plan;
@@ -774,100 +810,12 @@ namespace iw::tests
 			               !std::filesystem::exists(parentIdentity.remote / L"nested" / L"source.txt"),
 			           L"a replacement destination parent cannot inherit authority to receive a reviewed nested copy");
 
-			auto readOnlyReplacement = pair(L"read-only-replacement");
-			write(readOnlyReplacement.local / L"replace.txt", "new");
-			write(readOnlyReplacement.remote / L"replace.txt", "old");
-			std::filesystem::last_write_time(readOnlyReplacement.local / L"replace.txt",
-			                                 time + std::chrono::seconds(5));
-			std::filesystem::last_write_time(readOnlyReplacement.remote / L"replace.txt", time);
-			std::filesystem::permissions(readOnlyReplacement.remote / L"replace.txt",
-			                             std::filesystem::perms::owner_read, std::filesystem::perm_options::replace,
-			                             error);
-			if (!error)
-			{
-				const auto readOnlyReview = sync::analyze(readOnlyReplacement);
-				reporter.check(!readOnlyReview.plan.can_run() &&
-				                   readOnlyReview.plan.rows.front().state == tasks::RowState::blocked &&
-				                   readOnlyReview.plan.rows.front().detail.find(L"read-only") != std::wstring::npos,
-				               L"a read-only replacement target blocks synchronization during Review");
-				std::filesystem::permissions(readOnlyReplacement.remote / L"replace.txt",
-				                             std::filesystem::perms::owner_all, std::filesystem::perm_options::replace,
-				                             error);
-			}
-			else emit(L"  NOTE: read-only Sync test could not set file permissions.\n");
-
-			auto deletion = pair(L"deletion");
-			deletion.toRemote = false;
-			deletion.deleteLocal = true;
-			deletion.deleteRemote = true;
-			write(deletion.local / L"a-local.txt", "local");
-			write(deletion.remote / L"b-remote.txt", "remote");
-			snapshot = std::make_shared<sync::Review>(sync::analyze(deletion));
-			const auto confirmation = sync::deletion_confirmation(snapshot->plan);
-			reporter.check(confirmation.warning && confirmation.defaultButton == 2 &&
-			                   confirmation.heading.find(L"2 files") != std::wstring::npos &&
-			                   confirmation.message.find(L"1 local file and 1 remote file") != std::wstring::npos &&
-			                   confirmation.message.find(L"cannot be recovered from the Recycle Bin") !=
-			                       std::wstring::npos,
-			               L"permanent-delete confirmation states the total, counts each side, and defaults to Cancel");
-			const bool noConfirmation = sync::confirm_deletions(snapshot->plan, {});
-			const bool declined = sync::confirm_deletions(snapshot->plan,
-			                                              [](const platform::ChoiceDefinition&) { return 2; });
-			reporter
-				.check(!noConfirmation && !declined && snapshot->plan.count(tasks::RowState::ready) == 2 &&
-			               std::filesystem::exists(deletion.local / L"a-local.txt") &&
-			               std::filesystem::exists(deletion.remote / L"b-remote.txt"),
-			           L"deletion cannot proceed without affirmative confirmation and Cancel leaves Review unchanged");
-			reporter.check(sync::confirm_deletions(snapshot->plan, [](const platform::ChoiceDefinition&) { return 1; }),
-			               L"the explicit Synchronize answer authorizes the counted deletion plan");
-			write(deletion.remote / L"a-local.txt", "appeared after review");
 			result = snapshot->plan;
+			result.rows.front().tag = 4;
 			tasks::run_plan(result, {}, sync::run_options(snapshot));
-			reporter.check(
-				result.count(tasks::RowState::failed) == 1 && result.count(tasks::RowState::success) == 1 &&
-					std::filesystem::exists(deletion.local / L"a-local.txt") &&
-					!std::filesystem::exists(deletion.remote / L"b-remote.txt"),
-				L"an appeared counterpart refuses a stale delete while an independent reviewed deletion completes");
-			reporter.check(sync::affected_folders(result).empty(),
-			               L"remote-only successes do not claim that a local folder changed");
-			auto vanishedRoot = pair(L"vanished-root");
-			vanishedRoot.toRemote = false;
-			vanishedRoot.deleteLocal = true;
-			write(vanishedRoot.local / L"keep.txt", "local only");
-			snapshot = std::make_shared<sync::Review>(sync::analyze(vanishedRoot));
-			std::filesystem::rename(vanishedRoot.remote, vanishedRoot.remote.parent_path() / L"remote-moved");
-			result = snapshot->plan;
-			tasks::run_plan(result, {}, sync::run_options(snapshot));
-			reporter.check(result.count(tasks::RowState::failed) == 1 &&
-			                   std::filesystem::exists(vanishedRoot.local / L"keep.txt"),
-			               L"a remote root that disappears after analysis never authorizes local deletion");
-			std::filesystem::create_directories(vanishedRoot.remote);
-			result = snapshot->plan;
-			tasks::run_plan(result, {}, sync::run_options(snapshot));
-			reporter.check(
-				result.count(tasks::RowState::failed) == 1 && std::filesystem::exists(vanishedRoot.local / L"keep.txt"),
-				L"a replacement remote root with the same absent counterparts does not inherit deletion authority");
-
-			auto localDelete = pair(L"local-delete-cancel");
-			localDelete.toRemote = false;
-			localDelete.deleteLocal = true;
-			write(localDelete.local / L"a.txt", "delete first");
-			write(localDelete.local / L"b.txt", "retain second");
-			snapshot = std::make_shared<sync::Review>(sync::analyze(localDelete));
-			result = snapshot->plan;
-			std::stop_source deleteStop;
-			run = sync::run_options(snapshot);
-			run.progress = [&deleteStop](const size_t complete, size_t)
-			{
-				if (complete == 1) deleteStop.request_stop();
-			};
-			tasks::run_plan(result, deleteStop.get_token(), run);
-			reporter.check(
-				result.count(tasks::RowState::success) == 1 && result.count(tasks::RowState::notRun) == 1 &&
-					!std::filesystem::exists(localDelete.local / L"a.txt") &&
-					std::filesystem::exists(localDelete.local / L"b.txt") &&
-					sync::affected_folders(result) == std::vector<std::filesystem::path>{localDelete.local},
-				L"cancelling permanent deletion does not roll it back and still refreshes the changed local folder");
+			reporter.check(result.rows.front().state == tasks::RowState::failed &&
+			                   read(parentIdentity.local / L"nested" / L"source.txt") == "source",
+			               L"a stale deletion action fails without touching the source");
 
 			auto cancellation = pair(L"cancellation");
 			cancellation.toRemote = false;
@@ -1003,6 +951,62 @@ namespace iw::tests
 			               L"a selected handle takes precedence over hover and checked state");
 		}
 
+		void test_appearance(Reporter& reporter)
+		{
+			using platform::Appearance;
+			using platform::SystemColor;
+			reporter.section(L"Windows app appearance");
+			reporter.check(platform::select_appearance(true, false) == Appearance::light &&
+			                   platform::select_appearance(false, false) == Appearance::dark &&
+			                   platform::select_appearance(false, true) == Appearance::highContrast &&
+			                   platform::select_appearance(true, true) == Appearance::highContrast,
+			               L"the Windows app setting selects light or dark and contrast themes override both");
+			const auto luminance = [](const color value)
+			{
+				const auto linear = [](const std::uint8_t channel)
+				{
+					const double s = channel / 255.0;
+					return s <= 0.04045 ? s / 12.92 : std::pow((s + 0.055) / 1.055, 2.4);
+				};
+				return 0.2126 * linear(value.r) + 0.7152 * linear(value.g) + 0.0722 * linear(value.b);
+			};
+			const auto dark = [](const SystemColor role)
+			{
+				return platform::appearance_color(Appearance::dark, role);
+			};
+			const auto light = [](const SystemColor role)
+			{
+				return platform::appearance_color(Appearance::light, role);
+			};
+			reporter.check(luminance(dark(SystemColor::window)) < 0.05 && luminance(dark(SystemColor::face)) < 0.05,
+			               L"dark app mode darkens the canvas and chrome without tinting photos");
+			reporter.check(luminance(light(SystemColor::face)) > 0.8 &&
+			                   luminance(light(SystemColor::buttonText)) < 0.05,
+			               L"light app mode keeps light chrome and dark labels");
+			for (const auto appearance : {Appearance::light, Appearance::dark, Appearance::highContrast})
+			{
+				const auto palette = platform::appearance_palette(appearance);
+				reporter.check(palette.menu_background ==
+				                       platform::appearance_color(appearance, SystemColor::face).pack() &&
+				                   palette.menu_text ==
+				                       platform::appearance_color(appearance, SystemColor::buttonText).pack(),
+				               L"the shared menus use the same background and text colours as the app toolbar");
+			}
+			for (const auto& [text, background] : {std::pair{SystemColor::windowText, SystemColor::window},
+			                                       std::pair{SystemColor::buttonText, SystemColor::face},
+			                                       std::pair{SystemColor::grayText, SystemColor::face},
+			                                       std::pair{SystemColor::buttonText, SystemColor::hover},
+			                                       std::pair{SystemColor::highlightText, SystemColor::highlight},
+			                                       std::pair{SystemColor::warningText, SystemColor::face}})
+				reporter.check((luminance(dark(text)) + 0.05) / (luminance(dark(background)) + 0.05) >= 4.5,
+				               L"dark-palette text remains readable on its background");
+			reporter.check(platform::appearance_color(Appearance::highContrast, SystemColor::highlight).pack() ==
+			                       GetSysColor(COLOR_HIGHLIGHT) &&
+			                   platform::appearance_color(Appearance::highContrast, SystemColor::highlightText)
+			                           .pack() == GetSysColor(COLOR_HIGHLIGHTTEXT),
+			               L"contrast themes retain the Windows selection colours instead of application colours");
+		}
+
 		void test_dpi_metrics(Reporter& reporter)
 		{
 			reporter.section(L"ui DPI metrics");
@@ -1023,6 +1027,9 @@ namespace iw::tests
 			               L"the toolbar strip is a row of 24-pixel tiles");
 			reporter.check(strip.size.width / tile == static_cast<int>(platform::CommandBitmap::breadcrumbChevron) + 1,
 			               L"every toolbar tile has a CommandBitmap value, so the breadcrumb chevron is the last tile");
+			reporter.check(strip.hasAlpha && !strip.pixels.empty() && strip.pixels.front() == 0 &&
+			                   std::ranges::any_of(strip.pixels, [](auto pixel) { return pixel >> 24 == 255; }),
+			               L"the artwork carries a usable alpha mask, not a solid rectangle");
 		}
 
 		void test_toolbar_labels(Reporter& reporter)
@@ -1202,6 +1209,9 @@ namespace iw::tests
 			                 {L"a.jpg", files::ItemKind::image}});
 			reporter.check(state.items().size() == 4 && state.photo_count() == 2,
 			               L"collection state retains all items and counts images");
+			reporter.check(state.visible_items().size() == 4 && !state.photos_only(),
+			               L"the default view includes non-photo files, including audio and video");
+			state.set_photos_only(true);
 			reporter.check(state.visible_items().size() == 2 && state.visible_items()[0].path == L"a.jpg",
 			               L"the photos-only projection follows the selected sort order");
 			state.set_photos_only(false);
@@ -1911,11 +1921,15 @@ namespace iw::tests
 			                   std::filesystem::is_directory(root / L"directory.png"),
 			               L"a failed image commit cannot replace a directory");
 			reporter.check(std::ranges::none_of(std::filesystem::directory_iterator(root), [](const auto& entry)
-			{ return entry.path().filename().wstring().starts_with(L".iw30-"); }),
+			{ return entry.path().filename().wstring().starts_with(L".iw-output-"); }),
 			               L"failed image commits remove their incomplete temporary output");
-			reporter.check(files::save_image(image, occupied, files::ImageSaveFormat::png) &&
-			                   files::load_image(occupied).pixels == image.pixels,
-			               L"an explicitly approved replacement publishes a complete decodable image");
+			const auto approved = files::snapshot_file(occupied);
+			std::filesystem::path recovery;
+			reporter.check(approved &&
+			                   files::save_image(image, occupied, files::ImageSaveFormat::png, {}, true, {}, approved,
+			                                     &recovery) &&
+			                   files::load_image(occupied).pixels == image.pixels && read(recovery) == "original",
+			               L"an explicitly approved edit publishes a complete image and keeps the original bytes");
 			const auto snapshot = files::snapshot_file(occupied);
 			reporter.check(snapshot && snapshot->exists && files::matches_snapshot(occupied, *snapshot),
 			               L"a readable file has a matching identity snapshot");
@@ -3015,8 +3029,9 @@ namespace iw::tests
 			reporter.check(files::copy_file_to(root / L"photo.jpg", root / L"sub" / L"copied.jpg", false) ==
 			                   std::errc::file_exists,
 			               L"copy refuses an existing destination unless overwrite was asked for");
-			reporter.check(!files::copy_file_to(root / L"photo.jpg", root / L"sub" / L"copied.jpg", true),
-			               L"copy replaces an existing destination when overwrite was asked for");
+			const auto replacedCopy = files::copy_file_to(root / L"photo.jpg", root / L"sub" / L"copied.jpg", true);
+			reporter.check(!replacedCopy,
+			               std::format(L"explicit copy replacement (error {})", replacedCopy.value()).c_str());
 			reporter.check(!files::move_file_to(root / L"sub" / L"copied.jpg", root / L"sub" / L"moved.jpg", false) &&
 			                   !std::filesystem::exists(root / L"sub" / L"copied.jpg", error),
 			               L"move removes the source after a successful move");
@@ -3186,23 +3201,23 @@ namespace iw::tests
 			reporter.check(appeared.rows.front().state == tasks::RowState::skipped &&
 			                   read(appeared.rows.front().destination) == "arrived after Review" &&
 			                   read(source) == original,
-			               L"an unreviewed arrival is skipped and neither destination nor original is changed");
+			               (L"an unreviewed arrival is skipped without changing any bytes: " +
+			                tasks::summarize_results(appeared))
+			                   .c_str());
 
 			settings.policy = tasks::CollisionPolicy::replace;
 			auto replacement = convert::analyze({source}, settings);
-			reporter.check(replacement.can_run() && replacement.rows.front().replace,
-			               L"the existing destination is explicitly reviewed as Replace");
-			tasks::run_plan(replacement, {}, convert::run_options(settings, {source}));
-			const auto converted = files::load_image(replacement.rows.front().destination);
-			reporter.check(replacement.count(tasks::RowState::success) == 1 && converted.width == 1 &&
-			                   converted.height == 1 && read(source) == original,
-			               L"approved Replace writes the reviewed transformation and retains the original bytes");
-			auto changedReplacement = convert::analyze({source}, settings);
-			write(changedReplacement.rows.front().destination, "a different destination appeared");
-			tasks::run_plan(changedReplacement, {}, convert::run_options(settings, {source}));
-			reporter.check(changedReplacement.count(tasks::RowState::failed) == 1 &&
-			                   read(changedReplacement.rows.front().destination) == "a different destination appeared",
-			               L"Replace refuses a destination whose reviewed identity or contents changed");
+			reporter.check(!replacement.can_run() && !replacement.rows.front().replace,
+			               L"the retired Replace setting does not authorize overwriting existing output");
+			settings.policy = tasks::CollisionPolicy::autoRename;
+			auto named = convert::analyze({source}, settings);
+			tasks::run_plan(named, {}, convert::run_options(settings, {source}));
+			const auto converted = files::load_image(named.rows.front().destination);
+			reporter
+				.check(named.count(tasks::RowState::success) == 1 && converted.width == 1 && converted.height == 1 &&
+			               read(source) == original &&
+			               read(appeared.rows.front().destination) == "arrived after Review",
+			           L"Auto-rename writes the requested transformation and retains the existing output and original");
 
 			settings.destination = root / L"cancel";
 			settings.policy = tasks::CollisionPolicy::block;
@@ -3218,7 +3233,7 @@ namespace iw::tests
 			                   cancelled.count(tasks::RowState::notRun) == 1 &&
 			                   std::filesystem::exists(cancelled.rows.front().destination) &&
 			                   !std::filesystem::exists(cancelled.rows.back().destination),
-			               L"cancellation retains completed conversion output and marks unreached items Not run");
+			               (L"cancellation keeps completed output: " + tasks::summarize_results(cancelled)).c_str());
 
 			const auto malformed = root / L"malformed.png";
 			write(malformed, "not an image");
@@ -3532,20 +3547,22 @@ namespace iw::tests
 				               L"a destination created after Review is not granted overwrite permission");
 				const auto transferSource = root / L"transfer-source.jpg";
 				std::ofstream(transferSource) << "source bytes";
-				const auto commitReview = files::snapshot_file(reviewedPath);
+				bool writeBlocked = false;
 				const auto refusedCopy = files::copy_file_to(transferSource, reviewedPath, true, [&]
 				{
-					std::ofstream(reviewedPath) << "changed while copying";
-					return commitReview && files::matches_snapshot(reviewedPath, *commitReview);
+					std::ofstream writer(reviewedPath);
+					writeBlocked = !writer;
+					if (writer) writer << "unexpected write";
+					return false;
 				});
 				std::string preservedDestination;
 				{
 					std::ifstream stream(reviewedPath);
 					std::getline(stream, preservedDestination);
 				}
-				reporter.check(refusedCopy == std::errc::operation_canceled &&
-				                   preservedDestination == "changed while copying",
-				               L"a destination changed during copying survives a refused final commit");
+				reporter.check(refusedCopy == std::errc::operation_canceled && writeBlocked &&
+				                   preservedDestination == "same data",
+				               L"the pinned destination denies a concurrent writer and survives a refused commit");
 				const auto moveTarget = root / L"move-target.jpg";
 				const auto refusedMove = files::move_file_to(transferSource, moveTarget, false, [] { return false; });
 				reporter.check(refusedMove == std::errc::operation_canceled &&
@@ -3692,19 +3709,15 @@ namespace iw::tests
 			reporter.check(std::filesystem::exists(root / L"parked.txt", error) && content(L"parked.txt") == "parked",
 			               L"a file left staged is restored by the destructor, not only on success");
 
-			reporter.section(L"Rename reviewed planning and sidecar cycles");
+			reporter.section(L"Batch Rename copies and sidecars");
 			write(L"r2.jpg", "two");
 			write(L"r1.jpg", "one");
 			write(L"r2.xmp", "two metadata");
 			write(L"r1.xmp", "one metadata");
 			auto swap = rename::analyze({root / L"r2.jpg", root / L"r1.jpg"}, L"r#", 1, tasks::CollisionPolicy::block);
-			reporter.check(swap.can_run() && swap.rows.size() == 2 && swap.collisions == 0,
-			               L"a primary-and-sidecar exchange is reviewed as a cycle rather than a collision");
-			tasks::run_plan(swap, {}, rename::run_options(swap));
-			reporter.check(swap.count(tasks::RowState::success) == 2 && content(L"r1.jpg") == "two" &&
-			                   content(L"r2.jpg") == "one" && content(L"r1.xmp") == "two metadata" &&
-			                   content(L"r2.xmp") == "one metadata",
-			               L"a reviewed name swap moves both primaries and their occupied sidecars");
+			reporter.check(!swap.can_run() && swap.rows.size() == 2 && swap.collisions == 2 &&
+			                   content(L"r1.jpg") == "one" && content(L"r2.xmp") == "two metadata",
+			               L"an apparent name exchange is treated as two collisions without touching the originals");
 
 			write(L"keep.txt", "keep");
 			auto noOp = rename::analyze({root / L"keep.txt"}, L"{name}", 1, tasks::CollisionPolicy::block);
@@ -3712,19 +3725,18 @@ namespace iw::tests
 			                   noOp.rows.front().source.native() == noOp.rows.front().destination.native(),
 			               L"an all-no-op review has no writing row or direction arrow");
 			write(L"case.txt", "case");
-			auto caseOnly = rename::analyze({root / L"case.txt"}, L"CASE", 1, tasks::CollisionPolicy::block);
+			auto caseOnly = rename::direct_plan(root / L"case.txt", L"CASE.txt");
 			tasks::run_plan(caseOnly, {}, rename::run_options(caseOnly));
 			reporter.check(caseOnly.count(tasks::RowState::success) == 1 &&
 			                   std::ranges::any_of(std::filesystem::directory_iterator(root), [](const auto& entry)
 			{ return entry.path().filename().native() == L"CASE.txt"; }),
-			               L"a case-only name change is staged and committed rather than mistaken for a no-op");
+			               (L"case-only rename commits: " + tasks::summarize_results(caseOnly)).c_str());
 			std::filesystem::create_directory(root / L"folder.with.dots", error);
 			auto folderNoOp = rename::analyze({root / L"folder.with.dots"}, L"{name}", 1,
 			                                  tasks::CollisionPolicy::block);
-			reporter.check(!folderNoOp.can_run() && folderNoOp.rows.front().state == tasks::RowState::skipped,
-			               L"folder names keep all dots when expanding the old name");
-			auto folderRename = rename::analyze({root / L"folder.with.dots"}, L"new-folder", 1,
-			                                    tasks::CollisionPolicy::block);
+			reporter.check(!folderNoOp.can_run() && folderNoOp.rows.front().state == tasks::RowState::blocked,
+			               L"Batch Rename does not operate on folder trees");
+			auto folderRename = rename::direct_plan(root / L"folder.with.dots", L"new-folder");
 			tasks::run_plan(folderRename, {}, rename::run_options(folderRename));
 			reporter.check(folderRename.count(tasks::RowState::success) == 1 &&
 			                   std::filesystem::exists(root / L"new-folder"),
@@ -3754,10 +3766,11 @@ namespace iw::tests
 			write(L"shared.jpg", "jpeg");
 			write(L"shared.png", "png");
 			write(L"shared.xmp", "shared metadata");
-			reporter.check(!rename::analyze({root / L"shared.jpg", root / L"shared.png"}, L"shared-#", 1,
-			                                tasks::CollisionPolicy::autoRename)
-			                    .can_run(),
-			               L"a companion shared by two selected primaries cannot be moved twice");
+			write(L"shared.jpg.xmp", "JPEG metadata");
+			reporter.check(files::sidecar_paths(root / L"shared.jpg") ==
+			                       std::vector<std::filesystem::path>{root / L"shared.jpg.xmp"} &&
+			                   files::sidecar_paths(root / L"shared.png").empty(),
+			               L"an ambiguous stem sidecar is left alone while a file-qualified companion is used");
 
 			write(L"companion.jpg", "primary");
 			write(L"companion.xmp", "source metadata");
@@ -3771,12 +3784,20 @@ namespace iw::tests
 			               L"Auto-rename chooses a name free for the entire companion bundle");
 			auto sidecarReplace = rename::analyze({root / L"companion.jpg"}, L"next", 1,
 			                                      tasks::CollisionPolicy::replace);
-			reporter.check(sidecarReplace.can_run() && sidecarReplace.rows.front().replace,
-			               L"a sidecar-only replacement requires an explicit reviewed Replace decision");
-			tasks::run_plan(sidecarReplace, {}, rename::run_options(sidecarReplace));
-			reporter.check(sidecarReplace.count(tasks::RowState::success) == 1 && content(L"next.jpg") == "primary" &&
-			                   content(L"next.xmp") == "source metadata",
-			               L"an approved sidecar replacement commits with its primary");
+			reporter.check(!sidecarReplace.can_run() && !sidecarReplace.rows.front().replace,
+			               L"the retired Replace policy cannot overwrite a companion");
+			auto forgedRename = sidecarAuto;
+			forgedRename.rows.front().replace = true;
+			tasks::run_plan(forgedRename, {}, rename::run_options(sidecarAuto));
+			reporter.check(forgedRename.count(tasks::RowState::failed) == 1 &&
+			                   content(L"next.xmp") == "destination metadata",
+			               L"the copy runner refuses a forged replacement flag");
+			tasks::run_plan(sidecarAuto, {}, rename::run_options(sidecarAuto));
+			reporter.check(sidecarAuto.count(tasks::RowState::success) == 1 && content(L"next (2).jpg") == "primary" &&
+			                   content(L"next (2).xmp") == "source metadata" &&
+			                   content(L"next.xmp") == "destination metadata" &&
+			                   content(L"companion.jpg") == "primary" && content(L"companion.xmp") == "source metadata",
+			               L"a renamed bundle is copied without touching the original or the occupied companion");
 
 			write(L"stale1.jpg", "first");
 			write(L"stale2.jpg", "second");
@@ -3784,15 +3805,18 @@ namespace iw::tests
 			                             tasks::CollisionPolicy::block);
 			write(L"stale2.xmp", "a new companion");
 			tasks::run_plan(stale, {}, rename::run_options(stale));
-			reporter.check(stale.count(tasks::RowState::success) == 0 && content(L"stale1.jpg") == "first" &&
-			                   !std::filesystem::exists(root / L"fresh-1.jpg"),
-			               L"a changed sidecar snapshot aborts before the first primary rename");
-			auto changedSource = rename::analyze({root / L"stale1.jpg", root / L"stale2.jpg"}, L"fresh-#", 1,
+			reporter.check(stale.rows[0].state == tasks::RowState::success &&
+			                   stale.rows[1].state == tasks::RowState::failed && content(L"stale1.jpg") == "first" &&
+			                   content(L"fresh-1.jpg") == "first",
+			               (L"a changed companion refuses its row only: " + tasks::summarize_results(stale)).c_str());
+			auto changedSource = rename::analyze({root / L"stale1.jpg", root / L"stale2.jpg"}, L"changed-#", 1,
 			                                     tasks::CollisionPolicy::block);
 			write(L"stale2.jpg", "different source contents");
 			tasks::run_plan(changedSource, {}, rename::run_options(changedSource));
-			reporter.check(changedSource.count(tasks::RowState::success) == 0 && content(L"stale1.jpg") == "first",
-			               L"a modified later source prevents an earlier row from running against a stale snapshot");
+			reporter.check(changedSource.rows[0].state == tasks::RowState::success &&
+			                   changedSource.rows[1].state == tasks::RowState::failed &&
+			                   content(L"stale1.jpg") == "first",
+			               L"an earlier independent row is copied but a changed later source is refused");
 			write(L"identity.txt", "same");
 			auto identity = rename::analyze({root / L"identity.txt"}, L"identity-new", 1,
 			                                tasks::CollisionPolicy::block);
@@ -3871,7 +3895,7 @@ namespace iw::tests
 			write(L"cancel2.txt", "two");
 			write(L"cancel1.txt", "one");
 			auto partial = rename::analyze({root / L"cancel2.txt", root / L"cancel1.txt"}, L"cancel#", 1,
-			                               tasks::CollisionPolicy::block);
+			                               tasks::CollisionPolicy::autoRename);
 			std::stop_source cancelled;
 			auto partialOptions = rename::run_options(partial);
 			partialOptions.progress = [&cancelled](const size_t complete, size_t)
@@ -3879,18 +3903,17 @@ namespace iw::tests
 				if (complete == 1) cancelled.request_stop();
 			};
 			tasks::run_plan(partial, cancelled.get_token(), partialOptions);
-			reporter.check(
-				partial.count(tasks::RowState::success) == 1 && partial.count(tasks::RowState::notRun) == 1 &&
-					content(L"cancel1.txt") == "two" && content(L"cancel1 (2).txt") == "one" &&
-					!partial.rows.back().detail.empty(),
-				L"cancelled cycles preserve completed rows and visibly recover staged originals under a free name");
+			reporter.check(partial.count(tasks::RowState::success) == 1 &&
+			                   partial.count(tasks::RowState::notRun) == 1 && content(L"cancel1.txt") == "one" &&
+			                   content(L"cancel1 (2).txt") == "two" && content(L"cancel2.txt") == "two",
+			               L"cancellation leaves the completed copy, without moving either original");
 
 			write(L"bundle2.jpg", "two");
 			write(L"bundle1.jpg", "one");
 			write(L"bundle1.xmp", "one metadata");
 			write(L"bundle1 (2).jpg", "unrelated");
 			auto bundleCancel = rename::analyze({root / L"bundle2.jpg", root / L"bundle1.jpg"}, L"bundle#", 1,
-			                                    tasks::CollisionPolicy::block);
+			                                    tasks::CollisionPolicy::autoRename);
 			std::stop_source bundleStop;
 			auto bundleOptions = rename::run_options(bundleCancel);
 			bundleOptions.progress = [&bundleStop](const size_t complete, size_t)
@@ -3898,11 +3921,12 @@ namespace iw::tests
 				if (complete == 1) bundleStop.request_stop();
 			};
 			tasks::run_plan(bundleCancel, bundleStop.get_token(), bundleOptions);
-			reporter.check(
-				bundleCancel.count(tasks::RowState::success) == 1 && content(L"bundle1.jpg") == "two" &&
-					content(L"bundle1 (2).jpg") == "unrelated" && content(L"bundle1 (3).jpg") == "one" &&
-					content(L"bundle1 (3).xmp") == "one metadata" && !std::filesystem::exists(root / L"bundle1.xmp"),
-				L"cancelled exchanges stage all displaced companions and recover the bundle under one free stem");
+			reporter
+				.check(bundleCancel.count(tasks::RowState::success) == 1 && content(L"bundle1.jpg") == "one" &&
+			               content(L"bundle1 (2).jpg") == "unrelated" && content(L"bundle1 (3).jpg") == "two" &&
+			               content(L"bundle1.xmp") == "one metadata" &&
+			               !std::filesystem::exists(root / L"bundle2 (2).xmp"),
+			           L"cancellation keeps the original bundle untouched and leaves the completed independent copy");
 
 			write(L"guard.txt", "guarded original");
 			{
@@ -3927,6 +3951,7 @@ namespace iw::tests
 			task.set_photo(path);
 			task.source_ = image;
 			task.sourceSnapshot_ = files::snapshot_file(path);
+			task.sourceDigest_ = files::file_digest(path);
 			task.edits_.brightness = 20;
 		}
 
@@ -3936,7 +3961,6 @@ namespace iw::tests
 		}
 
 		static bool dirty(const TaskEdit& task) { return task.dirty(); }
-		static bool backup(const TaskEdit& task) { return task.backupOnOverwrite_; }
 		static const std::filesystem::path& path(const TaskEdit& task) { return task.path_; }
 		static void lose_decode(TaskEdit& task) { task.source_ = {}; }
 		static bool next(TaskEdit& task) { return task.step_photo(1, true); }
@@ -3946,6 +3970,10 @@ namespace iw::tests
 			return std::ranges::count_if(task.panel_.controls(), [](const auto& control)
 			{ return control.label.find(L"WebP") != std::wstring::npos; }) == 2;
 		}
+		static ui::ControlPanel& panel(TaskEdit& task) { return task.panel_; }
+		static int darks(const TaskEdit& task) { return task.edits_.darks; }
+		static bool is_comparing(const TaskEdit& task) { return task.holdingCompare_; }
+		static app::recti comparison_handle(const TaskEdit& task) { return task.compareHandleBounds_; }
 	};
 
 	namespace
@@ -4403,8 +4431,6 @@ namespace iw::tests
 				               L"a source changed immediately before replacement refuses the encoded edit");
 				TaskEdit editor;
 				EditAccess::prepare(editor, source, image);
-				reporter.check(EditAccess::backup(editor),
-				               L"original backups are enabled even before the options panel is created");
 				const auto formats = files::writable_image_formats();
 				const bool webpAvailable = std::ranges::find(formats, files::ImageSaveFormat::webp) != formats.end();
 				TaskEdit optionsEditor;
@@ -4481,6 +4507,75 @@ namespace iw::tests
 				reporter.check(paths::equal(EditAccess::path(editor), destination),
 				               L"a newly saved path cannot be replaced by the first old selector item");
 			}
+
+			// A two-page TIFF renders a usable preview but cannot be written back as a single photo.
+			libfiles::decoded_document document;
+			document.info.width = document.info.height = 2;
+			document.info.storage = libfiles::document_storage::bgra32;
+			document.info.bits_per_pixel = 32;
+			document.info.frames = 2;
+			libfiles::decoded_frame frame;
+			frame.width = frame.height = 2;
+			frame.storage = document.info.storage;
+			frame.stride = 8;
+			frame.pixels = {0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255, 0, 0, 255, 255};
+			document.frames.push_back(frame);
+			frame.pixels = {0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255};
+			document.frames.push_back(std::move(frame));
+			const auto tiff = libfiles::encode_document(document, libfiles::image_format::tiff);
+			reporter.check(tiff.success, L"the two-page TIFF fixture can be encoded");
+
+			// Two APNG frames; WIC opens the default image but does not expose the animation.
+			constexpr unsigned char apng[] = {
+				0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52, 0x00,
+				0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x7b, 0x40, 0xe8, 0xdd, 0x00,
+				0x00, 0x00, 0x08, 0x61, 0x63, 0x54, 0x4c, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0xf3, 0x8d,
+				0x93, 0x70, 0x00, 0x00, 0x00, 0x1a, 0x66, 0x63, 0x54, 0x4c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+				0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x03,
+				0x00, 0x00, 0xf6, 0xf8, 0x8d, 0xf6, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63,
+				0xf8, 0xcf, 0xc0, 0x00, 0x44, 0x00, 0x08, 0xfe, 0x01, 0xff, 0xc6, 0x9e, 0x79, 0xf7, 0x00, 0x00, 0x00,
+				0x1a, 0x66, 0x63, 0x54, 0x4c, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01,
+				0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x03, 0x00, 0x00, 0x6d, 0x8b, 0x67,
+				0x22, 0x00, 0x00, 0x00, 0x11, 0x66, 0x64, 0x41, 0x54, 0x00, 0x00, 0x00, 0x02, 0x78, 0x9c, 0x63, 0x60,
+				0xf8, 0xcf, 0x00, 0x44, 0x00, 0x07, 0x00, 0x01, 0xff, 0x73, 0xa7, 0xee, 0xa8, 0x00, 0x00, 0x00, 0x00,
+				0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+			};
+			const auto testMultiImage = [&](const wchar_t* name, const std::span<const unsigned char> bytes)
+			{
+				const auto path = root / name;
+				std::ofstream(path, std::ios::binary)
+					.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+				const auto preview = files::load_image(path);
+				if (preview.pixels.empty())
+				{
+					reporter.check(false, L"the multi-image fixture has a decodable first frame");
+					return;
+				}
+				TaskEdit editor;
+				EditAccess::prepare(editor, path, preview);
+				reporter.check(!EditAccess::write(editor, path, true) && EditAccess::dirty(editor),
+				               L"in-place Save refuses to discard additional pages or frames");
+				auto copy = root / path.stem();
+				copy += L"-copy.png";
+				reporter.check(EditAccess::write(editor, copy, false) && !files::load_image(copy).pixels.empty(),
+				               L"Save as can write a single-frame copy");
+				std::ifstream original(path, std::ios::binary);
+				const std::vector<unsigned char> untouched(std::istreambuf_iterator<char>(original), {});
+				reporter.check(std::ranges::equal(untouched, bytes),
+				               L"all frames remain in the byte-identical original");
+			};
+			if (tiff.success)
+			{
+				testMultiImage(L"two-pages.tif", tiff.data);
+				testMultiImage(L"mislabeled.png", tiff.data);
+			}
+			testMultiImage(L"animation.png", apng);
+			constexpr std::uint16_t pixels16[]{0xf123, 0x4010, 0x2050, 0xffff, 0x1050, 0x2060, 0xfff0, 0xffff};
+			const libfiles::image_view highDepth{reinterpret_cast<const std::uint8_t*>(pixels16), sizeof(pixels16), 2,
+			                                     1, libfiles::pixel_format::rgbx16};
+			const auto deepPng = libfiles::encode_png(highDepth, 1, {});
+			reporter.check(!deepPng.data.empty(), L"the 16-bit PNG fixture can be encoded");
+			if (!deepPng.data.empty()) testMultiImage(L"16-bit.png", deepPng.data);
 			std::filesystem::remove_all(root, error);
 		}
 
@@ -4502,6 +4597,7 @@ namespace iw::tests
 
 			std::vector<Text> texts;
 			std::vector<Fill> fills;
+			std::vector<app::recti> alphaImages;
 
 			static int width(const std::wstring_view value) { return static_cast<int>(value.size()) * 10; }
 
@@ -4517,7 +4613,10 @@ namespace iw::tests
 			{
 				return {width(value), 16};
 			}
-			void image(std::span<const std::uint32_t>, app::sizei, app::recti, bool) override {}
+			void image(std::span<const std::uint32_t>, app::sizei, const app::recti bounds, const bool alpha) override
+			{
+				if (alpha) alphaImages.push_back(bounds);
+			}
 			void focus(app::recti) override {}
 			void outline(app::recti, color, int) override {}
 			void clip(app::recti) override {}
@@ -4537,6 +4636,56 @@ namespace iw::tests
 				return found == fills.end() ? std::nullopt : std::optional<color>(found->value);
 			}
 		};
+
+		void test_command_chrome(Reporter& reporter)
+		{
+			using namespace platform;
+			reporter.section(L"Command icons and breadcrumb navigation");
+			const auto root = std::make_shared<RecordingFrame>();
+			const auto chrome = create_command_surface(root);
+			reporter.check(chrome && root->children.size() == 2, L"the command and status surfaces are created");
+			if (!chrome || root->children.size() != 2) return;
+			auto back = std::make_shared<Command>();
+			back->name = L"Back";
+			back->tooltip = L"Previous folder";
+			back->bitmap = CommandBitmap::back;
+			int invoked = 0;
+			back->invoke = [&invoked]
+			{
+				++invoked;
+			};
+			chrome->set_toolbar({ToolbarItem::action(back)});
+			std::filesystem::path selected;
+			chrome->set_breadcrumbs({{L"C:\\", L"C:\\"},
+			                         {L"C:\\test builds", L"test builds"},
+			                         {L"C:\\test builds\\Flickr", L"Flickr"}},
+			                        [&selected](const auto& path) { selected = path; });
+			chrome->layout({0, 0, 740, 460}, false);
+			const auto& tool = root->children[0];
+			const auto& status = root->children[1];
+			RecordingDraw draw;
+			tool->reactor->paint(tool, draw);
+			reporter.check(draw.find_text(L"\uE72B") && !draw.find_text(L"Back") && draw.alphaImages.empty(),
+			               L"navigation uses scalable glyphs rather than resized toolbar bitmaps");
+			tool->mouse(MouseMessage::move, {18, 12});
+			status->reactor->paint(status, draw);
+			reporter.check(draw.find_text(L"Previous folder"), L"hovering the icon gives the command's name in status");
+			tool->mouse(MouseMessage::leftButtonDown, {18, 12});
+			reporter.check(invoked == 1, L"clicking an icon invokes its command");
+			const auto* parent = draw.find_text(L"test builds");
+			reporter.check(parent != nullptr, L"an ancestor is visible when there is room");
+			if (parent) tool->mouse(MouseMessage::leftButtonDown, {parent->bounds.x + 2, parent->bounds.y + 2});
+			reporter.check(selected == L"C:\\test builds", L"clicking an ancestor opens that folder");
+
+			chrome->layout({0, 0, 185, 460}, false);
+			RecordingDraw narrow;
+			tool->reactor->paint(tool, narrow);
+			const auto* leaf = narrow.find_text(L"Flickr");
+			reporter.check(leaf && leaf->bounds.right() <= 185 && narrow.find_text(L"\u2026") &&
+			                   !narrow.find_text(L"C:\\"),
+			               L"narrow address space keeps the current folder and collapses earlier ancestors");
+			root->release_tree();
+		}
 
 		void test_fullscreen_strip(Reporter& reporter)
 		{
@@ -4559,11 +4708,144 @@ namespace iw::tests
 			canvas.set_fullscreen(true);
 			const auto fullscreen = paint();
 			reporter.check(
-				fullscreen.find_text(L"Images") && !fullscreen.find_text(L"Date modified"),
+				fullscreen.find_text(L"Filmstrip") && !fullscreen.find_text(L"Date modified"),
 				L"full screen entered from the Details view draws its thumbnail strip without the Details header");
+			if (const auto* strip = fullscreen.find_text(L"Filmstrip"))
+			{
+				const auto frame = host.canvas();
+				frame->mouse(platform::MouseMessage::leftButtonDown,
+				             {frame->client_rect().width - 155, strip->bounds.y + 8});
+				frame->mouse(platform::MouseMessage::move, {frame->client_rect().width - 63, strip->bounds.y + 8});
+				frame->mouse(platform::MouseMessage::leftButtonUp,
+				             {frame->client_rect().width - 63, strip->bounds.y + 8});
+				reporter.check(canvas.thumbnail_size() > 200 && canvas.thumbnail_selector_visible(),
+				               L"dragging the fullscreen size slider enlarges thumbnails without collapsing the strip");
+			}
+			std::vector<files::FolderItem> photos(14);
+			for (size_t i = 0; i < photos.size(); ++i)
+			{
+				photos[i].path = L"unopened-marker-" + std::to_wstring(i) + L".jpg";
+				photos[i].kind = files::ItemKind::image;
+			}
+			canvas.set_items(std::move(photos), 14);
+			const auto markers = [&]
+			{
+				const auto frame = paint();
+				std::vector<int> positions;
+				for (const auto& fill : frame.fills)
+					if (fill.bounds.width == 3 && fill.bounds.height == 12 &&
+					    fill.value == platform::system_color(platform::SystemColor::highlight))
+						positions.push_back(fill.bounds.x);
+				return positions;
+			};
+			canvas.select_index(0, false, false);
+			const auto first = markers();
+			canvas.select_index(10, false, false);
+			const auto later = markers();
+			reporter.check(first.size() == 1 && later.size() == 1 && later.front() > first.front(),
+			               L"the blue filmstrip tick follows the selected photo through total strip content");
 			canvas.set_fullscreen(false);
 			reporter.check(paint().find_text(L"Date modified") != nullptr,
 			               L"leaving full screen brings the Details header back");
+		}
+
+		void test_browse_playback(Reporter& reporter)
+		{
+			using media_fixtures::wait_until;
+			reporter.section(L"Playback in Browse");
+			const auto root = platform::unique_temp_folder(L"iw30-browse-playback");
+			std::error_code error;
+			if (root.empty() || !std::filesystem::create_directory(root, error))
+			{
+				reporter.check(false, L"the inline video fixture has a writable folder");
+				return;
+			}
+			const auto video = root / L"numbered.avi";
+			const ::core::scope_exit cleanup([&]
+			{
+				std::filesystem::remove(video, error);
+				std::filesystem::remove(root, error);
+			});
+			const bool ready = media_fixtures::save(video, media_fixtures::avi(media_fixtures::numbered_pixel));
+			reporter.check(ready, L"an inline video fixture is available");
+			if (!ready) return;
+			MainWindowAccess host;
+			if (!host.create())
+			{
+				reporter.check(false, L"the browse surface is available");
+				return;
+			}
+			auto& canvas = host.image_canvas();
+			const auto other = root / L"other";
+			const auto frame = host.canvas();
+			const auto tick = [&](const platform::KeyCode key)
+			{ ImageCanvasAccess::key(canvas, frame, {.key = key}); };
+			const auto player = [&] { return ImageCanvasAccess::player(canvas); };
+			canvas.set_items({{video, files::ItemKind::video}, {other, files::ItemKind::folder}}, 2);
+			canvas.select_index(0, false, false);
+			canvas.load(video);
+			RecordingDraw drawn;
+			frame->reactor->paint(frame, drawn);
+			reporter.check(!player() && drawn.find_text(L"Play") && drawn.find_text(L"Sound"),
+			               L"selecting a clip exposes transport without auto-playing it");
+			tick(platform::KeyCode::space);
+			const bool playing = wait_until([&] { return player() && player()->picture(); }, std::chrono::seconds(3));
+			reporter.check(playing && !host.task() && host.canvas() == frame && canvas.focused_index() == 0,
+			               L"Space shows decoded frames in the existing canvas without moving the selection");
+			if (!playing) return;
+			tick(platform::KeyCode::space);
+			reporter.check(wait_until([&] { return player()->status().state == media::PlaybackState::paused; },
+			                          std::chrono::seconds(2)),
+			               L"Space pauses the inline player");
+			tick(platform::KeyCode::f7);
+			reporter.check(player()->status().volume == 0.0f, L"F7 mutes the current player");
+			tick(platform::KeyCode::right);
+			reporter.check(!player() && paths::equal(canvas.path(), other) && canvas.focused_index() == 1,
+			               L"moving to another item stops and releases playback without closing Browse");
+		}
+
+		void test_edit_panel(Reporter& reporter)
+		{
+			reporter.section(L"Photo editor controls");
+			auto task = std::make_shared<TaskEdit>();
+			files::DecodedImage pixels;
+			pixels.width = pixels.originalWidth = 160;
+			pixels.height = pixels.originalHeight = 120;
+			pixels.pixels.assign(160 * 120, 0xff904062);
+			EditAccess::prepare(*task, L"edit-controls.png", pixels);
+			const auto frame = std::make_shared<RecordingFrame>();
+			reporter.check(task->create(frame, {}, true), L"the Edit host binds its existing surface");
+			RecordingDraw draw;
+			task->frame()->set_focus();
+			frame->reactor->paint(frame, draw);
+			auto& panel = EditAccess::panel(*task);
+			const auto value = std::ranges::find(panel.controls(), L"Darks", &ui::Control::label);
+			const auto chart = std::ranges::find(panel.controls(), ui::ControlKind::custom, &ui::Control::kind);
+			if (value == panel.controls().end() || chart == panel.controls().end())
+			{
+				reporter.check(false, L"tools show an editable tone value and a histogram");
+				task->dispose();
+				return;
+			}
+			reporter.check(value->hit.y == value->bounds.y && value->hit.right() < value->valueHit.x,
+			               L"wide tools lay the adjustment label, slider and numeric value on one line");
+			const auto nearDarks = app::pointi{chart->bounds.x + chart->bounds.width / 4, chart->bounds.y + 10};
+			panel.mouse_down(nearDarks);
+			reporter.check(EditAccess::darks(*task) > 0 && value->value == EditAccess::darks(*task),
+			               L"dragging a histogram handle updates the matching adjustment and draft together");
+			panel.cancel_drag();
+			reporter.check(EditAccess::darks(*task) == 0 && value->value == 0,
+			               L"cancelling the histogram gesture restores both the tone and its control");
+			const auto handle = EditAccess::comparison_handle(*task).center();
+			frame->mouse(platform::MouseMessage::leftButtonDown, handle);
+			reporter.check(EditAccess::is_comparing(*task), L"holding the on-photo compare handle shows the split");
+			frame->mouse(platform::MouseMessage::leftButtonUp, handle);
+			reporter.check(!EditAccess::is_comparing(*task), L"releasing the handle restores the crop workspace");
+			frame->move({0, 0, 370, 640});
+			frame->reactor->paint(frame, draw);
+			reporter.check(value->hit.y > value->bounds.y && value->value == 0,
+			               L"narrow tools stack the slider without changing its value");
+			task->dispose();
 		}
 
 		void test_path_shortening(Reporter& reporter)
@@ -5066,10 +5348,13 @@ namespace iw::tests
 			test_mode_bar(reporter);
 			test_main_window_host(reporter);
 			test_canvas_refresh(reporter);
+			test_browser_keys(reporter);
 			test_folder_scan_completion(reporter);
 			test_color(reporter);
+			test_appearance(reporter);
 			test_dpi_metrics(reporter);
 			test_toolbar_symbols(reporter);
+			test_command_chrome(reporter);
 			test_toolbar_labels(reporter);
 			test_item_count(reporter);
 			test_supported_images(reporter);
@@ -5115,6 +5400,8 @@ namespace iw::tests
 			test_folder_tree(reporter);
 			test_path_shortening(reporter);
 			test_fullscreen_strip(reporter);
+			test_browse_playback(reporter);
+			test_edit_panel(reporter);
 			test_sync_workflow(reporter);
 			test_undo(reporter);
 		}

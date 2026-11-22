@@ -10,10 +10,12 @@ restores the full edited image.</p>
 <h2>Colour</h2><p>Adjust brightness, contrast, darks, midtones, lights,
 saturation, vibrance, temperature and tint. Auto Colour chooses tone values
 from the image. Compare Before and After temporarily shows the source image.</p>
-<h2>Saving</h2><p>Save replaces the current file only after an edit. Save and
-Move Next saves and advances; Save As writes a new file. Discard Changes
+<h2>Saving</h2><p>Save checks that the original has not changed and keeps it
+beside the edit under an unused -original name. Save and Move Next saves and
+advances; Save As requires a new filename. Discard Changes
 returns to the unedited image. Undo Image Edit restores the preceding edit
 state.</p>
-<p class="note">Rotate Left and Rotate Right in the item view operate directly
-on selected files and preserve JPEG image data without re-compression.</p>
+<p class="note">Rotate Left and Rotate Right in the item view write new
+-rotated copies and leave the selections unchanged. When a JPEG supports
+lossless rotation, the copy is saved without re-compression.</p>
 </body></html>

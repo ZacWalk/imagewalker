@@ -185,18 +185,26 @@ inline void WriteStack(CONTEXT *context, HANDLE thread)
 	CONTEXT walk = *context;
 
 	STACKFRAME64 frame = {};
+#if defined(_M_IX86)
+	constexpr DWORD machine = IMAGE_FILE_MACHINE_I386;
+	frame.AddrPC.Offset = walk.Eip;
+	frame.AddrFrame.Offset = walk.Ebp;
+	frame.AddrStack.Offset = walk.Esp;
+#else
+	constexpr DWORD machine = IMAGE_FILE_MACHINE_AMD64;
 	frame.AddrPC.Offset = walk.Rip;
-	frame.AddrPC.Mode = AddrModeFlat;
 	frame.AddrFrame.Offset = walk.Rbp;
-	frame.AddrFrame.Mode = AddrModeFlat;
 	frame.AddrStack.Offset = walk.Rsp;
+#endif
+	frame.AddrPC.Mode = AddrModeFlat;
+	frame.AddrFrame.Mode = AddrModeFlat;
 	frame.AddrStack.Mode = AddrModeFlat;
 
 	const HANDLE process = GetCurrentProcess();
 
 	for (int i = 0; i < 96; i++)
 	{
-		if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, process, thread, &frame, &walk,
+		if (!StackWalk64(machine, process, thread, &frame, &walk,
 		                 NULL, SymFunctionTableAccess64, SymGetModuleBase64, NULL))
 			break;
 
@@ -333,11 +341,17 @@ inline void WriteExceptionDetail(EXCEPTION_RECORD *record)
 inline void WriteRegisters(const CONTEXT *c)
 {
 	Out("Registers:\n");
+#if defined(_M_IX86)
+	Out("  eax=%08lx ebx=%08lx ecx=%08lx edx=%08lx\n", c->Eax, c->Ebx, c->Ecx, c->Edx);
+	Out("  esi=%08lx edi=%08lx ebp=%08lx esp=%08lx\n", c->Esi, c->Edi, c->Ebp, c->Esp);
+	Out("  eip=%08lx eflags=%08lx\n\n", c->Eip, c->EFlags);
+#else
 	Out("  rax=%016llx rbx=%016llx rcx=%016llx rdx=%016llx\n", c->Rax, c->Rbx, c->Rcx, c->Rdx);
 	Out("  rsi=%016llx rdi=%016llx rbp=%016llx rsp=%016llx\n", c->Rsi, c->Rdi, c->Rbp, c->Rsp);
 	Out("  r8 =%016llx r9 =%016llx r10=%016llx r11=%016llx\n", c->R8, c->R9, c->R10, c->R11);
 	Out("  r12=%016llx r13=%016llx r14=%016llx r15=%016llx\n", c->R12, c->R13, c->R14, c->R15);
 	Out("  rip=%016llx eflags=%08lx\n\n", c->Rip, c->EFlags);
+#endif
 }
 
 // The one path everything funnels into. Runs on the reporting thread.
@@ -624,7 +638,6 @@ inline int __cdecl OnNewFailed(size_t size)
 	StringCchPrintfW(detail, ARRAYSIZE(detail), L"out of memory allocating %Iu bytes", size);
 	ReportAndNotify(detail, NULL);
 	_exit(3);
-	return 0;
 }
 
 // Optional, opt-in: every C++ throw as it happens, so an exception that some

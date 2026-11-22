@@ -172,6 +172,7 @@ namespace IW
 
 			// Message map
 			BEGIN_MSG_MAP(ThisClass)
+				MESSAGE_HANDLER(WM_SYSCOLORCHANGE, OnSystemColorsChanged)
 
 				if (App.Settings.BlackSkin)
 				{
@@ -196,6 +197,15 @@ namespace IW
 
 			/////////////////////////////////////////////////////////////////////////////////////////////////////
 			/////////////////////////////////////////////////////////////////////////////////////////////////////
+
+			LRESULT OnSystemColorsChanged(UINT, WPARAM, LPARAM, BOOL& bHandled)
+			{
+				// A top-level system color change can also turn on High Contrast.
+				// Re-erase existing panes so they immediately go back to native colors.
+				static_cast<T*>(this)->RedrawWindow(nullptr, nullptr, RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN);
+				bHandled = FALSE;
+				return 0;
+			}
 
 			LRESULT OnCreate(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM lParam, BOOL& bHandled)
 			{

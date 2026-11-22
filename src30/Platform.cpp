@@ -6,10 +6,13 @@
 #include "Files.h"
 #include "PlatformWin32.h"
 #include "DiagnosticLog.h"
+#include "Appearance.h"
 
+#include <core/recycle.h>
 #include <iw/imaging/PixelOps.h>
 
 #include <objbase.h>
+#include <dwmapi.h>
 #include <shlwapi.h>
 #include <algorithm>
 #include <array>
@@ -30,6 +33,8 @@ namespace iw::platform
 {
 	namespace
 	{
+		Appearance currentAppearance = Appearance::light;
+
 		core::recti core_rect(const app::recti v)
 		{
 			return static_cast<core::recti>(v);
@@ -269,6 +274,7 @@ namespace iw::platform
 			if (key == ::platform::keys::SPACE) return KeyCode::space;
 			if (key == ::platform::keys::DEL) return KeyCode::deleteKey;
 			if (key == ::platform::keys::F2) return KeyCode::f2;
+			if (key == ::platform::keys::F7) return KeyCode::f7;
 			if (key == ::platform::keys::RETURN) return KeyCode::enter;
 			if (key == ::platform::keys::ESCAPE) return KeyCode::escape;
 			if (key == ::platform::keys::DIVIDE) return KeyCode::divide;
@@ -630,6 +636,7 @@ namespace iw::platform
 
 			void on_window_layout(render::measure_context& mc, core::sizei extent, bool minimized) override
 			{
+				extent_ = extent;
 				if (menuBar_ && !minimized)
 				{
 					menuHeight_ = (std::max)(0, menuBar_->measure(mc, extent.cx).cy);
@@ -647,6 +654,8 @@ namespace iw::platform
 
 			void on_window_paint(render::draw_context& dc) override
 			{
+				dc.colors = frame_colors();
+				dc.draw_rect(core::recti(extent_), core::color(dc.colors.background, 1.0f));
 				if (menuBar_ && menuBar_->is_visible()) menuBar_->render(dc, {});
 				painting_ = true;
 				const core::scope_exit painted([this] { painting_ = false; });
@@ -865,6 +874,7 @@ namespace iw::platform
 			FrameReactorPtr reactor_;
 			::ui::control_ptr menuBar_;
 			std::vector<std::shared_ptr<Hosted>> hosted_;
+			core::sizei extent_{};
 			int menuHeight_{};
 			double pinchDistance_{};
 			bool painting_{};
@@ -899,8 +909,7 @@ namespace iw::platform
 			style.can_drop = true;
 			style.hardware_accelerated = true;
 			style.timer_milliseconds = 50;
-			style.colors = {ui::style::colors.view_background, ui::style::colors.view_text,
-			                ui::style::colors.view_selected_background};
+			style.colors = frame_colors();
 			auto child = native_->create_frame(host, style);
 			if (!child) return {};
 			if (host_) host_->add_child(host);
@@ -1138,6 +1147,9 @@ namespace iw::platform
 			case ShortcutKey::v: r.key = 'V'; break;
 			case ShortcutKey::x: r.key = 'X'; break;
 			case ShortcutKey::z: r.key = 'Z'; break;
+			case ShortcutKey::left: r.key = ::platform::keys::LEFT; break;
+			case ShortcutKey::right: r.key = ::platform::keys::RIGHT; break;
+			case ShortcutKey::up: r.key = ::platform::keys::UP; break;
 			case ShortcutKey::deleteKey: r.key = ::platform::keys::DEL; break;
 			case ShortcutKey::enterKey: r.key = ::platform::keys::RETURN; break;
 			case ShortcutKey::f1: r.key = ::platform::keys::F1; break;
@@ -1324,12 +1336,18 @@ namespace iw::platform
 		return impl_ ? static_cast<NativeHandle>(static_cast<int>(impl_->face)) : 0;
 	}
 
-	FontPtr create_message_font(unsigned int dpi)
+	FontPtr create_message_font(unsigned int)
 	{
-		auto p = std::make_unique<Font::Impl>();
-		p->face = render::make_font({"Segoe UI", (std::max)(1, static_cast<int>(9.0 * (dpi ? dpi : 96) / 96)), 400});
-		p->valid = true;
-		return std::shared_ptr<Font>(new Font(std::move(p)));
+		// Its size and DPI come from the render context, just like libdesktop's controls.
+		static const auto font = std::shared_ptr<Font>(
+			new Font(std::make_unique<Font::Impl>(Font::Impl{render::font_face::dialog, true})));
+		return font;
+	}
+
+	FontPtr command_icon_font(const unsigned int dpi)
+	{
+		return std::shared_ptr<Font>(new Font(std::make_unique<Font::Impl>(
+			Font::Impl{render::make_font({"Segoe MDL2 Assets", MulDiv(18, dpi ? dpi : 96, 96)}), true})));
 	}
 
 	namespace win32
@@ -1338,10 +1356,74 @@ namespace iw::platform
 		{
 			return frame ? reinterpret_cast<HWND>(frame->native_handle()) : nullptr;
 		}
+
+		void refresh_appearance(const HWND window)
+		{
+			HIGHCONTRASTW contrast{sizeof(contrast)};
+			const bool highContrast = SystemParametersInfoW(SPI_GETHIGHCONTRAST, contrast.cbSize, &contrast, 0) &&
+			                          (contrast.dwFlags & HCF_HIGHCONTRASTON) != 0;
+			DWORD useLight = 1;
+			DWORD size = sizeof(useLight);
+			// Read the app preference, not the independent taskbar/SystemUsesLightTheme setting.
+			const auto status = RegGetValueW(HKEY_CURRENT_USER,
+			                                 L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+			                                 L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &useLight, &size);
+			currentAppearance = select_appearance(status != ERROR_SUCCESS || useLight != 0, highContrast);
+
+			::ui::style::set_palette(appearance_palette(currentAppearance));
+			if (window)
+			{
+				const BOOL darkCaption = currentAppearance == Appearance::dark;
+				DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE, &darkCaption, sizeof(darkCaption));
+				RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_FRAME | RDW_ALLCHILDREN);
+			}
+		}
 	}
 
-	color system_color(const SystemColor v)
+	color appearance_color(const Appearance appearance, const SystemColor v)
 	{
+		if (appearance == Appearance::highContrast)
+		{
+			const auto native = [](const int index)
+			{
+				return color::from_packed(GetSysColor(index));
+			};
+			switch (v)
+			{
+			case SystemColor::window: return native(COLOR_WINDOW);
+			case SystemColor::windowText:
+			case SystemColor::warningText: return native(COLOR_WINDOWTEXT);
+			case SystemColor::face:
+			case SystemColor::hover:
+			case SystemColor::checked: return native(COLOR_BTNFACE);
+			case SystemColor::shadow:
+			case SystemColor::buttonText: return native(COLOR_BTNTEXT);
+			case SystemColor::highlight: return native(COLOR_HIGHLIGHT);
+			case SystemColor::highlightText: return native(COLOR_HIGHLIGHTTEXT);
+			case SystemColor::grayText: return native(COLOR_GRAYTEXT);
+			case SystemColor::scrollbar: return native(COLOR_SCROLLBAR);
+			}
+		}
+
+		if (appearance == Appearance::dark)
+		{
+			switch (v)
+			{
+			case SystemColor::window: return {27, 30, 34};
+			case SystemColor::windowText:
+			case SystemColor::buttonText: return {236, 239, 244};
+			case SystemColor::face: return {38, 42, 48};
+			case SystemColor::shadow: return {116, 128, 145};
+			case SystemColor::highlight: return {46, 83, 132};
+			case SystemColor::highlightText: return {255, 255, 255};
+			case SystemColor::grayText: return {178, 186, 197};
+			case SystemColor::scrollbar: return {47, 53, 62};
+			case SystemColor::hover: return {48, 64, 83};
+			case SystemColor::checked: return {50, 70, 96};
+			case SystemColor::warningText: return {255, 155, 134};
+			}
+		}
+
 		switch (v)
 		{
 		case SystemColor::window: return app_color(::platform::system_color_value(::platform::system_color::window));
@@ -1351,18 +1433,64 @@ namespace iw::platform
 		case SystemColor::shadow: return {128, 128, 128};
 		case SystemColor::highlight: return {51, 103, 180};
 		case SystemColor::highlightText: return {255, 255, 255};
-		case SystemColor::grayText: return {128, 128, 128};
+		case SystemColor::grayText: return {101, 101, 101};
 		case SystemColor::buttonText: return {32, 32, 32};
 		case SystemColor::scrollbar: return {220, 220, 220};
+		case SystemColor::hover: return {218, 232, 247};
+		case SystemColor::checked: return {202, 220, 241};
+		case SystemColor::warningText: return {176, 48, 32};
 		}
 		return colors::black;
+	}
+
+	color system_color(const SystemColor value)
+	{
+		return appearance_color(currentAppearance, value);
+	}
+
+	::ui::style::theme appearance_palette(const Appearance appearance)
+	{
+		const auto packed = [appearance](const SystemColor role)
+		{
+			return appearance_color(appearance, role).pack();
+		};
+		::ui::style::theme theme;
+		theme.menu_background = packed(SystemColor::face);
+		theme.menu_text = packed(SystemColor::buttonText);
+		theme.menu_shortcut_text = packed(SystemColor::grayText);
+		theme.toolbar_background = theme.menu_background;
+		theme.view_background = packed(SystemColor::window);
+		theme.view_text = packed(SystemColor::windowText);
+		theme.view_selected_background = packed(SystemColor::highlight);
+		theme.sidebar_background = theme.view_background;
+		theme.bubble_background = theme.menu_background;
+		theme.group_background = theme.menu_background;
+		theme.dialog_background = theme.menu_background;
+		theme.dialog_text = theme.menu_text;
+		theme.dialog_selected_background = theme.view_selected_background;
+		theme.dialog_selected_text = packed(SystemColor::highlightText);
+		theme.button_background = packed(SystemColor::checked);
+		theme.edit_background = theme.view_background;
+		theme.edit_text = theme.view_text;
+		theme.desktop_background = ::platform::system_color_value(::platform::system_color::desktop);
+		theme.important_background = core::bgr(0xcc6611);
+		theme.warning_background = core::bgr(0xaa2211);
+		theme.success_background = core::bgr(0x2e8b33);
+		theme.info_background = core::bgr(0x117799);
+		return theme;
+	}
+
+	render::color_style frame_colors()
+	{
+		return {system_color(SystemColor::window).pack(), system_color(SystemColor::windowText).pack(),
+		        system_color(SystemColor::highlight).pack()};
 	}
 
 	color calc_hande_color(bool hover, bool selected, bool checked)
 	{
 		if (selected) return system_color(SystemColor::highlight);
-		if (hover) return {188, 218, 246};
-		if (checked) return {214, 228, 242};
+		if (hover) return system_color(SystemColor::hover);
+		if (checked) return system_color(SystemColor::checked);
 		return system_color(SystemColor::face);
 	}
 
@@ -1544,16 +1672,37 @@ namespace iw::platform
 			}
 		}();
 		const auto bytes = ::platform::embedded_resource_data(name);
-		const auto surface = bytes.empty() ? core::surface_ptr{} : ::platform::load_image_memory(bytes);
-		if (!surface || surface->empty()) return result;
-		result.size = app_size(surface->dimensions());
+		// BI_RGB leaves the high byte unused in ordinary BMPs. These embedded assets use it for straight alpha.
+		const auto invalid = [name]
+		{
+			write_diagnostic(L"Invalid embedded bitmap: " + ::core::utf8_to_utf16(name) + L"\n");
+			return BitmapResource{};
+		};
+		BITMAPFILEHEADER file{};
+		BITMAPINFOHEADER info{};
+		if (bytes.size() < sizeof(file) + sizeof(info)) return invalid();
+		std::memcpy(&file, bytes.data(), sizeof(file));
+		std::memcpy(&info, bytes.data() + sizeof(file), sizeof(info));
+		if (file.bfType != 0x4d42 || info.biSize != sizeof(info) || info.biWidth <= 0 || info.biHeight == 0 ||
+		    info.biHeight == (std::numeric_limits<LONG>::min)() || info.biPlanes != 1 || info.biBitCount != 32 ||
+		    info.biCompression != BI_RGB || file.bfOffBits < sizeof(file) + sizeof(info) ||
+		    file.bfOffBits > bytes.size())
+			return invalid();
+		const int height = std::abs(info.biHeight);
+		const auto pixels = static_cast<std::uint64_t>(info.biWidth) * height;
+		if (pixels > (bytes.size() - file.bfOffBits) / sizeof(std::uint32_t)) return invalid();
+		result.size = {info.biWidth, height};
 		result.pixels.resize(static_cast<size_t>(result.size.width) * result.size.height);
+		const auto stride = static_cast<size_t>(info.biWidth) * sizeof(std::uint32_t);
 		for (int y = 0; y < result.size.height; ++y)
-			std::memcpy(result.pixels.data() + static_cast<size_t>(y) * result.size.width, surface->pixels_line(y),
-			            static_cast<size_t>(result.size.width) * sizeof(std::uint32_t));
+		{
+			const int row = info.biHeight < 0 ? y : height - y - 1;
+			std::memcpy(result.pixels.data() + static_cast<size_t>(y) * result.size.width,
+			            bytes.data() + file.bfOffBits + static_cast<size_t>(row) * stride, stride);
+		}
 		result.hasAlpha = std::ranges::any_of(result.pixels, [](std::uint32_t p) { return core::get_a(p) != 0xff; });
-		if (!result.hasAlpha)
-			for (auto& p : result.pixels) p |= 0xff000000;
+		for (auto& pixel : result.pixels)
+			if (core::get_a(pixel) == 0) pixel = 0;
 		return result;
 	}
 
@@ -1598,10 +1747,11 @@ namespace iw::platform
 		return StrCmpLogicalW(a.c_str(), b.c_str());
 	}
 
-	std::optional<std::filesystem::path> choose_folder(const WindowFramePtr&, std::wstring_view)
+	std::optional<std::filesystem::path> choose_folder(const WindowFramePtr&, std::wstring_view title,
+	                                                   const std::filesystem::path& initial)
 	{
-		core::folder_path selected;
-		if (!::platform::browse_for_folder(selected)) return {};
+		auto selected = desktop::folder_path(initial);
+		if (!::platform::browse_for_folder(nullptr, selected, ::core::utf16_to_utf8(title))) return {};
 		return ::platform::to_stream_path(selected);
 	}
 
@@ -1733,31 +1883,12 @@ namespace iw::platform
 	                            const std::filesystem::path& destination)
 	{
 		if (sources.empty()) return false;
+		if (op == FileOperation::recycle) return recycle::to_bin(sources);
 		std::vector<core::file_path> files;
 		for (const auto& p : sources) files.push_back(desktop::file_path(p));
-		if (op == FileOperation::recycle) return ::platform::delete_items(files, {}, true).success();
 		if (destination.empty()) return false;
 		return ::platform::move_or_copy(files, {}, desktop::folder_path(destination), op == FileOperation::move, false)
 		    .success();
-	}
-
-	bool delete_permanently(std::span<const std::filesystem::path> paths, std::error_code& error)
-	{
-		error.clear();
-		bool all = true;
-		for (const auto& p : paths)
-		{
-			auto r = ::platform::delete_file(desktop::file_path(p));
-			if (r.failed())
-			{
-				::platform::make_file_writable(desktop::file_path(p));
-				r = ::platform::delete_file(desktop::file_path(p));
-			}
-			if (r.success()) continue;
-			all = false;
-			if (!error) error = r.error ? r.error : std::make_error_code(std::errc::io_error);
-		}
-		return all;
 	}
 
 	namespace
@@ -1909,7 +2040,10 @@ namespace iw::platform
 
 	bool launch_process(const std::filesystem::path& executable, std::wstring_view arguments, const WindowFramePtr&)
 	{
-		return !executable.empty() && ::platform::run(desktop::file_path(executable), ::core::utf16_to_utf8(arguments));
+		if (!executable.is_absolute()) return false;
+		// CreateProcess needs argv[0] even when the executable is passed separately.
+		const auto commandLine = L"\"" + executable.native() + L"\" " + std::wstring(arguments);
+		return ::platform::run(desktop::file_path(executable), ::core::utf16_to_utf8(commandLine));
 	}
 
 	TextInputPtr create_text_input(const WindowFramePtr& owner, TextInputOptions options)
@@ -1950,8 +2084,10 @@ namespace iw::platform
 	std::filesystem::path unique_temp_folder(std::wstring_view name)
 	{
 		const auto folder = ::platform::to_stream_path(::platform::temp_folder());
-		return folder.empty() ? std::filesystem::path{}
-		                      : folder / std::format(L"{}-{}", name, ::platform::process_id());
+		GUID id{};
+		wchar_t suffix[40]{};
+		if (folder.empty() || FAILED(CoCreateGuid(&id)) || !StringFromGUID2(id, suffix, ARRAYSIZE(suffix))) return {};
+		return folder / std::format(L"{}-{}", name, suffix);
 	}
 
 	FileAttributes read_file_attributes(const std::filesystem::path& path)

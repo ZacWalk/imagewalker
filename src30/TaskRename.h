@@ -74,7 +74,7 @@ namespace iw
 		std::wstring title() const override { return L"Batch Rename"; }
 
 	protected:
-		std::wstring run_label() const override { return L"Rename files"; }
+		std::wstring run_label() const override { return L"Create copies"; }
 		void build_controls() override;
 		std::vector<Column> review_columns() const override;
 		tasks::TaskRunner::AnalyzeFunction make_analyzer() override;
@@ -82,6 +82,7 @@ namespace iw
 		std::wstring review_cell(const tasks::TaskRow& row, size_t column) const override;
 		void control_activated(ui::Control& control) override;
 		void layout_hosted_controls() override;
+		void release_hosted_controls() override;
 		void work_state_changed(bool busy) override;
 
 	private:

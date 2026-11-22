@@ -21,7 +21,7 @@ void CJobThumb::Work()
 	// one thumbnail, not the rest of the folder.
 	try
 	{
-		ThreadLoader().Load(&m_dib, m_strName, this, TRUE);
+		ThreadLoader().Load(&m_dib, m_strName, this, TRUE, m_nEdge);
 	}
 	catch (const std::exception& error)
 	{
@@ -42,7 +42,7 @@ void CJobThumb::Complete()
 	// returning here stopped thumbnail loading for the whole folder.
 	CDib* pDib = (!Exit() && m_dib.IsOpen()) ? &m_dib : nullptr;
 
-	m_pWnd->OnThumbJobComplete(pDib, m_uKey);
+	m_pWnd->OnThumbJobComplete(pDib, m_uKey, m_nEdge);
 }
 
 void CJobLoad::Work()
@@ -149,6 +149,8 @@ void CJobWatch::Work()
 		IW::Logging::LastError(_T("FindFirstChangeNotification"));
 		return;
 	}
+	const std::unique_ptr<void, decltype(&::FindCloseChangeNotification)> changeHandle(hChange,
+	                                                                                 &::FindCloseChangeNotification);
 
 	// The wake handle goes first: WaitForMultipleObjects returns the lowest
 	// signalled index, so a folder that changes continuously would otherwise
@@ -173,21 +175,24 @@ void CJobWatch::Work()
 		if (::WaitForSingleObject(m_hWake, 0) == WAIT_OBJECT_0)
 			break;
 
-		auto changed = std::make_shared<CJobDirChanged>(m_pWnd);
-		changed->SetOwner(m_owner.lock());
-		IW::UiQueue().Push(changed);
-
-		if (!::FindNextChangeNotification(hChange))
-		{
+		const BOOL rearmed = ::FindNextChangeNotification(hChange);
+		if (!rearmed)
 			IW::Logging::LastError(_T("FindNextChangeNotification"));
+		CJobDirChanged::Post(m_change);
+		if (!rearmed)
 			break;
-		}
 	}
+}
 
-	::FindCloseChangeNotification(hChange);
+void CJobDirChanged::Post(const std::shared_ptr<CJobDirChanged>& change)
+{
+	if (!change->m_pending.exchange(true))
+		IW::UiQueue().Push(change);
 }
 
 void CJobDirChanged::Complete()
 {
-	m_pWnd->OnDirChanged();
+	// Allow a change during enumeration to schedule another refresh.
+	m_pending.store(false);
+	m_pWnd->OnDirChanged(*this);
 }

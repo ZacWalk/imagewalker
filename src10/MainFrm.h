@@ -1,95 +1,60 @@
 #pragma once
 
-// The frame: a command bar with the logo, one toolbar row with the address
-// combo, a status bar, and a splitter holding the image pane on the left and
-// the items pane on the right.
-
+#include "AddressBar.h"
 #include "ImageView.h"
 #include "ItemsView.h"
 
-#include "iw/addressbar.h"
-#include "iw/chromelayout.h"
-#include "iw/logowindow.h"
+#include <array>
 
-class CMainFrame : public CFrameWindowImpl<CMainFrame>, public IW::CAddressBar<CMainFrame>
+class CMainFrame : public SdkWindow
 {
 public:
-	DECLARE_FRAME_WND_CLASS(_T("IWImageWalker10Frame"), IDR_MAINFRAME)
-
-	enum { kLogoTimer = 1 };
-
-	BEGIN_MSG_MAP(CMainFrame)
-		MSG_WM_CREATE(OnCreate)
-		MSG_WM_DESTROY(OnDestroy)
-		MSG_WM_SIZE(OnSize)
-		MSG_WM_TIMER(OnTimer)
-		MSG_WM_SETFOCUS(OnSetFocus)
-		MSG_WM_ERASEBKGND(OnEraseBkgnd)
-		MSG_WM_INITMENUPOPUP(OnInitMenuPopup)
-		MESSAGE_HANDLER(WM_IW_SELECTIONCHANGED, OnSelectionChanged)
-
-		CHAIN_MSG_MAP(IW::CAddressBar<CMainFrame>)
-
-		COMMAND_ID_HANDLER_EX(ID_APP_EXIT, OnAppExit)
-		COMMAND_ID_HANDLER_EX(ID_APP_ABOUT, OnAppAbout)
-		COMMAND_ID_HANDLER_EX(ID_HELP_FINDER, OnHelpFinder)
-		COMMAND_ID_HANDLER_EX(ID_HELP, OnHelpFinder)
-		COMMAND_ID_HANDLER_EX(ID_VIEW_ADDRESSBAR, OnViewAddressBar)
-		COMMAND_ID_HANDLER_EX(ID_VIEW_TOOLBAR, OnViewToolBar)
-		COMMAND_ID_HANDLER_EX(ID_VIEW_STATUS_BAR, OnViewStatusBar)
-
-		CHAIN_MSG_MAP(CFrameWindowImpl<CMainFrame>)
-
-		// Commands the frame does not own belong to the panes.
-		if (uMsg == WM_COMMAND && RouteCommandToPanes(wParam, lParam, lResult))
-			return TRUE;
-	END_MSG_MAP()
-
-	BOOL RouteCommandToPanes(WPARAM wParam, LPARAM lParam, LRESULT& lResult);
-	BOOL PreTranslateMessage(MSG* pMsg);
-	void UpdateLayout(BOOL bResizeBars = TRUE);
-
-	// IW::CAddressBar host contract.
-	enum { kAddressBarId = IDC_ADDRESS_COMBO };
-	void AddressNavigate(const CShellItem& item);
-	CShellItem AddressFolder();
-	HIMAGELIST AddressImageList();
+	enum { kStatusTimer = 1, kThumbnailTrackId = 0x7f21 };
+	HWND Create();
+	bool PreTranslateMessage(MSG* message);
 
 private:
-	LRESULT OnCreate(LPCREATESTRUCT lpcs);
+	LRESULT WindowMessage(UINT message, WPARAM wParam, LPARAM lParam) override;
+	bool Command(int id);
+	LRESULT OnCreate();
 	void OnDestroy();
-	void OnSize(UINT nType, CSize size);
-	void OnTimer(UINT_PTR nIDEvent);
-	void OnSetFocus(CWindow wndOld);
-	BOOL OnEraseBkgnd(CDCHandle dc);
-	void OnInitMenuPopup(CMenuHandle menu, UINT nIndex, BOOL bSysMenu);
-	LRESULT OnSelectionChanged(UINT, WPARAM, LPARAM, BOOL&);
-
-	void OnAppExit(UINT, int, CWindow);
-	void OnAppAbout(UINT, int, CWindow);
-	void OnHelpFinder(UINT, int, CWindow);
-	void OnViewAddressBar(UINT, int, CWindow);
-	void OnViewToolBar(UINT, int, CWindow);
-	void OnViewStatusBar(UINT, int, CWindow);
-
+	void OnInitMenuPopup(HMENU menu);
+	void OnSelectionChanged();
+	bool OnAddressCommand(int code);
+	bool AddressNavigate(const CShellItem& item);
+	void SetFullscreen(bool fullscreen);
+	bool ResizeToMonitor(HMONITOR monitor);
+	bool BackOut();
 	void UpdateStatus();
+	void UpdateLayout();
+	void LayoutStatusBar(const CRect& client);
 	void UpdateFolder();
 
-	WTL::CCommandBarCtrl m_CmdBar;
-	IW::CLogoWindow m_wndLogo;
-	IW::CChromeLayout m_chrome;
 	CToolBarCtrl m_toolBar;
-	CMultiPaneStatusBarCtrl m_statusBar;
-	CSplitterWindow m_splitter;
+	CAddressBar m_wndAddress;
+	CStatusBarCtrl m_statusBar;
+	CTrackBarCtrl m_thumbnailSlider;
+	HACCEL m_accelerators{};
+	CRect m_splitterBounds;
+	int m_splitPosition = -1;
+	int m_splitOffset = 0;
+	bool m_splitDragging = false;
+	bool m_ready = false;
+	bool m_fullscreen = false;
+	HMENU m_windowMenu{};
+	DWORD m_windowStyle{};
+	WINDOWPLACEMENT m_windowPlacement{sizeof(WINDOWPLACEMENT)};
 
 	CImageView m_wndImage;
 	CItemsView m_wndItems;
 
-	BOOL m_bShowAddress = TRUE;
-	BOOL m_bShowToolBar = TRUE;
-	BOOL m_bShowStatusBar = TRUE;
+	bool m_bShowAddress = true;
+	bool m_bShowToolBar = true;
+	bool m_bShowStatusBar = true;
 
 	CString m_strFolder;
 	CString m_strStatusItems;
 	CString m_strStatusImage;
+	std::array<int, 4> m_statusParts{0, 0, 0, -1};
+	CRect m_thumbnailSliderBounds{0, 0, 0, 0};
 };

@@ -40,49 +40,28 @@ protected:
 	STDMETHODIMP Drop(IDataObject  *pDataObj, DWORD grfKeyState, POINTL pt, DWORD  *pdwEffect) 
 	{
 		static FORMATETC fmteDib = {(CLIPFORMAT) CF_DIB, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
-		static FORMATETC fmteFile = {(CLIPFORMAT) CF_HDROP, NULL, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+		const DWORD allowed = *pdwEffect;
+		*pdwEffect = DROPEFFECT_NONE;
+		m_spDataObject.Release();
+		if (!(allowed & DROPEFFECT_COPY))
+			return S_OK;
 
-		T* pT = static_cast<T*>(this);
+		STGMEDIUM medium{};
+		const HRESULT hr = pDataObj->GetData(&fmteDib, &medium);
+		if (FAILED(hr))
+			return hr;
 
-		STGMEDIUM stgMedium;
-		HRESULT hr = pDataObj->GetData(&fmteDib, &stgMedium);
-		DWORD  dwEffect = DROPEFFECT_NONE;
-
-		if (SUCCEEDED(hr) && stgMedium.hGlobal)
+		struct ReleaseMedium
 		{
-			pT->LoadImageFromHGlobal(stgMedium.hGlobal);			
-			dwEffect = DROPEFFECT_COPY;
+			STGMEDIUM &value;
+			~ReleaseMedium() { ::ReleaseStgMedium(&value); }
+		} release{medium};
 
-			::ReleaseStgMedium(&stgMedium);
-		}
-		/*else
-		{
-		// DragQueryFile
+		if (medium.tymed == TYMED_HGLOBAL && medium.hGlobal &&
+			static_cast<T*>(this)->LoadImageFromHGlobal(medium.hGlobal))
+			*pdwEffect = DROPEFFECT_COPY;
 
-		HRESULT hr = pDataObj->GetData(&fmteDib, &stgMedium);
-		if (SUCCEEDED(hr))
-		{
-		//HGLOBAL gmem = stgMedium.hGlobal;
-		//TCHAR* str = (TCHAR*)GlobalLock(gmem);
-		// use str
-		//GlobalUnlock(gmem);
-
-		if (hglb)
-		{
-		IW::Image dib;
-		dib.Copy(stgMedium.hGlobal);
-
-		_pFolderWindow->SaveNewImage(dib);
-		}
-
-		::ReleaseStgMedium(&stgMedium);
-		}
-		}*/
-
-
-		*pdwEffect = dwEffect;
-
-		return hr;
+		return S_OK;
 	}
 
 

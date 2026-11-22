@@ -23,7 +23,9 @@ namespace iw::edits
 	{
 		std::optional<Quadrilateral> perspective; // source-normalized, before rotate/straighten/crop
 		int rotation{};                           // quarter turns clockwise, 0..3
-		int straighten{};                         // tenths of a degree, -100..100
+		int straighten{};                         // tenths of a degree, -449..449
+		int perspectiveHorizontal{};
+		int perspectiveVertical{};
 		recti crop;                               // in transformed pixels; an empty rect means the whole picture
 
 		int brightness{};
@@ -56,6 +58,7 @@ namespace iw::edits
 		void reset_geometry()
 		{
 			perspective.reset();
+			perspectiveHorizontal = perspectiveVertical = 0;
 			rotation = 0;
 			straighten = 0;
 			crop = {};
@@ -144,7 +147,7 @@ namespace iw::edits
 
 		inline double straighten_radians(const ImageEdits& value)
 		{
-			return std::clamp(value.straighten, -100, 100) * 0.1 * pi / 180.0;
+			return std::clamp(value.straighten, -449, 449) * 0.1 * pi / 180.0;
 		}
 
 		inline bool valid_image(const imaging::PixelImage& source)

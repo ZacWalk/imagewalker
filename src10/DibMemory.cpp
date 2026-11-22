@@ -77,7 +77,7 @@ BOOL CDib::Create(unsigned width, unsigned height, unsigned bpp, BOOL bHBitmap)
 
 	if (!m_pBMI)
 	{
-		TRACE("Out of memory for DIB header");
+		IW::Logging::Error("Out of memory for DIB header");
 		return FALSE;
 	}
 
@@ -87,7 +87,7 @@ BOOL CDib::Create(unsigned width, unsigned height, unsigned bpp, BOOL bHBitmap)
 	pBI->biWidth = width;
 	pBI->biHeight = height;
 	pBI->biPlanes = 1;
-	pBI->biBitCount = bpp;
+	pBI->biBitCount = static_cast<WORD>(bpp);
 	pBI->biCompression = BI_RGB;
 	pBI->biSizeImage = nSizeImage;
 	pBI->biXPelsPerMeter = 0;

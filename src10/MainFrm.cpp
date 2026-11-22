@@ -3,466 +3,631 @@
 #include "stdafx.h"
 #include "ImageWalker.h"
 #include "MainFrm.h"
-
 #include "iw/help.h"
+#include "iw/logfile.h"
 
-static constexpr TCHAR szSection[] = _T("Default");
-static constexpr TCHAR szSplitKey[] = _T("Preview Window Width");
-static constexpr TCHAR szAddressKey[] = _T("Show Address");
-static constexpr TCHAR szToolBarKey[] = _T("Show Toolbar");
-static constexpr TCHAR szStatusKey[] = _T("Show Status Bar");
+static constexpr char szSection[] = "Default";
+static constexpr char szSplitKey[] = "Preview Window Width";
+static constexpr char szAddressKey[] = "Show Address";
+static constexpr char szToolBarKey[] = "Show Toolbar";
+static constexpr char szStatusKey[] = "Show Status Bar";
 
-// Image list ids on the merged toolbar.
 namespace
 {
 	enum { kGlyphBack = 0, kGlyphForward = 1, kGlyphParent = 16 };
+	enum { kStatusImage = 1, kStatusItems = 2 };
 
-	class CAboutDlg : public CDialogImpl<CAboutDlg>
+	INT_PTR CALLBACK AboutDialog(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 	{
-	public:
-		enum { IDD = IDD_ABOUTBOX };
-
-		BEGIN_MSG_MAP(CAboutDlg)
-			MSG_WM_INITDIALOG(OnInitDialog)
-			COMMAND_ID_HANDLER_EX(IDOK, OnClose)
-			COMMAND_ID_HANDLER_EX(IDCANCEL, OnClose)
-		END_MSG_MAP()
-
-	private:
-		BOOL OnInitDialog(CWindow, LPARAM)
+		switch (message)
 		{
-			CenterWindow(GetParent());
-			SetDlgItemText(IDC_ABOUT_DETAILS, _T("64-bit build of ") _T(__DATE__) _T("."));
-
-			m_song.SetHyperLink(_T("https://www.youtube.com/watch?v=TLGWQfK-6DY"));
-			m_song.SetLabel(_T("\"It's Like That\" by Run-DMC vs. Jason Nevins"));
-			m_song.SubclassWindow(GetDlgItem(IDC_THEME_SONG));
-
+		case WM_INITDIALOG:
+#if defined(_WIN64)
+			::SetDlgItemTextA(window, IDC_ABOUT_DETAILS, "64-bit build of " __DATE__ ".");
+#else
+			::SetDlgItemTextA(window, IDC_ABOUT_DETAILS, "32-bit build of " __DATE__ ".");
+#endif
 			return TRUE;
+		case WM_COMMAND:
+			if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
+			{
+				::EndDialog(window, LOWORD(wParam));
+				return TRUE;
+			}
+			break;
+		case WM_NOTIFY:
+			if (const auto* header = reinterpret_cast<const NMHDR*>(lParam);
+				header && header->idFrom == IDC_THEME_SONG && (header->code == NM_CLICK || header->code == NM_RETURN))
+			{
+				const auto* link = reinterpret_cast<const NMLINK*>(header);
+				if (reinterpret_cast<INT_PTR>(::ShellExecuteW(window, L"open", link->item.szUrl,
+				                                             nullptr, nullptr, SW_SHOWNORMAL)) <= 32)
+					::MessageBoxA(window, "Windows could not open the theme song link.", "ImageWalker 1.0", MB_ICONWARNING);
+				return TRUE;
+			}
+			break;
 		}
-
-		void OnClose(UINT, int nID, CWindow) { EndDialog(nID); }
-
-		CHyperLink m_song;
-	};
-}
-
-LRESULT CMainFrame::OnCreate(LPCREATESTRUCT)
-{
-	m_bShowAddress = Settings::GetInt(szSection, szAddressKey, TRUE);
-	m_bShowToolBar = Settings::GetInt(szSection, szToolBarKey, TRUE);
-	m_bShowStatusBar = Settings::GetInt(szSection, szStatusKey, TRUE);
-
-	// The menu moves onto a command bar so that row one is ordinary client area
-	// and the logo can share it. A real menu bar is non-client and cannot.
-	if (m_CmdBar.Create(m_hWnd, rcDefault, nullptr, ATL_SIMPLE_CMDBAR_PANE_STYLE) == nullptr)
-		return -1;
-
-	m_CmdBar.AttachMenu(GetMenu());
-	SetMenu(nullptr);
-
-	m_wndLogo.Create(m_hWnd, rcDefault, nullptr, WS_CHILD | WS_VISIBLE);
-	m_wndLogo.SetOverlayIcon(AtlLoadIconImage(IDR_MAINFRAME, LR_DEFAULTCOLOR, 16, 16), 16, 16);
-
-	m_toolBar.Create(m_hWnd, rcDefault, nullptr,
-	                 WS_CHILD | (m_bShowToolBar ? WS_VISIBLE : 0) | CCS_NODIVIDER | CCS_NORESIZE |
-	                 CCS_NOPARENTALIGN | TBSTYLE_FLAT | TBSTYLE_TOOLTIPS,
-	                 0, ID_VIEW_TOOLBAR);
-
-	m_toolBar.SetButtonStructSize(sizeof(TBBUTTON));
-
-	{
-		CImageList imgCold, imgHot;
-		imgCold.Create(IDB_BAR_COLD, 22, 0, RGB(255, 0, 255));
-		imgHot.Create(IDB_BAR_HOT, 22, 0, RGB(255, 0, 255));
-
-		m_toolBar.SetImageList(imgCold.Detach());
-		m_toolBar.SetHotImageList(imgHot.Detach());
+		return FALSE;
 	}
 
-	TBBUTTON buttons[] =
+	void Place(CWindow child, CRect bounds)
+	{
+		CRect current;
+		child.GetWindowRect(&current);
+		CWindow(child.GetParent()).ScreenToClient(&current);
+		if (current != bounds || !(child.GetStyle() & WS_VISIBLE))
+			child.SetWindowPos(nullptr, bounds.left, bounds.top, bounds.Width(), bounds.Height(),
+			                   SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+	}
+}
+
+HWND CMainFrame::Create()
+{
+	const auto icon = ::LoadIconA(::GetModuleHandleA(nullptr), MAKEINTRESOURCEA(IDR_MAINFRAME));
+	return CreateNative("IWImageWalker10Frame", nullptr, {CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT},
+	                    "ImageWalker 1.0", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, 0, 0, icon);
+}
+
+LRESULT CMainFrame::WindowMessage(UINT message, WPARAM wParam, LPARAM lParam)
+{
+	switch (message)
+	{
+	case WM_CREATE: return OnCreate();
+	case WM_DESTROY: OnDestroy(); return 0;
+	case WM_SIZE:
+		if (wParam != SIZE_MINIMIZED) UpdateLayout();
+		return 0;
+	case WM_TIMER:
+		if (wParam != kStatusTimer) break;
+		UpdateStatus();
+		return 0;
+	case WM_SETFOCUS:
+		if (m_fullscreen) m_wndImage.SetFocus();
+		else if (m_wndItems.IsWindow()) m_wndItems.SetFocus();
+		return 0;
+	case WM_DISPLAYCHANGE:
+		if (m_fullscreen && !ResizeToMonitor(::MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST)))
+			SetFullscreen(false);
+		break;
+	case WM_CONTEXTMENU:
+		if (m_fullscreen)
+		{
+			auto point = MessagePoint(lParam);
+			if (point == CPoint(-1, -1)) ::GetCursorPos(&point);
+			TrackResourceMenu(IDR_MAINFRAME, kMenuImage, TPM_RIGHTBUTTON, point, m_hWnd);
+			return 0;
+		}
+		break;
+	case WM_ERASEBKGND:
+	{
+		CRect rect;
+		GetClientRect(&rect);
+		::FillRect(reinterpret_cast<HDC>(wParam), &rect, ::GetSysColorBrush(COLOR_BTNFACE));
+		return TRUE;
+	}
+	case WM_SETCURSOR:
+		if (LOWORD(lParam) == HTCLIENT && reinterpret_cast<HWND>(wParam) == m_hWnd)
+		{
+			POINT point{};
+			if (::GetCursorPos(&point) && ScreenToClient(&point) && m_splitterBounds.PtInRect(point))
+			{
+				::SetCursor(::LoadCursorA(nullptr, IDC_SIZEWE));
+				return TRUE;
+			}
+		}
+		break;
+	case WM_LBUTTONDOWN:
+		if (const auto point = MessagePoint(lParam); m_splitterBounds.PtInRect(point))
+		{
+			m_splitOffset = point.x - m_splitterBounds.left;
+			SetCapture();
+			m_splitDragging = ::GetCapture() == m_hWnd;
+			return 0;
+		}
+		break;
+	case WM_MOUSEMOVE:
+		if (m_splitDragging)
+		{
+			CRect rect;
+			GetClientRect(&rect);
+			m_splitPosition = std::clamp(static_cast<int>(MessagePoint(lParam).x) - m_splitOffset, 0, rect.Width());
+			UpdateLayout();
+			return 0;
+		}
+		break;
+	case WM_LBUTTONUP:
+	case WM_CANCELMODE:
+		if (m_splitDragging && ::GetCapture() == m_hWnd) ::ReleaseCapture();
+		break;
+	case WM_CAPTURECHANGED: m_splitDragging = false; break;
+	case WM_INITMENUPOPUP:
+		if (!HIWORD(lParam)) OnInitMenuPopup(reinterpret_cast<HMENU>(wParam));
+		break;
+	case WM_IW_SELECTIONCHANGED: OnSelectionChanged(); return 0;
+	case WM_HSCROLL:
+		if (m_thumbnailSlider.m_hWnd && reinterpret_cast<HWND>(lParam) == m_thumbnailSlider.m_hWnd)
+		{
+			if (!m_wndItems.IsDetailView())
+				m_wndItems.SetThumbnailSize(m_thumbnailSlider.GetPos(), LOWORD(wParam) == TB_THUMBTRACK);
+			return 0;
+		}
+		break;
+	case WM_COMMAND:
+		if (LOWORD(wParam) == IDC_ADDRESS_COMBO)
+		{
+			if (OnAddressCommand(HIWORD(wParam))) return 0;
+		}
+		else if (Command(LOWORD(wParam))) return 0;
+		break;
+	case WM_NOTIFY:
+		if (auto* header = reinterpret_cast<NMHDR*>(lParam); header && header->code == TTN_GETDISPINFOA)
+		{
+			auto* tip = reinterpret_cast<NMTTDISPINFOA*>(header);
+			CString text;
+			if (text.LoadString(static_cast<UINT>(header->idFrom)))
+			{
+				const int newline = text.Find('\n');
+				if (newline >= 0) text = text.Mid(newline + 1);
+				strncpy_s(tip->szText, text, _TRUNCATE);
+				tip->lpszText = tip->szText;
+				return 0;
+			}
+		}
+		break;
+	}
+	return SdkWindow::WindowMessage(message, wParam, lParam);
+}
+
+LRESULT CMainFrame::OnCreate()
+{
+	m_bShowAddress = Settings::GetInt(szSection, szAddressKey, TRUE) != 0;
+	m_bShowToolBar = Settings::GetInt(szSection, szToolBarKey, TRUE) != 0;
+	m_bShowStatusBar = Settings::GetInt(szSection, szStatusKey, TRUE) != 0;
+	m_splitPosition = Settings::GetInt(szSection, szSplitKey, -1);
+
+	const auto module = ::GetModuleHandleA(nullptr);
+	const auto menu = ::LoadMenuA(module, MAKEINTRESOURCEA(IDR_MAINFRAME));
+	if (!menu) return -1;
+	if (!::SetMenu(m_hWnd, menu))
+	{
+		::DestroyMenu(menu);
+		return -1;
+	}
+	m_accelerators = ::LoadAcceleratorsA(module, MAKEINTRESOURCEA(IDR_MAINFRAME));
+	if (!m_accelerators) return -1;
+
+	if (!m_toolBar.Create(m_hWnd, {}, nullptr, WS_CHILD | CCS_NODIVIDER | CCS_NORESIZE |
+	                      CCS_NOPARENTALIGN | TBSTYLE_FLAT | TBSTYLE_TOOLTIPS, 0, ID_VIEW_TOOLBAR))
+		return -1;
+	m_toolBar.SetButtonStructSize(sizeof(TBBUTTON));
+	m_toolBar.SetImageList(LoadToolbarImages(IDB_BAR_COLD, 22));
+	m_toolBar.SetHotImageList(LoadToolbarImages(IDB_BAR_HOT, 22));
+	const TBBUTTON buttons[] =
 	{
 		{kGlyphBack, ID_BROWSE_BACK, TBSTATE_ENABLED, BTNS_BUTTON, {0, 0}, 0, 0},
 		{kGlyphForward, ID_BROWSE_FORWARD, TBSTATE_ENABLED, BTNS_BUTTON, {0, 0}, 0, 0},
 		{kGlyphParent, ID_BROWSE_PARENT, TBSTATE_ENABLED, BTNS_BUTTON, {0, 0}, 0, 0},
 	};
-
+	m_toolBar.SetBitmapSize({22, 22});
 	m_toolBar.AddButtons(_countof(buttons), buttons);
-	m_toolBar.SetButtonSize(CSize(30, 26));
+	m_toolBar.SetButtonSize({30, 26});
 
-	if (!CreateAddressBar(m_hWnd))
+	if (!m_wndAddress.Create(m_hWnd, IDC_ADDRESS_COMBO)) return -1;
+	SHFILEINFOA info{};
+	const auto images = ::SHGetFileInfoA("Folder", FILE_ATTRIBUTE_DIRECTORY, &info, sizeof(info),
+	                                     SHGFI_SYSICONINDEX | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES);
+	m_wndAddress.SendMessage(CBEM_SETIMAGELIST, 0, static_cast<LPARAM>(images));
+
+	if (!m_statusBar.Create(m_hWnd, {}, nullptr,
+	                       WS_CHILD | WS_CLIPCHILDREN | SBARS_SIZEGRIP |
+	                       (m_bShowStatusBar ? WS_VISIBLE : 0), 0, IDC_STATUS_BAR))
 		return -1;
-
-	m_statusBar.Create(m_hWnd, nullptr,
-	                   WS_CHILD | (m_bShowStatusBar ? WS_VISIBLE : 0) | SBARS_SIZEGRIP,
-	                   ATL_IDW_STATUS_BAR);
-
-	int panes[] = {ID_DEFAULT_PANE, IDS_STATUS_IMAGE};
-	m_statusBar.SetPanes(panes, _countof(panes), false);
-
-	m_splitter.Create(m_hWnd, rcDefault, nullptr, 0, WS_EX_CLIENTEDGE);
-	m_hWndClient = m_splitter;
-
-	// WS_CLIPCHILDREN: both panes fill their gutters in OnEraseBkgnd, and the
-	// scroll bars and the strip sit in those gutters. Without it every repaint
-	// paints the gutter first and the controls over it, which flickers badly
-	// while the zoom slider is being dragged.
-	if (m_wndImage.Create(m_splitter, rcDefault, nullptr,
-	                      WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN) == nullptr ||
-		m_wndItems.Create(m_splitter, rcDefault, nullptr,
-		                  WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN) == nullptr)
+	m_statusBar.SendMessage(SB_SETMINHEIGHT, ::GetSystemMetrics(SM_CYHSCROLL) + 2);
+	m_statusBar.SetParts(static_cast<int>(m_statusParts.size()), m_statusParts.data());
+	if (!m_thumbnailSlider.Create(m_statusBar, {}, "Thumbnail size",
+	                              WS_CHILD | WS_CLIPSIBLINGS | TBS_HORZ | TBS_NOTICKS | TBS_TOOLTIPS,
+	                              0, kThumbnailTrackId))
 		return -1;
+	m_thumbnailSlider.SetRange(CThumbnailGrid::minEdge, CThumbnailGrid::maxEdge, FALSE);
+	m_thumbnailSlider.SetLineSize(8);
+	m_thumbnailSlider.SetPageSize(16);
+	m_thumbnailSlider.SetPos(m_wndItems.ThumbnailSize());
 
-	m_splitter.SetSplitterPanes(m_wndImage, m_wndItems);
-
-	m_wndAddress.ShowWindow(m_bShowAddress ? SW_SHOW : SW_HIDE);
-
+	constexpr DWORD paneStyle = WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+	if (!m_wndImage.Create(m_hWnd, {}, nullptr, paneStyle) ||
+		!m_wndItems.Create(m_hWnd, {}, nullptr, paneStyle) ||
+		!m_wndImage.CreateFooterControls(m_statusBar))
+		return -1;
+	if (!SetTimer(kStatusTimer, 150)) return -1;
+	m_ready = true;
 	UpdateLayout();
-
-	// After the first layout, not before: SetSplitterPos clamps against the
-	// splitter's current width, and until the frame has laid out that is still
-	// the creation rect. Setting it first stored a clamped position, which the
-	// save on exit then wrote back, so the image pane shrank on every run.
-	m_splitter.SetSplitterPos(Settings::GetInt(szSection, szSplitKey, -1));
-
-	SetTimer(kLogoTimer, 100);
-	UpdateStatus();
-
+	OnSelectionChanged();
 	return 0;
 }
 
 void CMainFrame::OnDestroy()
 {
-	KillTimer(kLogoTimer);
-
-	Settings::SetInt(szSection, szSplitKey, m_splitter.GetSplitterPos());
+	if (!m_ready) return;
+	m_ready = false;
+	KillTimer(kStatusTimer);
+	Settings::SetInt(szSection, szSplitKey, m_splitPosition);
 	Settings::SetInt(szSection, szAddressKey, m_bShowAddress);
 	Settings::SetInt(szSection, szToolBarKey, m_bShowToolBar);
 	Settings::SetInt(szSection, szStatusKey, m_bShowStatusBar);
-	Settings::SaveWindowPlacement(m_hWnd);
-
-	// Handled here rather than passed on: CFrameWindowImpl would post WM_QUIT with 1,
-	// which _tWinMain returns, so every ordinary exit reported a failure.
+	if (m_fullscreen) Settings::SaveWindowPlacement(m_windowPlacement);
+	else Settings::SaveWindowPlacement(m_hWnd);
+	if (m_windowMenu) ::DestroyMenu(std::exchange(m_windowMenu, nullptr));
 	::PostQuitMessage(0);
 }
 
-void CMainFrame::OnSize(UINT nType, CSize size)
+bool CMainFrame::ResizeToMonitor(HMONITOR target)
 {
-	if (nType != SIZE_MINIMIZED)
-		UpdateLayout();
-
-	SetMsgHandled(FALSE);
+	MONITORINFO monitor{sizeof(monitor)};
+	if (!::GetMonitorInfo(target, &monitor))
+		return false;
+	const CRect bounds(monitor.rcMonitor);
+	return SetWindowPos(HWND_TOP, bounds.left, bounds.top, bounds.Width(), bounds.Height(),
+	                    SWP_FRAMECHANGED | SWP_NOACTIVATE) != FALSE;
 }
 
-void CMainFrame::OnTimer(UINT_PTR nIDEvent)
+void CMainFrame::SetFullscreen(bool fullscreen)
 {
-	if (nIDEvent != kLogoTimer)
-		return;
-
-	m_wndLogo.OnTimer();
-
-	// Thumbnails arrive one at a time on the work queue; the counts follow them
-	// here rather than through a notification per thumbnail.
-	UpdateStatus();
-}
-
-void CMainFrame::OnSetFocus(CWindow)
-{
-	if (m_wndItems.IsWindow())
-		m_wndItems.SetFocus();
-}
-
-// comctl32 implies TBSTYLE_TRANSPARENT for a flat toolbar, and WTL forces
-// TBSTYLE_FLAT on command bars. A transparent toolbar does not erase itself; it
-// asks its parent to paint into its DC, and nothing else answers here.
-BOOL CMainFrame::OnEraseBkgnd(CDCHandle dc)
-{
-	CRect rect;
-	GetClientRect(&rect);
-	dc.FillRect(&rect, reinterpret_cast<HBRUSH>(LongToHandle(COLOR_BTNFACE + 1)));
-	return TRUE;
-}
-
-// Row one is the menu with the logo at its right end; row two is the toolbar
-// followed by the address combo.
-//
-// Priorities encode the give-up order: the logo goes first, then the toolbar.
-// The address combo is Stretch, so it is never dropped - every toolbar command
-// is also on the menu, but the address bar is the only navigation that is not.
-void CMainFrame::UpdateLayout(BOOL /*bResizeBars*/)
-{
-	// A WM_SIZE can arrive before OnCreate has built the bars, and every window
-	// this touches asserts on a null handle in a debug build.
-	if (m_hWndClient == nullptr)
-		return;
-
-	CRect rectClient;
-	GetClientRect(&rectClient);
-
-	int yBottom = rectClient.bottom;
-
-	if (m_statusBar.IsWindow() && m_statusBar.IsWindowVisible())
+	if (fullscreen == m_fullscreen) return;
+	if (fullscreen)
 	{
-		m_statusBar.SendMessage(WM_SIZE, 0, 0);
+		if (!m_wndItems.FocusPhoto()) return;
+		const HMONITOR target = ::MonitorFromWindow(m_hWnd, MONITOR_DEFAULTTONEAREST);
+		if (!::GetWindowPlacement(m_hWnd, &m_windowPlacement))
+		{
+			IW::Logging::LastError("Save window placement before fullscreen");
+			return;
+		}
+		const auto menu = ::GetMenu(m_hWnd);
+		if (!::SetMenu(m_hWnd, nullptr))
+		{
+			IW::Logging::LastError("Hide the menu for fullscreen");
+			return;
+		}
+		m_windowMenu = menu;
+		if (::IsZoomed(m_hWnd)) ShowWindow(SW_RESTORE);
+		m_windowStyle = GetStyle();
+		m_fullscreen = true;
+		m_wndImage.SetFullscreen(true);
+		::SetWindowLongPtrA(m_hWnd, GWL_STYLE, m_windowStyle & ~(WS_CAPTION | WS_THICKFRAME));
+		if (!ResizeToMonitor(target))
+		{
+			IW::Logging::LastError("Open fullscreen on the current monitor");
+			SetFullscreen(false);
+			return;
+		}
+		m_wndImage.SetFocus();
+	}
+	else
+	{
+		m_fullscreen = false;
+		::SetWindowLongPtrA(m_hWnd, GWL_STYLE, m_windowStyle);
+		if (m_windowMenu)
+		{
+			if (::SetMenu(m_hWnd, m_windowMenu)) m_windowMenu = nullptr;
+			else IW::Logging::LastError("Restore the menu after fullscreen");
+		}
+		if (!::SetWindowPlacement(m_hWnd, &m_windowPlacement))
+			IW::Logging::LastError("Restore window placement after fullscreen");
+		SetWindowPos(nullptr, 0, 0, 0, 0,
+		             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+		m_wndImage.SetFullscreen(false);
+		m_wndItems.SetFocus();
+	}
+	UpdateLayout();
+}
 
-		CRect rectBar;
-		m_statusBar.GetWindowRect(&rectBar);
-		yBottom -= rectBar.Height();
+bool CMainFrame::BackOut()
+{
+	if (m_wndImage.EndPan()) return true;
+	if (m_splitDragging && ::GetCapture() == m_hWnd && ::ReleaseCapture()) return true;
+	if ((m_fullscreen || ::GetFocus() == m_wndImage.m_hWnd) && !m_wndImage.IsFit())
+	{
+		m_wndImage.Command(ID_MODE_FITTOWINDOW);
+		return true;
+	}
+	if (!m_fullscreen) return false;
+	SetFullscreen(false);
+	return true;
+}
+
+void CMainFrame::UpdateLayout()
+{
+	if (!m_ready) return;
+	CRect client;
+	GetClientRect(&client);
+	if (m_fullscreen)
+	{
+		m_splitterBounds.SetRectEmpty();
+		m_toolBar.ShowWindow(SW_HIDE);
+		m_wndAddress.ShowWindow(SW_HIDE);
+		m_statusBar.ShowWindow(SW_HIDE);
+		m_wndItems.ShowWindow(SW_HIDE);
+		Place(m_wndImage, client);
+		return;
+	}
+	if (m_bShowStatusBar)
+	{
+		if (!(m_statusBar.GetStyle() & WS_VISIBLE)) m_statusBar.ShowWindow(SW_SHOWNA);
+		m_statusBar.SendMessage(WM_SIZE);
+		CRect bar;
+		m_statusBar.GetClientRect(&bar);
+		client.bottom = max(0L, client.bottom - bar.Height());
+		LayoutStatusBar(bar);
 	}
 
-	m_chrome.Clear();
-	m_chrome.Add(0, m_CmdBar, IW::CChromeLayout::Toolbar, IW::CChromeLayout::Stretch, 20);
-	m_chrome.Add(0, m_wndLogo, IW::CChromeLayout::Custom, IW::CChromeLayout::Right, 0, true, 26);
-	m_chrome.Add(1, m_toolBar, IW::CChromeLayout::Toolbar, IW::CChromeLayout::Left, 10,
-	             m_bShowToolBar != FALSE);
-	m_chrome.Add(1, m_wndAddress, IW::CChromeLayout::Combo, IW::CChromeLayout::Stretch, 30,
-	             m_bShowAddress != FALSE);
-
-	CRect rectChrome(rectClient.left, rectClient.top, rectClient.right, yBottom);
-	m_chrome.Layout(rectChrome);
-
-	if (m_splitter.IsWindow())
-		m_splitter.SetWindowPos(nullptr, rectChrome.left, rectChrome.top,
-		                        rectChrome.Width(), rectChrome.Height(),
-		                        SWP_NOZORDER | SWP_NOACTIVATE);
-}
-
-// Hands a command to a pane's message map the way ATL's own window procedure
-// would. The _EX handlers call SetMsgHandled, which writes through
-// CWindowImplRoot::m_pCurrentMsg, and that only points at a live _ATL_MSG while
-// ATL's WindowProc is on the stack. Calling ProcessWindowMessage straight out of
-// the frame's map wrote into a returned stack frame; the access violation
-// happened inside a kernel callback, where it is swallowed, so every menu
-// command owned by a pane silently did nothing.
-template <class TView>
-static BOOL ForwardCommand(TView& view, WPARAM wParam, LPARAM lParam, LRESULT& lResult)
-{
-	if (!view.IsWindow())
-		return FALSE;
-
-	_ATL_MSG msg(view.m_hWnd, WM_COMMAND, wParam, lParam);
-	const _ATL_MSG* pPrevious = view.m_pCurrentMsg;
-	view.m_pCurrentMsg = &msg;
-
-	const BOOL bHandled = view.ProcessWindowMessage(view.m_hWnd, WM_COMMAND, wParam, lParam, lResult, 0);
-
-	view.m_pCurrentMsg = pPrevious;
-	return bHandled;
-}
-
-BOOL CMainFrame::RouteCommandToPanes(WPARAM wParam, LPARAM lParam, LRESULT& lResult)
-{
-	return ForwardCommand(m_wndItems, wParam, lParam, lResult) ||
-		ForwardCommand(m_wndImage, wParam, lParam, lResult);
-}
-
-BOOL CMainFrame::PreTranslateMessage(MSG* pMsg)
-{
-	// Enter and Escape in the address combo belong to the address bar; without
-	// this a typed path was handed straight back to the combo and went nowhere.
-	if (IW::CAddressBar<CMainFrame>::PreTranslateMessage(pMsg))
-		return TRUE;
-
-	// The address combo and the scale box want their own keys, so accelerators
-	// stay out of the way while either has focus.
-	if (pMsg->message >= WM_KEYFIRST && pMsg->message <= WM_KEYLAST)
+	CRect tools(0, 0, 0, 26);
+	if (m_toolBar.GetButtonCount() > 0) m_toolBar.GetItemRect(m_toolBar.GetButtonCount() - 1, &tools);
+	const int toolWidth = tools.right + 4;
+	const bool showTools = m_bShowToolBar && (!m_bShowAddress || client.Width() >= toolWidth + 85);
+	int rowHeight = 0;
+	if (showTools)
 	{
-		const HWND hWndFocus = ::GetFocus();
-		const int nId = hWndFocus != nullptr ? ::GetDlgCtrlID(hWndFocus) : 0;
+		rowHeight = max(tools.bottom + 2, 28L);
+		Place(m_toolBar, {0, 0, min(toolWidth, client.Width()), rowHeight});
+	}
+	else
+		m_toolBar.ShowWindow(SW_HIDE);
 
+	if (m_bShowAddress)
+	{
+		const int left = showTools ? toolWidth : 3;
+		const int editHeight = static_cast<int>(m_wndAddress.SendMessage(CB_GETITEMHEIGHT, static_cast<WPARAM>(-1)));
+		rowHeight = max(rowHeight, editHeight + 10);
+		// The height includes the dropdown, not just the visible field.
+		CRect current;
+		m_wndAddress.GetWindowRect(&current);
+		ScreenToClient(&current);
+		const int right = max(left, client.Width() - 3);
+		if (current.left != left || current.top != 2 || current.right != right ||
+			!(m_wndAddress.GetStyle() & WS_VISIBLE))
+			m_wndAddress.SetWindowPos(nullptr, left, 2, right - left, 300,
+			                          SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW);
+	}
+	else
+		m_wndAddress.ShowWindow(SW_HIDE);
+	client.top = min(static_cast<int>(client.bottom), rowHeight);
+
+	const int splitter = min(max(4, ::GetSystemMetrics(SM_CXSIZEFRAME)), client.Width());
+	const int space = client.Width() - splitter;
+	const int minimum = min(72, space / 2);
+	const int left = std::clamp(m_splitPosition < 0 ? space / 2 : m_splitPosition, minimum, space - minimum);
+	const CRect old = m_splitterBounds;
+	m_splitterBounds = CRect(left, client.top, left + splitter, client.bottom);
+	Place(m_wndImage, {0, client.top, left, client.bottom});
+	Place(m_wndItems, {m_splitterBounds.right, client.top, client.right, client.bottom});
+	if (old != m_splitterBounds)
+	{
+		InvalidateRect(old, TRUE);
+		InvalidateRect(m_splitterBounds, TRUE);
+	}
+}
+
+void CMainFrame::LayoutStatusBar(const CRect& client)
+{
+	// Reserve the rightmost space for the slider and sizing grip, never status text.
+	const int right = max(0, client.Width() - ::GetSystemMetrics(SM_CXVSCROLL) - 6);
+	const int width = min(112, max(0, (right - 320) / 2));
+	CRect slider;
+	if (width >= 64 && client.Height() > 0)
+	{
+		const int height = min(client.Height(), ::GetSystemMetrics(SM_CYHSCROLL));
+		const int top = (client.Height() - height) / 2;
+		slider.SetRect(right - width, top, right, top + height);
+	}
+	if (slider != m_thumbnailSliderBounds)
+	{
+		m_thumbnailSliderBounds = slider;
+		if (slider.IsRectEmpty()) m_thumbnailSlider.ShowWindow(SW_HIDE);
+		else Place(m_thumbnailSlider, slider);
+	}
+
+	const int itemsEnd = slider.IsRectEmpty() ? right : slider.left - 8;
+	const int controlsEnd = m_wndImage.LayoutFooterControls({0, 0, itemsEnd, client.Height()});
+	const int imageEnd = itemsEnd - min(190, (itemsEnd - controlsEnd) * 2 / 3);
+	const std::array parts{controlsEnd, imageEnd, itemsEnd, -1};
+	if (parts != m_statusParts)
+	{
+		m_statusParts = parts;
+		m_statusBar.SetParts(static_cast<int>(m_statusParts.size()), m_statusParts.data());
+	}
+}
+
+bool CMainFrame::PreTranslateMessage(MSG* message)
+{
+	if (message->message >= WM_KEYFIRST && message->message <= WM_KEYLAST)
+	{
+		if (m_wndAddress.HasKey(*message))
+		{
+			if (message->message == WM_KEYDOWN && (message->wParam == VK_RETURN || message->wParam == VK_ESCAPE))
+				return m_wndAddress.HandleKey(*message, m_wndItems.FolderItem(),
+				                             [this](const CShellItem& item) { return AddressNavigate(item); });
+			return false;
+		}
 		if (m_wndImage.ScaleEditHasFocus())
 		{
-			if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN)
-			{
-				m_wndImage.ApplyScaleText();
-				return TRUE;
-			}
-
-			::TranslateMessage(pMsg);
-			::DispatchMessage(pMsg);
-			return TRUE;
+			if (message->message != WM_KEYDOWN || message->wParam != VK_RETURN) return false;
+			m_wndImage.ApplyScaleText();
+			return true;
 		}
-
-		if (nId == kAddressBarId || ::IsChild(m_wndAddress, hWndFocus))
+		if (message->message == WM_KEYDOWN)
 		{
-			::TranslateMessage(pMsg);
-			::DispatchMessage(pMsg);
-			return TRUE;
+			const bool control = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
+			const bool shift = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+			if (!shift && ((message->wParam == VK_ESCAPE && !control) || (message->wParam == VK_F4 && control)))
+			{
+				if (BackOut()) return true;
+				if (control)
+				{
+					PostMessage(WM_CLOSE);
+					return true;
+				}
+			}
+			if (m_fullscreen && !control && !shift && m_wndImage.PanWithKey(message->wParam)) return true;
+			if (m_fullscreen && !control && !shift &&
+				(message->wParam == VK_LEFT || message->wParam == VK_RIGHT))
+			{
+				m_wndItems.StepPhoto(message->wParam == VK_RIGHT ? 1 : -1);
+				return true;
+			}
+			const auto focus = ::GetFocus();
+			if (!control && !shift && (message->wParam == VK_RETURN || message->wParam == VK_SPACE) &&
+				::IsChild(m_statusBar, focus))
+				return false;
 		}
 	}
-
-	return CFrameWindowImpl<CMainFrame>::PreTranslateMessage(pMsg);
+	return ::TranslateAcceleratorA(m_hWnd, m_accelerators, message) != 0;
 }
 
-void CMainFrame::OnInitMenuPopup(CMenuHandle menu, UINT /*nIndex*/, BOOL bSysMenu)
+bool CMainFrame::Command(int id)
 {
-	if (!bSysMenu)
+	switch (id)
 	{
-		menu.EnableMenuItem(ID_BROWSE_PARENT,
-		                    MF_BYCOMMAND | (m_wndItems.CanGoParent() ? MF_ENABLED : MF_GRAYED));
-		menu.EnableMenuItem(ID_BROWSE_BACK,
-		                    MF_BYCOMMAND | (m_wndItems.CanGoBack() ? MF_ENABLED : MF_GRAYED));
-		menu.EnableMenuItem(ID_BROWSE_FORWARD,
-		                    MF_BYCOMMAND | (m_wndItems.CanGoForward() ? MF_ENABLED : MF_GRAYED));
-
-		menu.CheckMenuItem(ID_VIEW_ADDRESSBAR, MF_BYCOMMAND | (m_bShowAddress ? MF_CHECKED : MF_UNCHECKED));
-		menu.CheckMenuItem(ID_VIEW_TOOLBAR, MF_BYCOMMAND | (m_bShowToolBar ? MF_CHECKED : MF_UNCHECKED));
-		menu.CheckMenuItem(ID_VIEW_STATUS_BAR, MF_BYCOMMAND | (m_bShowStatusBar ? MF_CHECKED : MF_UNCHECKED));
-
-		menu.CheckMenuRadioItem(ID_VIEW_SORT_NAME, ID_VIEW_SORT_DATE,
-		                        static_cast<UINT>(m_wndItems.SortCommand()), MF_BYCOMMAND);
-
-		menu.CheckMenuItem(ID_ITEMS_THUMBNAILS,
-		                   MF_BYCOMMAND | (m_wndItems.IsDetailView() ? MF_UNCHECKED : MF_CHECKED));
-		menu.CheckMenuItem(ID_ITEMS_DETAILS,
-		                   MF_BYCOMMAND | (m_wndItems.IsDetailView() ? MF_CHECKED : MF_UNCHECKED));
-
-		const CImageView::ScaleType eScale = m_wndImage.GetScaleType();
-
-		menu.CheckMenuItem(ID_MODE_FITTOWINDOW,
-		                   MF_BYCOMMAND | (eScale == CImageView::eFit ? MF_CHECKED : MF_UNCHECKED));
-		menu.CheckMenuItem(ID_MODE_SCALEDOWNTOFIT,
-		                   MF_BYCOMMAND | (eScale == CImageView::eDown ? MF_CHECKED : MF_UNCHECKED));
-		menu.CheckMenuItem(ID_MODE_SCALEUPTOFIT,
-		                   MF_BYCOMMAND | (eScale == CImageView::eUp ? MF_CHECKED : MF_UNCHECKED));
-		menu.CheckMenuItem(ID_MODE_ACTUALSIZE,
-		                   MF_BYCOMMAND | (m_wndImage.IsActualSize() ? MF_CHECKED : MF_UNCHECKED));
+	case ID_APP_EXIT: PostMessage(WM_CLOSE); return true;
+	case ID_MODE_FULLSCREEN: SetFullscreen(!m_fullscreen); return true;
+	case ID_VIEW_ACTIVATE:
+		if (m_fullscreen) m_wndItems.StepPhoto(1);
+		else m_wndItems.ActivateFocus();
+		return true;
+	case ID_EDIT_TOGGLE_FOCUS:
+		if (!m_fullscreen) m_wndItems.Command(id);
+		return true;
+	case ID_HELP_FINDER: IW::InvokeHelp(m_hWnd, HELP_IMAGEWALKER10); return true;
+	case ID_APP_ABOUT:
+		if (::DialogBoxParamA(::GetModuleHandleA(nullptr), MAKEINTRESOURCEA(IDD_ABOUTBOX),
+		                      m_hWnd, AboutDialog, 0) == -1)
+			IW::Logging::LastError("Open About dialog");
+		return true;
+	case ID_VIEW_ADDRESSBAR:
+		m_bShowAddress = !m_bShowAddress;
+		break;
+	case ID_VIEW_TOOLBAR:
+		m_bShowToolBar = !m_bShowToolBar;
+		break;
+	case ID_VIEW_STATUS_BAR:
+		m_bShowStatusBar = !m_bShowStatusBar;
+		m_statusBar.ShowWindow(m_bShowStatusBar ? SW_SHOWNA : SW_HIDE);
+		break;
+	default:
+		return m_wndItems.Command(id) || m_wndImage.Command(id);
 	}
-
-	SetMsgHandled(FALSE);
+	UpdateLayout();
+	return true;
 }
 
-LRESULT CMainFrame::OnSelectionChanged(UINT, WPARAM, LPARAM, BOOL&)
+void CMainFrame::OnInitMenuPopup(HMENU menu)
 {
-	// The one place the two panes meet: what the items pane has selected is what
-	// the image pane shows.
-	m_wndImage.Show(m_wndItems.SelectedItems());
+	const auto enable = [menu](UINT id, bool enabled)
+	{
+		::EnableMenuItem(menu, id, MF_BYCOMMAND | (enabled ? MF_ENABLED : MF_GRAYED));
+	};
+	const auto check = [menu](UINT id, bool checked)
+	{
+		::CheckMenuItem(menu, id, MF_BYCOMMAND | (checked ? MF_CHECKED : MF_UNCHECKED));
+	};
+	enable(ID_BROWSE_PARENT, m_wndItems.CanGoParent());
+	enable(ID_BROWSE_BACK, m_wndItems.CanGoBack());
+	enable(ID_BROWSE_FORWARD, m_wndItems.CanGoForward());
+	check(ID_VIEW_ADDRESSBAR, m_bShowAddress);
+	check(ID_VIEW_TOOLBAR, m_bShowToolBar);
+	check(ID_VIEW_STATUS_BAR, m_bShowStatusBar);
+	// These IDs are not contiguous: Refresh and Address Bar also use this range.
+	for (const UINT id : {ID_VIEW_SORT_NAME, ID_VIEW_SORT_TYPE, ID_VIEW_SORT_SIZE, ID_VIEW_SORT_DATE})
+		check(id, id == static_cast<UINT>(m_wndItems.SortCommand()));
+	check(ID_ITEMS_THUMBNAILS, !m_wndItems.IsDetailView());
+	check(ID_ITEMS_DETAILS, m_wndItems.IsDetailView());
 
+	const auto scale = m_wndImage.GetScaleType();
+	check(ID_MODE_FITTOWINDOW, scale == CImageView::eFit);
+	check(ID_MODE_SCALEDOWNTOFIT, scale == CImageView::eDown);
+	check(ID_MODE_SCALEUPTOFIT, scale == CImageView::eUp);
+	check(ID_MODE_ACTUALSIZE, m_wndImage.IsActualSize());
+	check(ID_MODE_FULLSCREEN, m_fullscreen);
+}
+
+void CMainFrame::OnSelectionChanged()
+{
+	if (!m_ready) return;
+	m_wndImage.Show(m_wndItems.SelectedItems());
 	UpdateFolder();
 	UpdateStatus();
-	return 0;
 }
 
-// The title and the address name the folder, and both cost a shell call. This
-// arrives on every arrow key, so do that work only when the folder moved.
 void CMainFrame::UpdateFolder()
 {
 	const CShellItem item = m_wndItems.FolderItem();
+	CString path;
+	item.GetPath(path);
+	const CString name = CShellDesktop().GetDisplayNameOf(item, SHGDN_NORMAL);
+	const CString label = path.IsEmpty() ? name : path;
+	if (label == m_strFolder) return;
+	m_strFolder = label;
 
-	CString strFull;
-	item.GetPath(strFull);
-
-	CShellDesktop desktop;
-	const CString strPath = desktop.GetDisplayNameOf(item, SHGDN_NORMAL);
-	const CString strKey = strFull.IsEmpty() ? strPath : strFull;
-
-	if (strKey == m_strFolder)
-		return;
-
-	m_strFolder = strKey;
-
-	CString strTitle;
-	strTitle.LoadString(IDR_MAINFRAME);
-
-	if (!strPath.IsEmpty())
-		strTitle = strPath + _T(" - ") + strTitle;
-
-	SetWindowText(strTitle);
-
-	SHFILEINFO sfi = {0};
-	SHGetFileInfo((LPCTSTR)item.GetItem(), 0, &sfi, sizeof(sfi),
-	              SHGFI_PIDL | SHGFI_SYSICONINDEX | SHGFI_SMALLICON);
-
-	SetAddress(strKey, sfi.iIcon);
+	CString title;
+	title.LoadString(IDR_MAINFRAME);
+	SetWindowText(name.IsEmpty() ? title : name + " - " + title);
+	SHFILEINFOA info{};
+	::SHGetFileInfoA(reinterpret_cast<LPCSTR>(item.GetItem()), 0, &info, sizeof(info),
+	                 SHGFI_PIDL | SHGFI_SYSICONINDEX | SHGFI_SMALLICON);
+	m_wndAddress.SetAddress(label, info.iIcon);
 }
 
 void CMainFrame::UpdateStatus()
 {
-	if (m_toolBar.IsWindow())
+	m_toolBar.EnableButton(ID_BROWSE_PARENT, m_wndItems.CanGoParent());
+	m_toolBar.EnableButton(ID_BROWSE_BACK, m_wndItems.CanGoBack());
+	m_toolBar.EnableButton(ID_BROWSE_FORWARD, m_wndItems.CanGoForward());
+	const bool thumbnails = !m_wndItems.IsDetailView();
+	if ((m_thumbnailSlider.IsWindowEnabled() != FALSE) != thumbnails)
+		m_thumbnailSlider.EnableWindow(thumbnails);
+
+	const CString items = m_wndItems.StatusText();
+	const CString image = m_wndImage.StatusText();
+	if (items != m_strStatusItems)
 	{
-		// Nothing else updates the toolbar, so Back and Forward used to look
-		// available in a folder with no history behind it.
-		m_toolBar.EnableButton(ID_BROWSE_PARENT, m_wndItems.CanGoParent());
-		m_toolBar.EnableButton(ID_BROWSE_BACK, m_wndItems.CanGoBack());
-		m_toolBar.EnableButton(ID_BROWSE_FORWARD, m_wndItems.CanGoForward());
+		m_strStatusItems = items;
+		m_statusBar.SetText(kStatusItems, CString("\t\t") + items, SBT_NOBORDERS);
 	}
-
-	if (!m_statusBar.IsWindow())
-		return;
-
-	const CString strItems = m_wndItems.StatusText();
-	const CString strImage = m_wndImage.StatusText();
-
-	if (strItems != m_strStatusItems)
+	if (image != m_strStatusImage)
 	{
-		m_strStatusItems = strItems;
-		m_statusBar.SetPaneText(ID_DEFAULT_PANE, strItems);
-	}
-
-	if (strImage != m_strStatusImage)
-	{
-		m_strStatusImage = strImage;
-		m_statusBar.SetPaneText(IDS_STATUS_IMAGE, strImage);
+		m_strStatusImage = image;
+		m_statusBar.SetText(kStatusImage, image, SBT_NOBORDERS);
 	}
 }
 
-void CMainFrame::OnAppExit(UINT, int, CWindow)
+bool CMainFrame::OnAddressCommand(int code)
 {
-	PostMessage(WM_CLOSE);
+	switch (code)
+	{
+	case CBN_DROPDOWN:
+		m_wndAddress.DropDown(m_wndItems.FolderItem());
+		return true;
+	case CBN_SELENDOK:
+		if (auto item = m_wndAddress.SelectedFolder(); !item.IsNull()) AddressNavigate(item);
+		return true;
+	case CBN_CLOSEUP:
+		m_wndAddress.RestoreAddress();
+		return true;
+	}
+	return false;
 }
 
-void CMainFrame::OnHelpFinder(UINT, int, CWindow)
-{
-	IW::InvokeHelp(m_hWnd, HELP_IMAGEWALKER10);
-}
-
-void CMainFrame::OnAppAbout(UINT, int, CWindow)
-{
-	CAboutDlg dlg;
-	dlg.DoModal(m_hWnd);
-}
-
-void CMainFrame::OnViewAddressBar(UINT, int, CWindow)
-{
-	m_bShowAddress = !m_bShowAddress;
-	m_wndAddress.ShowWindow(m_bShowAddress ? SW_SHOW : SW_HIDE);
-	UpdateLayout();
-}
-
-void CMainFrame::OnViewToolBar(UINT, int, CWindow)
-{
-	m_bShowToolBar = !m_bShowToolBar;
-	m_toolBar.ShowWindow(m_bShowToolBar ? SW_SHOW : SW_HIDE);
-	UpdateLayout();
-}
-
-void CMainFrame::OnViewStatusBar(UINT, int, CWindow)
-{
-	m_bShowStatusBar = !m_bShowStatusBar;
-	m_statusBar.ShowWindow(m_bShowStatusBar ? SW_SHOW : SW_HIDE);
-	UpdateLayout();
-}
-
-void CMainFrame::AddressNavigate(const CShellItem& item)
+bool CMainFrame::AddressNavigate(const CShellItem& item)
 {
 	try
 	{
 		m_wndItems.Navigate(item);
+		m_wndItems.SetFocus();
+		return true;
 	}
-	catch (const std::exception&)
+	catch (const std::exception& error)
 	{
+		IW::Logging::Warn("Open address: %hs", error.what());
+		::MessageBeep(MB_OK);
+		return false;
 	}
-}
-
-CShellItem CMainFrame::AddressFolder()
-{
-	return m_wndItems.FolderItem();
-}
-
-HIMAGELIST CMainFrame::AddressImageList()
-{
-	SHFILEINFO sfi = {0};
-
-	return (HIMAGELIST)SHGetFileInfo(_T("C:\\"), 0, &sfi, sizeof(sfi),
-	                                 SHGFI_SYSICONINDEX | SHGFI_SMALLICON);
 }

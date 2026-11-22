@@ -1,10 +1,11 @@
 # Shared imaging
 
-All five applications use one set of application-owned imaging headers under
-`include/iw` and link libfiles and libdesktop directly. There is no shared
-imaging library, DLL, object library or implementation translation unit.
-Release identity, interface, settings and workflows stay in the application
-directories.
+ImageWalker 2.x and 3.0 use the application-owned imaging headers under
+`include/iw` and link libfiles and libdesktop directly. ImageWalker 1.0 uses
+libfiles and Windows SDK codecs without that adapter. There is no shared
+ImageWalker imaging library, DLL, object library or implementation translation
+unit. Release identity, interface, settings and workflows stay in the
+application directories.
 
 ## Ownership
 
@@ -42,8 +43,9 @@ historical adapter, and in 3.0 a private Win32 frame or drawing implementation
 or a native control window.
 
 Keep resource loading, drawing into application canvases, clipboard and OLE
-objects, printing and contact-sheet layout in the applications, and Media
-Foundation playback and poster acquisition in [src30](../src30). Reusable
+objects, printing and contact-sheet layout in the applications, and video
+playback and poster acquisition in [src30](../src30). FFmpeg decodes pictures
+and resamples audio; the player presents both through libdesktop. Reusable
 platform pixel primitives belong in libdesktop; application editing and
 historical storage algorithms stay inline here.
 
@@ -80,6 +82,15 @@ Pixel-format tags, alpha and composited pixels follow
 
 ## Decoding
 
+In [ImageWalker 1.0](../src10/LoadAny.cpp), wrap a read-only Win32 file handle
+in a `libfiles::reader`, or borrow bytes directly for resources. Retain the
+first complete native frame in a DIB, reducing large thumbnail rows without
+keeping a full-size raster. Keep the 1 GiB native decoder working limit and
+the 256 MiB DIB allocation limit. The viewer shows stored orientation.
+Use WIC for additional installed Windows image codecs and libfiles for WebP.
+Keep JPEG regression images as small resources; the app tests don't include
+private JPEG or PNG codec headers or link their targets directly.
+
 [Codec.h](../include/iw/imaging/Codec.h) provides path and memory decoding,
 capability queries, dimensions, orientation, photo properties and encoding.
 
@@ -89,31 +100,27 @@ capability queries, dimensions, orientation, photo properties and encoding.
 - Use the native document path for packed and indexed storage, multiple pages
   and retained metadata, and the BGRA path for display, editing and the formats
   only Windows decodes.
-- Choose a BGRA decoder only through `pixel_decoder` in Codec.h: libfiles for
-  WebP, identified by signature for encoded bytes and by extension for a path;
-  a Windows codec for PNG, TIFF, any extension a Windows codec claims and
-  anything the native decoders cannot read; otherwise the native decoders.
-  Native-storage decodes start with the native loaders and reach WebP and the
-  Windows codecs only through their own loaders, which call one backend
-  directly and never re-enter selection. A display decode reads the loader's
-  image straight to BGRA, without a document's copy of its rows.
-- JPEG, PNG, GIF, TIFF and BMP therefore have two decoders - libfiles on the
-  document path, Windows on the BGRA path - which can disagree on damaged
-  input, colour handling and orientation. Windows providers may stay where
-  their capabilities differ, but never as application-version forks; both
-  paths share codec ownership, pixel utilities, colour processing and CPU
-  detection.
+- Use libfiles first for 3.0 display and editing, including JPEG, PNG, GIF,
+  TIFF, BMP and WebP. Prefer the file signature over its extension. Write
+  directly to BGRA where the decoder can; otherwise retain only the first
+  complete document frame and convert it to BGRA.
+- Leave camera RAW, codecs not in the build, and unsupported TIFF encodings
+  to Windows. Non-default TIFF orientation also uses Windows: libtiff may
+  already reflect its output rows, so applying orientation again can turn a
+  photo twice. Do not retry cancellation or an allocation-budget refusal.
+  The 2.x native-storage loaders choose their backend explicitly and never
+  re-enter automatic selection.
 - Native JPEG, PNG, GIF, TIFF, PCX, PSD, WPG and uncompressed BMP readers call
   libfiles; the historical document adapter adapts rows, palettes, metadata and
   diagnostics, not file formats. Memory streams lend an immutable `GetMemory()`
   view for the synchronous decode; files keep positional buffered I/O.
-- Identify input by its extension, then by a complete signature. A first word
+- Use a complete signature or a known extension for a signatureless format. A first word
   shared with an image format, as RIFF audio and OLE containers share one, does
   not make a file an image: report it as unsupported, not damaged.
 - Pass thumbnail bounds, orientation policy, memory limits, cancellation and
   progress explicitly. A modern decode request defaults to a 256 MiB budget;
-  the ImageWalker 1.0 adapter and the historical loaders keep a 1 GiB native
-  page ceiling. The policy sink counts frame pixels, palettes and metadata
+  the 2.x historical loaders keep a 1 GiB native page ceiling. The policy
+  sink counts frame pixels, palettes and metadata
   before allocating, independently of libfiles' working limit.
 - Reject input without one complete frame, with invalid headers or offsets, or
   with truncated pixel data, and never report partially initialized pixels as
@@ -127,9 +134,9 @@ capability queries, dimensions, orientation, photo properties and encoding.
   unsupported input, decoding or encoding failure, resource limits and
   cancellation, and keep warnings rather than replacing them with a
   successful-looking default.
-- Decode photos upright through libdesktop's image loader, which applies the
-  orientation Windows reports after a container's own transforms - the HEIF
-  decoder turns its images itself - so no photo is turned twice. Native
+- Decode photos upright using the orientation the native decoder reports,
+  unless it already transformed the image. For system formats, let the
+  Windows adapter apply orientation after container transforms. Native
   orientation handling supports all eight EXIF values and resets the tag only
   after turning the pixels.
 - Read photo properties - camera, capture date, exposure - through libfiles'

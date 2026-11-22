@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cwchar>
 #include <cwctype>
 #include <format>
 #include <new>
@@ -46,8 +47,14 @@ namespace iw
 			idPerspective,
 			idAutoDocument,
 			idCrop,
-			idResetCrop
+			idResetCrop,
+			idHorizontal,
+			idVertical,
+			idHistogram
 		};
+		constexpr int tones[]{idDarks, idMidtones, idLights};
+		constexpr double toneNeutral[]{0.2, 0.5, 0.8};
+		constexpr auto single = platform::TextFormat::singleLine | platform::TextFormat::verticalCenter;
 
 		constexpr int previewLimit = 2400;
 
@@ -149,6 +156,7 @@ namespace iw
 
 	void TaskEdit::build_controls()
 	{
+		panel_.set_compact(true);
 		const auto slider =
 			[this](const int id, const wchar_t* label, const int minimum, const int maximum, const int value)
 		{
@@ -166,65 +174,75 @@ namespace iw
 			};
 			panel_.add(std::move(control));
 		};
-		const auto button = [this](const int id, const wchar_t* label)
+		const auto button = [this](const int id, const wchar_t* label, const int row)
 		{
 			ui::Control control;
 			control.id = id;
 			control.kind = ui::ControlKind::button;
 			control.label = label;
+			control.buttonRow = row;
 			panel_.add(std::move(control));
 		};
-		const auto heading = [this](const int id, const wchar_t* label)
+		const auto heading = [this](const int id, const wchar_t* label, const wchar_t* badge)
 		{
 			ui::Control control;
 			control.id = id;
 			control.kind = ui::ControlKind::heading;
 			control.label = label;
+			control.badge = badge;
 			panel_.add(std::move(control));
 		};
 
 		ui::Control description;
 		description.id = idDescription;
-		description.kind = ui::ControlKind::label;
-		description.label = L"Drag crop handles, adjust perspective corners, or detect a document. Preview shows "
-							L"the saved result. Nothing is written until you save.";
+		description.kind = ui::ControlKind::heading;
+		description.label = L"Edit photo";
+		description.badge = L"\u270e";
 		panel_.add(std::move(description));
 
-		heading(idGeometryHeading, L"Geometry");
-		slider(idStraighten, L"Straighten", -100, 100, 0);
-		button(idRotateLeft, L"Rotate anticlockwise");
-		button(idRotateRight, L"Rotate clockwise");
-		button(idAutoStraighten, L"Auto straighten");
-		button(idPerspective, L"Adjust perspective corners");
-		button(idAutoDocument, L"Detect document");
-		button(idCrop, L"Adjust crop handles");
-		button(idResetCrop, L"Reset crop");
-		button(idResetGeometry, L"Reset all geometry");
+		heading(idGeometryHeading, L"Straighten and crop", L"\u25a7");
+		slider(idStraighten, L"Angle", -449, 449, 0);
+		slider(idHorizontal, L"Horizontal", -60, 60, 0);
+		slider(idVertical, L"Vertical", -60, 60, 0);
+		button(idRotateLeft, L"\u21b6 Left", 1);
+		button(idRotateRight, L"\u21b7 Right", 1);
+		button(idResetGeometry, L"Reset", 1);
+		button(idAutoStraighten, L"Auto straighten", 2);
+		button(idAutoDocument, L"Detect document", 2);
+		button(idPerspective, L"Corners", 3);
+		button(idCrop, L"Crop", 3);
+		button(idResetCrop, L"Reset crop", 3);
 
-		heading(idColorHeading, L"Colour");
-		slider(idBrightness, L"Brightness", -100, 100, 0);
-		slider(idContrast, L"Contrast", -100, 100, 0);
+		heading(idColorHeading, L"Colour", L"\u25d0");
+		ui::Control histogram;
+		histogram.id = idHistogram;
+		histogram.kind = ui::ControlKind::custom;
+		histogram.draw = [this](const auto& renderer, const auto bounds)
+		{
+			draw_histogram(renderer, bounds);
+		};
+		histogram.mouse = [this](const auto message, const auto bounds, const auto point)
+		{
+			return tone_mouse(message, bounds, point);
+		};
+		panel_.add(std::move(histogram));
+		slider(idVibrance, L"Vibrance", -100, 100, 0);
 		slider(idDarks, L"Darks", -100, 100, 0);
 		slider(idMidtones, L"Midtones", -100, 100, 0);
 		slider(idLights, L"Lights", -100, 100, 0);
+		slider(idContrast, L"Contrast", -100, 100, 0);
+		slider(idBrightness, L"Brightness", -100, 100, 0);
 		slider(idSaturation, L"Saturation", -100, 100, 0);
-		slider(idVibrance, L"Vibrance", -100, 100, 0);
 		slider(idTemperature, L"Temperature", -100, 100, 0);
 		slider(idTint, L"Tint", -100, 100, 0);
-		button(idAutoColor, L"Auto colour");
-		button(idResetColor, L"Reset colour adjustments");
+		button(idAutoColor, L"Auto colour", 4);
+		button(idResetColor, L"Reset colour", 4);
 
-		heading(idSaveHeading, L"Saving");
+		heading(idSaveHeading, L"Save options", L"\u25a1");
 		ui::Control backup;
 		backup.id = idBackup;
-		backup.kind = ui::ControlKind::checkBox;
-		backup.label = L"When overwriting a photo with irreversible changes make an original backup copy";
-		backupOnOverwrite_ = platform::read_integer_setting(L"Edit", L"BackupOnOverwrite", 1) != 0;
-		backup.checked = backupOnOverwrite_;
-		backup.changed = [this]
-		{
-			persist_options();
-		};
+		backup.kind = ui::ControlKind::label;
+		backup.label = L"Save keeps the original beside the edited photo. Save as writes a separate file.";
 		panel_.add(std::move(backup));
 		jpegQuality_ = std::clamp(platform::read_integer_setting(L"Edit", L"JpegQuality", 90), 10, 100);
 		slider(idQuality, L"JPEG save quality", 10, 100, jpegQuality_);
@@ -261,7 +279,14 @@ namespace iw
 			panel_.add(std::move(lossless));
 			panel_.set_enabled(idWebpQuality, !webpLossless_);
 		}
-		if (auto* straighten = panel_.find(idStraighten)) straighten->suffix = L" tenths";
+		if (auto* straighten = panel_.find(idStraighten))
+		{
+			straighten->readout = [](const int value)
+			{
+				return std::format(L"{:.1f}", value / 10.0);
+			};
+			straighten->suffix = L"\u00b0";
+		}
 
 		write_controls();
 		if (source_.width <= 0) load_photo();
@@ -270,6 +295,8 @@ namespace iw
 	void TaskEdit::write_controls()
 	{
 		panel_.set_value(idStraighten, edits_.straighten);
+		panel_.set_value(idHorizontal, edits_.perspectiveHorizontal);
+		panel_.set_value(idVertical, edits_.perspectiveVertical);
 		panel_.set_value(idBrightness, edits_.brightness);
 		panel_.set_value(idContrast, edits_.contrast);
 		panel_.set_value(idDarks, edits_.darks);
@@ -288,6 +315,27 @@ namespace iw
 			if (const auto* control = panel_.find(id)) into = control->value;
 		};
 		value(idStraighten, edits_.straighten);
+		if (controlGroup_ == idHorizontal || controlGroup_ == idVertical)
+		{
+			value(idHorizontal, edits_.perspectiveHorizontal);
+			value(idVertical, edits_.perspectiveVertical);
+			const auto inset = [](const int amount)
+			{
+				return std::abs(amount) / 200.0;
+			};
+			const auto hor = edits_.perspectiveHorizontal;
+			const auto vert = edits_.perspectiveVertical;
+			if (!hor && !vert) edits_.perspective.reset();
+			else
+			{
+				const auto hTop = vert > 0 ? inset(vert) : 0.0, hBottom = vert < 0 ? inset(vert) : 0.0;
+				const auto vLeft = hor > 0 ? inset(hor) : 0.0, vRight = hor < 0 ? inset(hor) : 0.0;
+				edits_.perspective = edits::Quadrilateral{
+					{{hTop, vLeft}, {1.0 - hTop, vRight}, {1.0 - hBottom, 1.0 - vRight}, {hBottom, 1.0 - vLeft}}};
+			}
+			edits_.crop = {};
+			perspectiveHandles_ = false;
+		}
 		value(idBrightness, edits_.brightness);
 		value(idContrast, edits_.contrast);
 		value(idDarks, edits_.darks);
@@ -310,13 +358,20 @@ namespace iw
 	void TaskEdit::load_photo()
 	{
 		finish_drag(true);
+		dismiss_adjustment(false);
 		history_.clear();
 		perspectiveHandles_ = false;
+		comparing_ = false;
+		histogram_ = {};
+		comparisonPosition_ = 0.5;
 		imageBounds_ = {};
 		const auto generation = ++loadGeneration_;
 		source_ = {};
 		sourceSnapshot_.reset();
+		sourceDigest_.reset();
 		previewSource_.reset();
+		renderedPreview_ = {};
+		renderedSourceSize_ = {};
 		if (path_.empty() || !files::is_editable_image(path_))
 		{
 			loading_ = false;
@@ -338,25 +393,30 @@ namespace iw
 		{
 			files::DecodedImage decoded;
 			std::optional<files::FileSnapshot> snapshot;
+			std::optional<std::array<unsigned char, 32>> digest;
 			try
 			{
 				snapshot = files::snapshot_file(path);
 				if (snapshot && snapshot->exists && !snapshot->directory && !snapshot->readOnly)
+				{
 					decoded = files::load_image_for_area(path, previewLimit, previewLimit);
+					if (valid_image(decoded)) digest = files::file_digest(path);
+				}
 				if (!snapshot || !files::matches_snapshot(path, *snapshot)) decoded = {};
 			}
 			catch (...)
 			{
 				decoded = {};
 			}
-			platform::queue_ui([weak, path, generation, snapshot, decoded = std::move(decoded)]() mutable
+			platform::queue_ui([weak, path, generation, snapshot, digest, decoded = std::move(decoded)]() mutable
 			{
 				const auto self = std::static_pointer_cast<TaskEdit>(weak.lock());
 				if (!self || self->loadGeneration_ != generation || !paths::equal(self->path_, path)) return;
 				self->loading_ = false;
-				self->panel_.set_interactive(true);
+				self->panel_.set_interactive(valid_image(decoded));
 				self->source_ = std::move(decoded);
 				self->sourceSnapshot_ = snapshot;
+				self->sourceDigest_ = digest;
 				self->previewSource_.reset();
 				self->set_status_for_photo();
 				self->refresh_commands();
@@ -402,7 +462,7 @@ namespace iw
 
 	void TaskEdit::controls_changed()
 	{
-		if (loading_ || saving_) return;
+		if (loading_ || saving_ || !valid_image(source_)) return;
 		const auto previous = edits_;
 		read_controls();
 		history_.record(previous, edits_, controlGroup_);
@@ -414,33 +474,49 @@ namespace iw
 	void TaskEdit::control_activated(ui::Control& control)
 	{
 		if (loading_ || saving_ || !valid_image(source_)) return;
+		if (control.kind == ui::ControlKind::slider)
+		{
+			open_adjustment(control);
+			return;
+		}
+		dismiss_adjustment(true);
 		finish_drag();
 		const auto previous = edits_;
 		switch (control.id)
 		{
 		case idRotateLeft:
-			edits_.rotation = ((edits_.rotation - 1) % 4 + 4) % 4;
-			edits_.crop = {};
-			perspectiveHandles_ = false;
-			break;
 		case idRotateRight:
-			edits_.rotation = (edits_.rotation + 1) % 4;
-			edits_.crop = {};
+		{
+			const bool right = control.id == idRotateRight;
+			const auto size = edits::transformed_size(original_size(), edits_);
+			if (edits_.has_crop())
+			{
+				const app::recti c = edits::effective_crop(original_size(), edits_);
+				const auto rotated = right ? app::recti{size.cy - c.bottom(), c.x, c.height, c.width}
+				                           : app::recti{c.y, size.cx - c.right(), c.height, c.width};
+				edits_.crop = static_cast<::core::recti>(rotated);
+			}
+			edits_.rotation = (edits_.rotation + (right ? 1 : 3)) % 4;
 			perspectiveHandles_ = false;
 			break;
+		}
 		case idPerspective:
+			comparing_ = false;
 			perspectiveHandles_ = true;
 			showResult_ = false;
 			set_status(
 				L"Drag the four corners on the original photo, clockwise from top-left. Preview shows the corrected result.");
 			invalidate();
+			refresh_commands();
 			return;
 		case idCrop:
+			comparing_ = false;
 			perspectiveHandles_ = false;
 			showResult_ = false;
 			set_status(
 				L"Drag an edge or corner to crop; drag inside to move the crop. Preview shows the saved result.");
 			invalidate();
+			refresh_commands();
 			return;
 		case idResetCrop: edits_.crop = {}; break;
 		case idAutoDocument:
@@ -453,6 +529,7 @@ namespace iw
 					return;
 				}
 				edits_.perspective = corners;
+				edits_.perspectiveHorizontal = edits_.perspectiveVertical = 0;
 				edits_.crop = {};
 				edits_.straighten = 0;
 				perspectiveHandles_ = true;
@@ -542,17 +619,33 @@ namespace iw
 		auto preview = make(L"Preview", [this]
 		{
 			finish_drag();
+			comparing_ = false;
 			showResult_ = !showResult_;
+			refresh_commands();
 			invalidate();
-		});
+		}, [this] { return !loading_ && !saving_ && valid_image(source_); });
 		preview->checked = [this]
 		{
-			return showResult_;
+			return showResult_ && !comparing_;
 		};
-		auto previous = make(L"Save and open previous", [this] { step_photo(-1, true); },
+		auto compare = make(L"Compare", [this]
+		{
+			finish_drag();
+			comparing_ = !comparing_;
+			refresh_commands();
+			invalidate();
+		}, [this] { return !loading_ && !saving_ && valid_image(source_); });
+		compare->checked = [this]
+		{
+			return comparing_;
+		};
+		auto previous = make(L"Previous photo", [this] { step_photo(-1, false); },
 		                     [this] { return !saving_ && !loading_ && targets_.size() > 1; });
-		auto next = make(L"Save and open next", [this] { step_photo(1, true); },
+		auto next = make(L"Next photo", [this] { step_photo(1, false); },
 		                 [this] { return !saving_ && !loading_ && targets_.size() > 1; });
+		previous->bitmap = platform::CommandBitmap::back;
+		next->bitmap = platform::CommandBitmap::forward;
+		previous->toolbarText = next->toolbarText = {};
 		auto saveAs = make(L"Save as", [this] { save_as(); },
 		                   [this] { return !saving_ && !loading_ && valid_image(source_); });
 		auto saveCommand = make(L"Save", [this] { save(); },
@@ -562,6 +655,7 @@ namespace iw
 		auto redoCommand = make(L"Redo", [this] { undo(true); },
 		                        [this] { return !saving_ && !loading_ && history_.can_redo(); });
 		std::vector<platform::ToolbarItem> items{platform::ToolbarItem::action(preview),
+		                                         platform::ToolbarItem::action(compare),
 		                                         platform::ToolbarItem::separator(),
 		                                         platform::ToolbarItem::action(undoCommand),
 		                                         platform::ToolbarItem::action(redoCommand),
@@ -578,6 +672,7 @@ namespace iw
 	void TaskEdit::draw_content(const ui::CanvasRenderer& renderer, const app::recti bounds)
 	{
 		imageBounds_ = {};
+		compareHandleBounds_ = {};
 		const color face = platform::system_color(platform::SystemColor::face);
 		const color shadow = platform::system_color(platform::SystemColor::shadow);
 		const color gray = platform::system_color(platform::SystemColor::grayText);
@@ -617,7 +712,8 @@ namespace iw
 			return;
 		}
 
-		rebuild_preview({photoBounds_.width - metric(16), photoBounds_.height - metric(16)});
+		const int horizontalPadding = photoBounds_.width >= metric(180) ? metric(38) : metric(8);
+		rebuild_preview({photoBounds_.width - 2 * horizontalPadding, photoBounds_.height - metric(16)});
 		const auto& preview = previewSource_.image();
 		if (preview.width <= 0) return;
 		// Preview off keeps the whole straightened frame so the emptied corners stay visible.
@@ -627,11 +723,23 @@ namespace iw
 		                                               source_.originalHeight > 0 ? source_.originalHeight
 		                                                                          : source_.height},
 		                                              {preview.width, preview.height});
-		const bool selectingCorners = perspectiveHandles_ && !showResult_;
-		files::DecodedImage shown;
+		const bool showCropped = showResult_ || comparing_ || holdingCompare_;
+		const bool selectingCorners = perspectiveHandles_ && !showCropped;
+		const files::DecodedImage* rendered = &preview;
 		try
 		{
-			shown = selectingCorners ? preview : edits::apply(preview, previewEdits, showResult_);
+			if (!selectingCorners && !previewEdits.empty())
+			{
+				const app::sizei size{preview.width, preview.height};
+				if (renderedSourceSize_ != size || renderedEdits_ != previewEdits || renderedCropped_ != showCropped)
+				{
+					renderedPreview_ = edits::apply(preview, previewEdits, showCropped);
+					renderedSourceSize_ = size;
+					renderedEdits_ = previewEdits;
+					renderedCropped_ = showCropped;
+				}
+				rendered = &renderedPreview_;
+			}
 		}
 		catch (const std::bad_alloc&)
 		{
@@ -639,20 +747,72 @@ namespace iw
 			              platform::TextFormat::center | platform::TextFormat::singleLine);
 			return;
 		}
+		const auto& shown = *rendered;
 		if (!valid_image(shown))
 		{
 			renderer.text(L"The perspective exceeds the supported image size or cannot be rendered.", photoBounds_,
 			              gray, platform::TextFormat::center | platform::TextFormat::singleLine);
 			return;
 		}
-		const app::recti fitted = ui::fit_centered({shown.width, shown.height},
-		                                           {photoBounds_.x + metric(8), photoBounds_.y + metric(8),
-		                                            (std::max)(1, photoBounds_.width - metric(16)),
-		                                            (std::max)(1, photoBounds_.height - metric(16))});
+		const app::recti inset{photoBounds_.x + horizontalPadding, photoBounds_.y + metric(8),
+		                       (std::max)(1, photoBounds_.width - 2 * horizontalPadding),
+		                       (std::max)(1, photoBounds_.height - metric(16))};
+		update_histogram(shown);
+		const auto text = platform::system_color(platform::SystemColor::windowText);
+		const auto caption = [&](const std::wstring_view label, const app::recti pane)
+		{
+			const app::recti tag{pane.x + metric(6), pane.y + metric(3), metric(64), metric(26)};
+			renderer.fill(tag, face);
+			renderer.text(label, tag, text, single | platform::TextFormat::center);
+		};
+		if (showResult_ && !comparing_ && !holdingCompare_)
+		{
+			const int half = inset.width / 2;
+			const app::recti before{inset.x, inset.y, (std::max)(1, half - metric(3)), inset.height};
+			const app::recti after{inset.x + half + metric(3), inset.y, (std::max)(1, half - metric(3)), inset.height};
+			renderer.image({preview.width, preview.height, preview.pixels, true, 0},
+			               ui::fit_centered({preview.width, preview.height}, before));
+			renderer.image({shown.width, shown.height, shown.pixels, true, 0},
+			               ui::fit_centered({shown.width, shown.height}, after));
+			caption(L"Before", before);
+			caption(L"After", after);
+			return;
+		}
+		const app::recti fitted = ui::fit_centered({shown.width, shown.height}, inset);
 		renderer.image({shown.width, shown.height, shown.pixels, true, 0}, fitted);
-		renderer.outline(fitted, shadow);
 		imageBounds_ = fitted;
-		if (showResult_ || loading_ || saving_) return;
+		if (comparing_ || holdingCompare_)
+		{
+			const int x = photoBounds_.x + static_cast<int>(std::lround(photoBounds_.width * comparisonPosition_));
+			const app::recti before{photoBounds_.x, photoBounds_.y, x - photoBounds_.x, photoBounds_.height};
+			renderer.clip(before);
+			renderer.fill(before, face);
+			renderer.image({preview.width, preview.height, preview.pixels, true, 0},
+			               ui::fit_centered({preview.width, preview.height}, inset));
+			renderer.reset_clip();
+			renderer.fill({x - 1, photoBounds_.y, 2, photoBounds_.height}, text);
+			compareHandleBounds_ = {x - metric(13), photoBounds_.y + photoBounds_.height / 2 - metric(13), metric(26),
+			                        metric(26)};
+			caption(L"Before", inset);
+			caption(L"After", {inset.right() - metric(70), inset.y, metric(70), inset.height});
+		}
+		else
+		{
+			const auto x = (std::max)(photoBounds_.x + metric(14), fitted.x - metric(17));
+			compareHandleBounds_ = {x - metric(13), photoBounds_.y + photoBounds_.height / 2 - metric(13), metric(26),
+			                        metric(26)};
+		}
+		const auto compareCenter = compareHandleBounds_.x + compareHandleBounds_.width / 2;
+		const int compareRadius = compareHandleBounds_.width / 2;
+		for (int dy = -compareRadius; dy < compareRadius; ++dy)
+		{
+			const auto extent = static_cast<int>(std::sqrt(compareRadius * compareRadius - dy * dy));
+			renderer.fill({compareCenter - extent, compareHandleBounds_.y + compareRadius + dy, 2 * extent + 1, 1},
+			              platform::system_color(platform::SystemColor::highlight));
+		}
+		renderer.text(L"\u2194", compareHandleBounds_, platform::system_color(platform::SystemColor::highlightText),
+		              single | platform::TextFormat::center);
+		if (comparing_ || holdingCompare_ || loading_ || saving_) return;
 		const auto highlight = platform::system_color(platform::SystemColor::highlight);
 		const auto handle = [&](const app::pointi p)
 		{
@@ -677,6 +837,21 @@ namespace iw
 		else
 		{
 			const auto crop = displayed_crop();
+			if (crop.width < fitted.width || crop.height < fitted.height)
+				for (const auto border :
+				     {app::recti{fitted.x, fitted.y, fitted.width, crop.y - fitted.y},
+				      app::recti{fitted.x, crop.bottom(), fitted.width, fitted.bottom() - crop.bottom()},
+				      app::recti{fitted.x, crop.y, crop.x - fitted.x, crop.height},
+				      app::recti{crop.right(), crop.y, fitted.right() - crop.right(), crop.height}})
+					renderer.blend_fill(border, {0, 0, 0, 125});
+			if (cropDrag_ != edits::CropHandle::none)
+				for (const int third : {1, 2})
+				{
+					renderer.blend_fill({crop.x + crop.width * third / 3, crop.y, 1, crop.height},
+					                    {255, 255, 255, 145});
+					renderer.blend_fill({crop.x, crop.y + crop.height * third / 3, crop.width, 1},
+					                    {255, 255, 255, 145});
+				}
 			renderer.outline(crop, highlight, metric(2));
 			for (const int x : {crop.x, crop.x + crop.width / 2, crop.right()})
 				for (const int y : {crop.y, crop.y + crop.height / 2, crop.bottom()})
@@ -708,9 +883,19 @@ namespace iw
 
 	void TaskEdit::finish_drag(const bool cancel)
 	{
+		if (draggingCompare_)
+		{
+			draggingCompare_ = false;
+			if (holdingCompare_ || cancel) comparisonPosition_ = beforeComparisonDrag_;
+			holdingCompare_ = false;
+			if (frame_) frame_->release_capture();
+			invalidate();
+			return;
+		}
 		if (!content_dragging()) return;
 		if (cancel) edits_ = beforeDrag_;
 		else history_.record(beforeDrag_, edits_);
+		if (cancel) write_controls();
 		cropDrag_ = edits::CropHandle::none;
 		cornerDrag_ = -1;
 		if (frame_) frame_->release_capture();
@@ -735,6 +920,28 @@ namespace iw
 		if (message == platform::MouseMessage::leave)
 		{
 			finish_drag(true);
+			return true;
+		}
+		if (draggingCompare_ ||
+		    (!saving_ && !loading_ &&
+		     ((comparing_ && photoBounds_.contains(input.point)) || compareHandleBounds_.contains(input.point))))
+		{
+			if (message == platform::MouseMessage::leftButtonDown && photoBounds_.width > 0)
+			{
+				beforeComparisonDrag_ = comparisonPosition_;
+				draggingCompare_ = true;
+				holdingCompare_ = !comparing_;
+				if (frame_) frame_->set_capture();
+			}
+			if (draggingCompare_ && photoBounds_.width > 0)
+			{
+				comparisonPosition_ = std::clamp(static_cast<double>(input.point.x - photoBounds_.x) /
+				                                     photoBounds_.width,
+				                                 0.02, 0.98);
+				if (message == platform::MouseMessage::leftButtonUp) finish_drag();
+				invalidate();
+			}
+			if (frame_) frame_->set_cursor(platform::CursorShape::sizeHorizontal);
 			return true;
 		}
 		if (content_dragging())
@@ -771,6 +978,8 @@ namespace iw
 					    app::sizei{edits::perspective_size(original_size(), corners)}.width >= 2)
 					{
 						edits_.perspective = corners;
+						edits_.perspectiveHorizontal = edits_.perspectiveVertical = 0;
+						write_controls();
 						edits_.crop = {};
 					}
 				}
@@ -837,12 +1046,188 @@ namespace iw
 	{
 		// clang-format off
 		if (input.key == platform::KeyCode::escape && content_dragging()) { finish_drag(true); return true; }
+		if (input.alt && !input.control && !input.shift)
+		{
+			if (input.key == platform::KeyCode::enter) { save(); return true; }
+			if (input.key == platform::KeyCode::left) { step_photo(-1, true); return true; }
+			if (input.key == platform::KeyCode::right) { step_photo(1, true); return true; }
+		}
 		if (input.control && std::towupper(input.character) == L'Z') { undo(input.shift); return true; }
 		if (input.control && std::towupper(input.character) == L'Y') { undo(true); return true; }
+		if (input.control && std::towupper(input.character) == L'S') { if (input.shift) save_as(); else save(); return true; }
 		if (input.key == platform::KeyCode::left) return step_photo(-1, false);
 		if (input.key == platform::KeyCode::right) return step_photo(1, false);
 		// clang-format on
 		return false;
+	}
+
+	void TaskEdit::update_histogram(const files::DecodedImage& image)
+	{
+		histogram_ = {};
+		const size_t count = static_cast<size_t>(image.width) * image.height;
+		const auto step = (std::max)(size_t{1}, (count + 16383) / 16384);
+		for (size_t i = 0; i < count; i += step)
+		{
+			const auto p = image.pixels[i];
+			if ((p >> 24) == 0) continue;
+			for (size_t channel = 0; channel < histogram_.size(); ++channel)
+				++histogram_[channel][(p >> (16 - 8 * channel + 2)) & 63];
+		}
+	}
+
+	void TaskEdit::draw_histogram(const ui::CanvasRenderer& renderer, const app::recti bounds) const
+	{
+		const int pad = metric(7);
+		const int baseline = bounds.bottom() - metric(19);
+		const int width = (std::max)(1, bounds.width - pad * 2);
+		const int height = (std::max)(1, baseline - bounds.y - pad);
+		const int left = bounds.x + pad;
+		const auto shadow = platform::system_color(platform::SystemColor::shadow);
+		renderer.fill(bounds, platform::system_color(platform::SystemColor::window));
+		renderer.outline(bounds, shadow);
+		unsigned peak = 1;
+		for (const auto& channel : histogram_) peak = (std::max)(peak, *std::ranges::max_element(channel));
+		constexpr color colors[] = {{234, 73, 82, 153}, {47, 183, 108, 153}, {85, 140, 251, 153}};
+		for (size_t channel = 0; channel < histogram_.size(); ++channel)
+			for (int bin = 0; bin < 64; ++bin)
+			{
+				const auto bar = static_cast<int>(height *
+				                                  std::sqrt(static_cast<double>(histogram_[channel][bin]) / peak));
+				if (bar > 0)
+					renderer.blend_fill({left + width * bin / 64, baseline - bar,
+					                     (std::max)(1, width * (bin + 1) / 64 - width * bin / 64), bar},
+					                    colors[channel]);
+			}
+		renderer.fill({left, baseline, width, 1}, shadow);
+		const int radius = metric(5);
+		for (int i = 0; i < 3; ++i)
+		{
+			const int x = left + static_cast<int>(width * (toneNeutral[i] + panel_.find(tones[i])->value / 1000.0));
+			const auto tone = platform::system_color(i == toneHandle_ ? platform::SystemColor::highlight
+			                                                          : platform::SystemColor::windowText);
+			draw_edge(renderer, {x - radius, baseline + radius}, {x, baseline + 1}, tone, 1);
+			draw_edge(renderer, {x, baseline + 1}, {x + radius, baseline + radius}, tone, 1);
+			renderer.fill({x - radius, baseline + radius, radius * 2 + 1, radius}, tone);
+		}
+	}
+
+	bool TaskEdit::tone_mouse(const platform::MouseMessage message, const app::recti bounds, const app::pointi point)
+	{
+		using Mouse = platform::MouseMessage;
+		if (loading_ || saving_ || !valid_image(source_)) return false;
+		const int pad = metric(7);
+		const auto pos = static_cast<double>(point.x - bounds.x - pad) / (std::max)(1, bounds.width - pad * 2);
+		const auto value = [&](const int i)
+		{
+			return panel_.find(tones[i])->value;
+		};
+		if (message == Mouse::leftButtonDown || message == Mouse::leftButtonDoubleClick)
+		{
+			int best = 0;
+			for (int i = 1; i < 3; ++i)
+				if (std::abs(pos - (toneNeutral[i] + value(i) / 1000.0)) <
+				    std::abs(pos - (toneNeutral[best] + value(best) / 1000.0)))
+					best = i;
+			toneHandle_ = best;
+			beforeTone_ = edits_;
+		}
+		if (toneHandle_ < 0) return false;
+		if (message == Mouse::leave) edits_ = beforeTone_;
+		else
+		{
+			controlGroup_ = tones[toneHandle_];
+			panel_.set_value(controlGroup_,
+			                 message == Mouse::leftButtonDoubleClick
+			                     ? 0
+			                     : static_cast<int>(std::lround((pos - toneNeutral[toneHandle_]) * 1000)));
+			read_controls();
+		}
+		if (message == Mouse::leave || message == Mouse::leftButtonUp || message == Mouse::leftButtonDoubleClick)
+		{
+			if (message != Mouse::leave) history_.record(beforeTone_, edits_);
+			toneHandle_ = -1;
+			write_controls();
+		}
+		set_status_for_photo();
+		refresh_commands();
+		invalidate();
+		return true;
+	}
+
+	void TaskEdit::open_adjustment(ui::Control& control)
+	{
+		if (!frame_ || !control.showValue) return;
+		if (adjustmentId_ != control.id)
+		{
+			dismiss_adjustment(true);
+			const auto weak = weak_from_this();
+			platform::TextInputOptions options;
+			options.text = control.readout ? control.readout(control.value) : std::to_wstring(control.value);
+			options.accepted = [weak]
+			{
+				if (const auto self = std::static_pointer_cast<TaskEdit>(weak.lock())) self->dismiss_adjustment(true);
+			};
+			options.escaped = [weak]
+			{
+				if (const auto self = std::static_pointer_cast<TaskEdit>(weak.lock())) self->dismiss_adjustment(false);
+			};
+			options.tabbed = [weak](const bool reverse)
+			{
+				if (const auto self = std::static_pointer_cast<TaskEdit>(weak.lock()))
+				{
+					self->dismiss_adjustment(true);
+					self->control_key({.character = L'\t', .shift = reverse});
+				}
+			};
+			adjustmentInput_ = platform::create_text_input(frame_, std::move(options));
+			adjustmentId_ = control.id;
+		}
+		layout_hosted_controls();
+		if (adjustmentInput_) adjustmentInput_->set_focus();
+	}
+
+	void TaskEdit::dismiss_adjustment(const bool accept)
+	{
+		if (!adjustmentInput_) return;
+		const auto field = std::exchange(adjustmentInput_, {});
+		field->show(false);
+		const int id = std::exchange(adjustmentId_, 0);
+		if (frame_ && accept) frame_->set_focus();
+		if (auto* control = panel_.find(id); control && accept)
+		{
+			const auto text = field->text();
+			wchar_t* end{};
+			const auto parsed = std::wcstod(text.c_str(), &end);
+			if (text.empty() || !end || *end != L'\0' || end == text.c_str() || !std::isfinite(parsed))
+				set_status(L"Enter a numeric adjustment value.");
+			else
+			{
+				const auto units = id == idStraighten ? parsed * 10 : parsed;
+				panel_.set_value(id,
+				                 static_cast<int>(std::lround(std::clamp(units, static_cast<double>(control->minimum),
+				                                                         static_cast<double>(control->maximum)))));
+				if (control->changed) control->changed();
+			}
+		}
+		invalidate();
+	}
+
+	void TaskEdit::layout_hosted_controls()
+	{
+		if (!adjustmentInput_) return;
+		if (const auto* control = panel_.find(adjustmentId_))
+		{
+			const auto bounds = control->valueHit;
+			const auto extent = frame_->client_rect();
+			const bool visible = bounds.y >= metric(8) && bounds.bottom() <= extent.height - metric(8);
+			adjustmentInput_->show(visible);
+			if (visible) adjustmentInput_->set_bounds(bounds);
+		}
+	}
+
+	void TaskEdit::release_hosted_controls()
+	{
+		dismiss_adjustment(false);
 	}
 
 	TaskEdit::Leaving TaskEdit::ask_about_draft()
@@ -861,11 +1246,8 @@ namespace iw
 
 	void TaskEdit::persist_options()
 	{
-		if (const auto* backup = panel_.find(idBackup)) backupOnOverwrite_ = backup->checked;
 		if (const auto* quality = panel_.find(idQuality)) jpegQuality_ = std::clamp(quality->value, 10, 100);
-		std::vector<platform::IntegerSetting> settings{platform::IntegerSetting{L"JpegQuality", jpegQuality_},
-		                                               platform::IntegerSetting{L"BackupOnOverwrite",
-		                                                                        backupOnOverwrite_ ? 1 : 0}};
+		std::vector<platform::IntegerSetting> settings{platform::IntegerSetting{L"JpegQuality", jpegQuality_}};
 		if (const auto* quality = panel_.find(idWebpQuality))
 		{
 			webpQuality_ = std::clamp(quality->value, 1, 100);
@@ -902,35 +1284,16 @@ namespace iw
 			return fail(L"Choose an image filename supported by an available encoder.");
 		const auto destinationSnapshot = files::snapshot_file(destination);
 		if (!destinationSnapshot) return fail(L"The destination could not be checked. Nothing was saved.");
-		const bool exists = destinationSnapshot->exists;
-		std::error_code error;
-		if (!inPlace)
-		{
-			if (paths::equal(path_, destination) ||
-			    (exists &&
-			     std::filesystem::equivalent(files::native_path(path_), files::native_path(destination), error)))
-				return fail(L"Save as must use a different file so the original is left unchanged.");
-			if (error) return fail(L"The destination could not be checked. Nothing was saved.");
-		}
-		if (exists)
-		{
-			if (destinationSnapshot->directory || destinationSnapshot->readOnly)
-				return fail(L"The destination is read-only or is not a regular file. Choose another filename.");
-		}
+		if (!inPlace && destinationSnapshot->exists)
+			return fail(L"Save as does not replace existing files. Choose a new filename.");
+		if (inPlace && (!destinationSnapshot->exists || destinationSnapshot->directory ||
+		                destinationSnapshot->readOnly || destinationSnapshot->reparse))
+			return fail(L"The original is unavailable, read-only or a link. Use Save as to keep it unchanged.");
 		if (!sourceSnapshot_ || !files::matches_snapshot(path_, *sourceSnapshot_))
 			return fail(
 				L"The source photo changed or is no longer available. Nothing was saved; the draft has been kept.");
-		if (!inPlace && exists)
-		{
-			platform::ChoiceDefinition definition;
-			definition.title = title();
-			definition.heading = std::format(L"Replace {}?", destination.filename().wstring());
-			definition.message = L"This existing file will be replaced by the edited photo.";
-			definition.buttons = {{1, L"Replace"}, {2, L"Cancel"}};
-			definition.defaultButton = 2;
-			definition.warning = true;
-			if (platform::show_choice(frame_, definition) != 1) return false;
-		}
+		if (inPlace && !sourceDigest_)
+			return fail(L"The original could not be verified. Use Save as to keep it unchanged.");
 		saving_ = true;
 		struct SavingGuard
 		{
@@ -947,7 +1310,6 @@ namespace iw
 		set_status(std::format(L"Saving {}...", destination.filename().wstring()));
 		try
 		{
-			const bool backup = inPlace && edits_.is_irreversible() && backupOnOverwrite_;
 			files::SaveOptions options;
 			options.quality = *format == files::ImageSaveFormat::webp ? webpQuality_ : jpegQuality_;
 			options.lossless = *format == files::ImageSaveFormat::webp && webpLossless_;
@@ -957,9 +1319,9 @@ namespace iw
 			const bool saved = platform::run_with_status(frame_, title(),
 			                                             std::format(L"Saving {}...", destination.filename().wstring()),
 			                                             [source = path_, sourceSnapshot = *sourceSnapshot_,
-			                                              destination, destinationSnapshot = *destinationSnapshot,
-			                                              value = edits_, backup, options, format = *format,
-			                                              workerError]
+			                                              digest = sourceDigest_, destination,
+			                                              destinationSnapshot = *destinationSnapshot, inPlace,
+			                                              value = edits_, options, format = *format, workerError]
 			{
 				const auto unchanged = [&]
 				{
@@ -977,6 +1339,11 @@ namespace iw
 					return true;
 				};
 				if (!unchanged()) return false;
+				if (inPlace)
+				{
+					*workerError = files::in_place_edit_block_reason(source, format);
+					if (!workerError->empty()) return false;
+				}
 				// Never substitute the scaled preview when the full-resolution decode fails.
 				const auto full = files::load_image(source);
 				if (!valid_image(full))
@@ -993,17 +1360,20 @@ namespace iw
 				if (!unchanged()) return false;
 				auto journal = undo::history().begin(L"Photo Edit");
 				if (!journal->protect({destination}, *workerError)) return false;
-				const bool written = files::save_image(rendered, destination, format, options,
-				                                       destinationSnapshot.exists, [&]
+				std::filesystem::path originalLocation;
+				const bool written = files::save_image(rendered, destination, format, options, inPlace, [&]
 				{
 					if (!unchanged() || !journal->validate_before({destination}, *workerError)) return false;
-					if (backup && files::create_original_backup(destination).empty())
+					if (inPlace && files::file_digest(source) != digest)
 					{
-						*workerError = L"The original backup copy could not be written, so nothing was saved.";
+						*workerError = L"The original contents changed. Nothing was saved; the draft has been kept.";
 						return false;
 					}
-					return unchanged() && journal->validate_before({destination}, *workerError);
-				});
+					return true;
+				}, destinationSnapshot, &originalLocation);
+				if (!written && !originalLocation.empty())
+					*workerError = L"The edit could not be published. Your original was kept at " +
+					               originalLocation.wstring() + L". The draft has been kept.";
 				std::wstring recordError;
 				if (written && !journal->completed({destination}, recordError))
 					*workerError = L"The photo was saved, but Undo recording failed. " + recordError;
@@ -1018,7 +1388,11 @@ namespace iw
 			if (!saved)
 				return fail(workerError->empty() ? L"The photo could not be saved. The draft has been kept."
 				                                 : std::move(*workerError));
-			if (!workerError->empty()) platform::show_error(*workerError, L"Photo Edit recovery", frame_);
+			if (!workerError->empty())
+			{
+				platform::write_diagnostic(*workerError);
+				if (frame_) platform::show_error(*workerError, L"Photo Edit recovery", frame_);
+			}
 			return saved;
 		}
 		catch (...)
@@ -1090,6 +1464,7 @@ namespace iw
 	bool TaskEdit::save()
 	{
 		if (saving_) return false;
+		dismiss_adjustment(true);
 		finish_drag();
 		if (!dirty()) return true;
 		if (loading_ || !valid_image(source_)) return false;
@@ -1110,6 +1485,7 @@ namespace iw
 	bool TaskEdit::save_as()
 	{
 		if (saving_ || loading_ || !valid_image(source_)) return false;
+		dismiss_adjustment(true);
 		if (!format_keeps_edits(path_)) return save_as_jpeg();
 		const auto proposed = proposed_edit_path(path_);
 		if (proposed.empty())
@@ -1171,6 +1547,7 @@ namespace iw
 	bool TaskEdit::request_close()
 	{
 		if (saving_) return false;
+		dismiss_adjustment(true);
 		finish_drag();
 		switch (ask_about_draft())
 		{

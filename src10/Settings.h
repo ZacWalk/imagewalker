@@ -101,13 +101,8 @@ namespace Settings
 	}
 
 	// Window placement is the only layout state worth persisting as a group.
-	inline void SaveWindowPlacement(HWND hWnd, LPCTSTR szSection = _T("Window"))
+	inline void SaveWindowPlacement(const WINDOWPLACEMENT& wp, LPCTSTR szSection = _T("Window"))
 	{
-		WINDOWPLACEMENT wp = {sizeof(WINDOWPLACEMENT)};
-
-		if (!::GetWindowPlacement(hWnd, &wp))
-			return;
-
 		// Named values, not a struct blob: the layout of WINDOWPLACEMENT is not
 		// something to bake into a settings file.
 		SetInt(szSection, _T("Left"), wp.rcNormalPosition.left);
@@ -115,6 +110,12 @@ namespace Settings
 		SetInt(szSection, _T("Right"), wp.rcNormalPosition.right);
 		SetInt(szSection, _T("Bottom"), wp.rcNormalPosition.bottom);
 		SetInt(szSection, _T("Show"), wp.showCmd);
+	}
+
+	inline void SaveWindowPlacement(HWND hWnd)
+	{
+		WINDOWPLACEMENT wp = {sizeof(WINDOWPLACEMENT)};
+		if (::GetWindowPlacement(hWnd, &wp)) SaveWindowPlacement(wp);
 	}
 
 	inline bool RestoreWindowPlacement(HWND hWnd, LPCTSTR szSection = _T("Window"))

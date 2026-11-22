@@ -13,6 +13,7 @@
 #include "iw/logfile.h"
 #include "iw/imagingdiagnostics.h"
 #include "iw/testrunner.h"
+#include "window_screenshot.h"
 
 #pragma comment(lib, "HtmlHelp")
 
@@ -21,7 +22,7 @@ extern const std::string_view s_app_name = "ImageWalker22";
 
 // In AppMainFrame.cpp, which is the only translation unit that needs the
 // complete frame type.
-int RunMainWindow(LPTSTR lpCmdLine);
+int RunMainWindow(LPTSTR lpCmdLine, const iw::screenshot::Request& screenshot);
 
 int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPTSTR lpCmdLine, int nCmdShow)
 {
@@ -42,6 +43,13 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPTSTR lp
 		CoUninitialize();
 
 		return nFailures;
+	}
+
+	const auto screenshot = iw::screenshot::command_line();
+	if (screenshot.enabled && screenshot.output.empty())
+	{
+		iw::screenshot::report_usage();
+		return 2;
 	}
 
 	IW::Crash::Install(L"imagewalker22");
@@ -97,7 +105,7 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, LPTSTR lp
 
 		AtlAxWinInit();
 
-		nRet = RunMainWindow(lpCmdLine);
+		nRet = RunMainWindow(lpCmdLine, screenshot);
 
 		App.Free();
 		_Module.Term();

@@ -277,16 +277,13 @@ namespace iw::folders
 
 	namespace
 	{
-		const ::ui::view_theme& tree_theme()
+		::ui::view_theme& tree_theme()
 		{
-			static const auto theme = []
+			static auto theme = []
 			{
 				::ui::view_theme value;
 				// The tree fills its own ground in the window's colour.
 				value.window_background = 0;
-				value.handle = core::rgba(232, 232, 232);
-				value.handle_hover = core::rgba(166, 166, 166);
-				value.handle_tracking = core::rgba(120, 120, 120);
 				return value;
 			}();
 			return theme;
@@ -296,9 +293,6 @@ namespace iw::folders
 		{
 			return core::color(core::rgba(value.r, value.g, value.b, value.a));
 		}
-
-		constexpr color hotBackground{229, 241, 251};
-		constexpr color inactiveSelection{217, 217, 217};
 
 		// A glyph scaled to size, averaged with its alpha premultiplied so the transparent pixels around it -
 		// white in the folder bitmap - leave no fringe.
@@ -436,6 +430,10 @@ namespace iw::folders
 	{
 		const auto client = client_rect();
 		const auto background = to_core(platform::system_color(platform::SystemColor::window));
+		auto& theme = tree_theme();
+		theme.handle = platform::system_color(platform::SystemColor::scrollbar).pack();
+		theme.handle_hover = platform::system_color(platform::SystemColor::shadow).pack();
+		theme.handle_tracking = platform::system_color(platform::SystemColor::highlight).pack();
 		dc.draw_rect(client, background);
 		const auto& rows = model_.rows();
 		if (rowHeight_ <= 0 || rows.empty())
@@ -460,9 +458,10 @@ namespace iw::folders
 			const bool isSelected = selected && *selected == index;
 			const bool emphasised = isSelected && focused;
 			if (isSelected)
-				dc.draw_rect(line, to_core(emphasised ? platform::system_color(platform::SystemColor::highlight)
-				                                      : inactiveSelection));
-			else if (static_cast<int>(index) == hot_) dc.draw_rect(line, to_core(hotBackground));
+				dc.draw_rect(line, to_core(platform::system_color(emphasised ? platform::SystemColor::highlight
+				                                                             : platform::SystemColor::checked)));
+			else if (static_cast<int>(index) == hot_)
+				dc.draw_rect(line, to_core(platform::system_color(platform::SystemColor::hover)));
 
 			const int x = padding_ + row.depth * indent_;
 			const int middle = top + rowHeight_ / 2;

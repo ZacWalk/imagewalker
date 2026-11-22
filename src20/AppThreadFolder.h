@@ -150,9 +150,9 @@ private:
 	{
 	public:
 		volatile bool &_bExit;
-		volatile bool &_bAbort;
+		std::atomic_bool &_bAbort;
 
-		CThumbStopper(volatile bool &bExit, volatile bool &bAbort) : _bExit(bExit), _bAbort(bAbort) {};
+		CThumbStopper(volatile bool &bExit, std::atomic_bool &bAbort) : _bExit(bExit), _bAbort(bAbort) {};
 
 		bool QueryCancel() { return _bExit || _bAbort; }
 	};
@@ -161,9 +161,21 @@ private:
 	mutable CCriticalSection _csSearch;
 	Search::Spec _searchSpec;
 	Search::Type _searchType;
+	IW::FolderPtr _pendingSearchFolder;
+	UINT_PTR _searchGeneration = 0;
 
 	int _timeLastStatus;
-	volatile bool _bAbort;		
+	std::atomic_bool _bAbort;
+
+	void FinishSearch(UINT_PTR generation)
+	{
+		IW::CAutoLockCS lock(_csSearch);
+		if (generation == _searchGeneration)
+		{
+			_state.Folder.IsSearching = false;
+			_pCoupling->SignalSearchingComplete(generation);
+		}
+	}
 
 public:
 
@@ -192,26 +204,53 @@ public:
 		_eventFolderChange.Set();
 	}
 
-	void Abort()
+	bool Abort()
 	{
+		IW::CAutoLockCS lock(_csSearch);
 		_bAbort = true;
-		_state.Folder.IsSearchMode = false;
+		_pendingSearchFolder = nullptr;
+		if (!_state.Folder.IsSearchMode.exchange(false))
+			return false;
+
+		_state.Folder.IsSearching = false;
+		++_searchGeneration;
+		return true;
 	}	
 
-	void StartSearch(Search::Type type, const Search::Spec &ss)
-	{			
+	UINT_PTR StartSearch(Search::Type type, const Search::Spec &ss)
+	{
+		const auto folder = _state.Folder.GetFolder();
+		UINT_PTR generation;
 		{
 			IW::CAutoLockCS lock(_csSearch);
 			_searchType = type;
 			_searchSpec = ss;
+			_pendingSearchFolder = folder;
+			generation = ++_searchGeneration;
+			_state.Folder.IsSearchMode = true;
+			_state.Folder.IsSearching = true;
 		}
-
-		// After the spec, never before: the worker copies the spec first and
-		// tests this second, so publishing the flag first lets a pass run with
-		// the previous search's criteria.
-		_state.Folder.IsSearchMode = true;
-
 		_eventFolderChange.Set();
+		return generation;
+	}
+
+	bool IsCurrentSearch(UINT_PTR generation) const
+	{
+		IW::CAutoLockCS lock(_csSearch);
+		return generation != 0 && generation == _searchGeneration;
+	}
+
+	bool PublishSearchResult(UINT_PTR generation, IW::Folder *pFolder, IW::FolderItem *pThumb)
+	{
+		// Abort and publication must share a lock. A new search clears the
+		// same folder immediately after Abort, not after the decode returns.
+		IW::CAutoLockCS lock(_csSearch);
+		if (generation != _searchGeneration || !_state.Folder.IsSearchMode || _bExit)
+			return false;
+
+		pThumb->ModifyFlags(0, THUMB_IS_SEARCH_RESULT | THUMB_INVALIDATE);
+		pFolder->InsertThumb(pThumb);
+		return true;
 	}
 
 	void Process()
@@ -230,6 +269,7 @@ public:
 
 		while(!_bExit)
 		{
+			UINT_PTR generation = 0;
 			// One failed pass must not retire the worker: the catch is inside the
 			// loop, not around it. Outside, a single unreadable file ends background
 			// thumbnailing for the rest of the session while ResetThread keeps
@@ -243,24 +283,31 @@ public:
 			_bAbort = false;
 			IW::FolderPtr pFolder = _state.Folder.GetFolder();
 
-			Search::Type searchType;
+			Search::Type searchType = Search::Current;
 			Search::Spec searchSpec;
+			bool bSearchMode;
 
 			{
 				IW::CAutoLockCS lock(_csSearch);
-				searchType = _searchType;
-				searchSpec = _searchSpec;
+				bSearchMode = _state.Folder.IsSearchMode;
+				if (_pendingSearchFolder)
+				{
+					pFolder = _pendingSearchFolder;
+					_pendingSearchFolder = nullptr;
+					generation = _searchGeneration;
+					searchType = _searchType;
+					searchSpec = _searchSpec;
+				}
 			}
 
 			// What shall we load?
-			if (_state.Folder.IsSearchMode)
+			if (generation)
 			{
-				IW::ScopeLockedBool isSearching(_state.Folder.IsSearching);
-				_pCoupling->SignalSearching();					
+				_pCoupling->SignalSearching(generation);
 
 				if (searchType == Search::Current)
 				{
-					DecodeFolder(pFolder, &loader, searchSpec, pFolder->GetFolderItem(), pFolder->GetShellFolder());
+					DecodeFolder(generation, pFolder, &loader, searchSpec, pFolder->GetFolderItem(), pFolder->GetShellFolder());
 				}
 				else if (searchType == Search::MyPictures)
 				{
@@ -272,7 +319,7 @@ public:
 							IW::CShellFolder pMyPicsFolder;
 							if (SUCCEEDED(pMyPicsFolder.Open(item)))
 							{
-								DecodeFolder(pFolder, &loader, searchSpec, item, pMyPicsFolder);
+								DecodeFolder(generation, pFolder, &loader, searchSpec, item, pMyPicsFolder);
 							}
 						}
 					}
@@ -281,9 +328,9 @@ public:
 					}
 				}
 
-				_pCoupling->SignalSearchingComplete();
+				FinishSearch(generation);
 			}
-			else
+			else if (!bSearchMode)
 			{
 				IW::ScopeLockedBool isThumbnailing(_state.Folder.IsThumbnailing);
 				_pCoupling->SignalThumbnailing();
@@ -336,14 +383,14 @@ public:
 			catch (const std::exception &e)
 			{
 				IW::Logging::Error(_T("Exception escaped a thumbnail pass: %hs"), e.what());
-				_pCoupling->SignalSearchingComplete();
-				_pCoupling->SignalThumbnailingComplete();
+				if (generation) FinishSearch(generation);
+				else _pCoupling->SignalThumbnailingComplete();
 			}
 			catch (...)
 			{
 				IW::Logging::Error(_T("Unknown exception escaped a thumbnail pass"));
-				_pCoupling->SignalSearchingComplete();
-				_pCoupling->SignalThumbnailingComplete();
+				if (generation) FinishSearch(generation);
+				else _pCoupling->SignalThumbnailingComplete();
 			}
 
 			// No more images?
@@ -377,13 +424,13 @@ public:
 	// runs on a worker with a default stack and several shell objects per frame.
 	enum { kMaxSearchDepth = 32 };
 
-	bool DecodeFolder(IW::Folder *pFolder, CLoadAny *pLoader, const Search::Spec &spec, const IW::CShellItem &itemFolder, IW::CShellFolder &pShellFolder, LPCITEMIDLIST pItemGap = 0, int nDepth = 0)
+	bool DecodeFolder(UINT_PTR generation, IW::Folder *pFolder, CLoadAny *pLoader, const Search::Spec &spec, const IW::CShellItem &itemFolder, IW::CShellFolder &pShellFolder, LPCITEMIDLIST pItemGap = 0, int nDepth = 0)
 	{
-		if (nDepth > kMaxSearchDepth)
+		if (nDepth > kMaxSearchDepth || _bExit || !IsCurrentSearch(generation))
 			return true;
 
 		CString strPath = IW::CShellDesktop().GetDisplayNameOf(itemFolder, SHGDN_FORPARSING);
-		_pCoupling->SignalSearchingFolder(strPath);
+		_pCoupling->SignalSearchingFolder(strPath, generation);
 
 		// Get the IEnumIDList object for the given folder.
 		IW::CShellItemEnum enumItems;
@@ -401,7 +448,7 @@ public:
 			LPITEMIDLIST pItem = NULL;
 			ULONG ulFetched = 0;
 
-			while (enumItems->Next(1, &pItem, &ulFetched) == S_OK && _state.Folder.IsSearchMode && !_bExit && !_bAbort)
+			while (!_bExit && IsCurrentSearch(generation) && enumItems && enumItems->Next(1, &pItem, &ulFetched) == S_OK)
 			{
 				IW::FolderItemPtr pThumb = new IW::RefObj<IW::FolderItem>;
 
@@ -410,8 +457,8 @@ public:
 
 				if (spec.DoMatch(pThumb, pLoader))
 				{
-					pThumb->ModifyFlags(0, THUMB_IS_SEARCH_RESULT | THUMB_INVALIDATE);
-					pFolder->InsertThumb(pThumb);
+					if (!PublishSearchResult(generation, pFolder, pThumb))
+						return true;
 
 					int t = GetTickCount();
 
@@ -420,7 +467,7 @@ public:
 					if (_timeLastStatus < t)
 					{
 						_timeLastStatus = t + statusUpdateTicks;
-						_pCoupling->SignalSearching();
+						_pCoupling->SignalSearching(generation);
 					}
 				}			
 			}
@@ -428,6 +475,9 @@ public:
 
 
 		// Get the IEnumIDList object for the given folder.
+		if (_bExit || !IsCurrentSearch(generation))
+			return true;
+
 		IW::CShellItemEnum enumFolders;
 
 		dwFlags = SHCONTF_FOLDERS;
@@ -442,7 +492,7 @@ public:
 			LPITEMIDLIST pItem = NULL;
 			ULONG ulFetched = 0;
 
-			while (enumFolders->Next(1, &pItem, &ulFetched) == S_OK && _state.Folder.IsSearchMode && !_bExit && !_bAbort)
+			while (!_bExit && IsCurrentSearch(generation) && enumFolders && enumFolders->Next(1, &pItem, &ulFetched) == S_OK)
 			{
 				IW::CShellItem item;
 				item.Attach(pItem);
@@ -460,11 +510,11 @@ public:
 					{
 						IW::CShellItem itemGap;
 						itemGap.Cat(pItemGap, item);
-						DecodeFolder(pFolder, pLoader, spec, itemSubFolder, pSubFolder, itemGap, nDepth + 1);
+						DecodeFolder(generation, pFolder, pLoader, spec, itemSubFolder, pSubFolder, itemGap, nDepth + 1);
 					}
 					else
 					{
-						DecodeFolder(pFolder, pLoader, spec, itemSubFolder, pSubFolder, item, nDepth + 1);
+						DecodeFolder(generation, pFolder, pLoader, spec, itemSubFolder, pSubFolder, item, nDepth + 1);
 					}
 				}
 			}

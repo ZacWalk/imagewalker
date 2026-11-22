@@ -347,8 +347,13 @@ public:
 				IW::FolderItemPtr pItem = pFolder->GetItem(nFocusItem);
 				if (!pItem) return;
 
-				pItem->SetItemName(dlg.GetFileName());
-				pFolder->UpdateSelectedItems();
+				if (pItem->SetItemName(dlg.GetFileName()))
+					pFolder->UpdateSelectedItems();
+				else
+				{
+					IW::CMessageBoxIndirect mb;
+					mb.Show(IDS_FAILEDTO_RENAME);
+				}
 			}
 		}
 	}
@@ -601,7 +606,9 @@ public:
 
 	inline bool CanRename() const throw()
 	{
-		return HasSelection() && (m_nAttribs & SFGAO_CANRENAME);
+		const auto pFolder = GetFolder();
+		const ULONG required = pFolder->GetSelectCount() > 1 ? SFGAO_CANCOPY : SFGAO_CANRENAME;
+		return pFolder->HasSelection() && (m_nAttribs & required);
 	}
 
 	inline bool HasProperties() const throw()

@@ -41,9 +41,9 @@ namespace
 		void ShowSearchPane() override {}
 		void StartSearch(Search::Type) override {}
 		void SignalImageLoadComplete(CImageLoad *) override {}
-		void SignalSearching() override {}
-		void SignalSearchingComplete() override {}
-		void SignalSearchingFolder(const CString &) override {}
+		void SignalSearching(UINT_PTR) override {}
+		void SignalSearchingComplete(UINT_PTR) override {}
+		void SignalSearchingFolder(const CString &, UINT_PTR) override {}
 		void SignalThumbnailing() override {}
 		void SignalThumbnailingComplete() override {}
 		void SortOrderChanged(int) override {}

@@ -334,6 +334,7 @@ public:
 		dlg.m_pd.hDevNames = _folder.m_printer.CopyToHDEVNAMES();
 		IW::SetPrintDialogPageRange(dlg.m_pd, _folder.m_nMaxPage);
 		dlg.m_pd.Flags &= ~PD_NOPAGENUMS;
+		dlg.m_pd.Flags |= PD_HIDEPRINTTOFILE | PD_DISABLEPRINTTOFILE;
 
 		if (dlg.DoModal() == IDOK)
 		{

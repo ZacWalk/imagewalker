@@ -7,7 +7,7 @@ set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
 # libraries silently build against the dynamic CRT.
 set(CMAKE_POLICY_DEFAULT_CMP0091 NEW)
 
-# Every dependency is fetched and built from source, static, x64, no tools/tests/docs. libfiles is
+# Every dependency is fetched and built from source, static, no tools/tests/docs. libfiles is
 # pinned by commit; each of the others is the archive of its release tag - the tag's tree - or the
 # release tarball, pinned by SHA-256 here.
 set(BUILD_SHARED_LIBS OFF)
@@ -23,7 +23,8 @@ set(IW_HUNSPELL_VERSION 1.7.6)
 # through the Windows codecs installed, so libfiles' own are not built. A sibling checkout at
 # ../libfiles is built instead of the pin when one exists, whatever its HEAD; CI and a fresh clone
 # build the pin.
-if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_LIBFILES AND EXISTS "${PROJECT_SOURCE_DIR}/../libfiles/CMakeLists.txt")
+if(IW_USE_SIBLING_DEPS AND NOT DEFINED FETCHCONTENT_SOURCE_DIR_LIBFILES
+   AND EXISTS "${PROJECT_SOURCE_DIR}/../libfiles/CMakeLists.txt")
     set(FETCHCONTENT_SOURCE_DIR_LIBFILES "${PROJECT_SOURCE_DIR}/../libfiles" CACHE PATH
         "A libfiles checkout to build instead of the pinned commit")
 endif()
@@ -52,6 +53,11 @@ add_library(iw::webp ALIAS libfiles-webp)
 add_library(iw::gif ALIAS libfiles-gif)
 add_library(iw::tiff ALIAS libfiles-tiff)
 
+if(IW_BUILD_10_ONLY)
+    add_custom_target(third_party DEPENDS libfiles::libfiles)
+    return()
+endif()
+
 # ------------------------------------------------------------------ hunspell
 # Replaces the myspell fork 2.31 vendored. It reads the same .aff/.dic files,
 # which is why exe/dic carries over unchanged.
@@ -64,6 +70,8 @@ FetchContent_Declare(hunspell
     EXCLUDE_FROM_ALL)
 FetchContent_MakeAvailable(hunspell)
 add_library(iw::hunspell ALIAS hunspell)
+
+include(FFmpeg.cmake)
 
 # ---------------------------------------------------------------------------
 add_custom_target(third_party

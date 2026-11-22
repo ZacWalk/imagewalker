@@ -97,7 +97,7 @@ END
 // Positions here are placeholders. CSearchPanelDlg::Layout does the real work
 // at the width the pane actually has.
 IDD_SEARCH_PANEL DIALOGEX 0, 0, 148, 226
-STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD | WS_CLIPCHILDREN
 FONT 8, "MS Sans Serif", 0, 0, 0x1
 BEGIN
     LTEXT           "Containing text or keyword",IDC_SEARCH_TITLE_TEXT,7,7,134,8
@@ -124,7 +124,7 @@ END
 // the width the pane actually has -- a template stretched sideways leaves every
 // control at its design width with dead space beside it.
 IDD_EDIT_PANEL DIALOGEX 0, 0, 152, 400
-STYLE DS_SETFONT | DS_CONTROL | WS_CHILD
+STYLE DS_SETFONT | DS_CONTROL | WS_CHILD | WS_CLIPCHILDREN
 FONT 8, "MS Sans Serif", 0, 0, 0x1
 BEGIN
     LTEXT           "",IDC_EDIT_FILENAME,7,5,138,8,SS_PATHELLIPSIS
@@ -596,7 +596,7 @@ END
 
 IDD_RENAME DIALOGEX 0, 0, 372, 232
 STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Rename Selected Files"
+CAPTION "Create Renamed Copies"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     LTEXT           "A run of #'s is the number, ? is the name the file has now. Example: 'My Image ###'",-1,7,7,308,18
@@ -607,7 +607,7 @@ BEGIN
     CONTROL         "",IDC_START_AT_PICK,"msctls_updown32",UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_AUTOBUDDY | UDS_ARROWKEYS | UDS_NOTHOUSANDS,107,48,11,14
     CONTROL         "",IDC_RENAME_LIST,"SysListView32",LVS_REPORT | LVS_SINGLESEL | LVS_NOSORTHEADER | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP,7,70,308,124
     LTEXT           "",IDC_RENAME_STATUS,7,200,308,18
-    DEFPUSHBUTTON   "OK",IDOK,315,7,50,14
+    DEFPUSHBUTTON   "&Copy",IDOK,315,7,50,14
     PUSHBUTTON      "Cancel",IDCANCEL,315,25,50,14
     PUSHBUTTON      "&Help",IDHELP,315,43,50,14
 END
@@ -993,7 +993,7 @@ IDR_MAINFRAME ACCELERATORS
 BEGIN
     "A",            ID_EDIT_SELECT_ALL,     VIRTKEY, CONTROL, NOINVERT
     "C",            ID_EDIT_COPY,           VIRTKEY, CONTROL, NOINVERT
-    "C",            ID_IMAGE_COPY,          VIRTKEY, SHIFT, CONTROL, NOINVERT
+    "C",            ID_FILE_COPYTO_POPUP,   VIRTKEY, SHIFT, CONTROL, NOINVERT
     "D",            ID_EDIT_INVERTSELECTION, VIRTKEY, CONTROL, NOINVERT
     "D",            ID_VIEW_DESCRIPTION,    VIRTKEY, SHIFT, CONTROL, NOINVERT
     "F",            ID_VIEW_FOLDERS,        VIRTKEY, SHIFT, CONTROL, NOINVERT
@@ -1004,35 +1004,38 @@ BEGIN
     "N",            ID_BROWSE_NEWFOLDER,    VIRTKEY, CONTROL, NOINVERT
     "N",            ID_VIEW_NORMAL,         VIRTKEY, SHIFT, CONTROL, NOINVERT
     "E",            ID_VIEW_EDIT,           VIRTKEY, SHIFT, CONTROL, NOINVERT
+    "F",            ID_VIEW_SEARCHADVANCED, VIRTKEY, CONTROL, NOINVERT
     "O",            ID_FILE_OPEN,           VIRTKEY, CONTROL, NOINVERT
+    "O",            ID_FILE_OPENCONTAINING, VIRTKEY, SHIFT, CONTROL, NOINVERT
     "P",            ID_FILE_PRINT,          VIRTKEY, CONTROL, NOINVERT
     "P",            ID_VIEW_PRINT,          VIRTKEY, SHIFT, CONTROL, NOINVERT
     "R",            ID_EDIT_ROTATERIGHT,    VIRTKEY, CONTROL, NOINVERT
     "S",            ID_EDIT_SAVE,           VIRTKEY, CONTROL, NOINVERT
     "S",            ID_EDIT_SAVEAS,         VIRTKEY, SHIFT, CONTROL, NOINVERT
     "V",            ID_EDIT_PASTE,          VIRTKEY, CONTROL, NOINVERT
+    VK_BACK,        ID_BROWSE_BACK,         VIRTKEY, NOINVERT
     VK_DELETE,      ID_EDIT_DELETE,         VIRTKEY, NOINVERT
     VK_DELETE,      ID_EDIT_CUT,            VIRTKEY, SHIFT, NOINVERT
     VK_F1,          ID_HELP_FINDER,         VIRTKEY, NOINVERT
-    VK_F10,         ID_VIEW_PRINT,          VIRTKEY, NOINVERT
     VK_F11,         ID_VIEW_IMAGEFULLSCREEN, VIRTKEY, NOINVERT
     VK_F12,         ID_VIEW_EDIT,           VIRTKEY, NOINVERT
     VK_F2,          ID_BROWSE_RENAME,       VIRTKEY, NOINVERT
     VK_F3,          ID_VIEW_SEARCHADVANCED, VIRTKEY, NOINVERT
-    VK_F4,          ID_VIEW_NORMAL,         VIRTKEY, NOINVERT
+    VK_F4,          ID_VIEW_FOLDERS,        VIRTKEY, SHIFT, NOINVERT
     VK_F5,          ID_VIEW_REFRESHX,       VIRTKEY, NOINVERT
     VK_F6,          ID_TOOLS_OPTIONS,       VIRTKEY, NOINVERT
-    VK_F7,          ID_FILE_MOVETO_POPUP,   VIRTKEY, NOINVERT
-    VK_F8,          ID_FILE_COPYTO_POPUP,   VIRTKEY, NOINVERT
-    VK_F9,          ID_VIEW_FOLDERS,        VIRTKEY, NOINVERT
+    VK_F8,          ID_TOOLS_CONVERTIMAGES, VIRTKEY, CONTROL, NOINVERT
     VK_INSERT,      ID_EDIT_COPY,           VIRTKEY, CONTROL, NOINVERT
     VK_INSERT,      ID_EDIT_PASTE,          VIRTKEY, SHIFT, NOINVERT
     VK_LEFT,        ID_BROWSE_BACK,         VIRTKEY, ALT, NOINVERT
-    VK_RETURN,      ID_FILE_PROPERTIES,     VIRTKEY, ALT, NOINVERT
+    VK_RETURN,      ID_FILE_OPEN_WITH,      VIRTKEY, CONTROL, NOINVERT
+    VK_RETURN,      ID_FILE_PROPERTIES,     VIRTKEY, SHIFT, CONTROL, NOINVERT
     VK_RIGHT,       ID_BROWSE_FORWARD,      VIRTKEY, ALT, NOINVERT
     VK_SPACE,       ID_IMAGE_NEXT,          VIRTKEY, NOINVERT
+    VK_SPACE,       ID_VIEW_IMAGEFULLSCREEN, VIRTKEY, SHIFT, CONTROL, NOINVERT
     VK_UP,          ID_BROWSE_PARENT,       VIRTKEY, ALT, NOINVERT
     "X",            ID_EDIT_CUT,            VIRTKEY, CONTROL, NOINVERT
+    "X",            ID_FILE_MOVETO_POPUP,   VIRTKEY, SHIFT, CONTROL, NOINVERT
     "Z",            ID_EDIT_UNDO_IMAGE,     VIRTKEY, CONTROL, NOINVERT
 END
 
@@ -1280,8 +1283,8 @@ BEGIN
         MENUITEM "Copy File Paths",             ID_EDIT_COPY_PATHS
         MENUITEM "Paste",                       ID_EDIT_PASTE
         MENUITEM SEPARATOR
-        MENUITEM "Rotate selected images left", ID_EDIT_ROTATELEFT
-        MENUITEM "Rotate selected images right", ID_EDIT_ROTATERIGHT
+        MENUITEM "Make copies rotated left",     ID_EDIT_ROTATELEFT
+        MENUITEM "Make copies rotated right",    ID_EDIT_ROTATERIGHT
         MENUITEM SEPARATOR
         MENUITEM "Delete",                      ID_EDIT_DELETE
         MENUITEM "New Folder",                  ID_BROWSE_NEWFOLDER
@@ -1464,7 +1467,7 @@ BEGIN
     IDS_FAILEDTOCOPYORMOVE  "Failed to copy or move selected file."
     IDS_FAILEDTOSAVEIMAGE   "Failed to save image."
     IDS_PRINTING            "Printing"
-    IDS_COULD_NOT_DELETE    "Failed to Delete Selected File."
+    IDS_COULD_NOT_DELETE    "Could not move all selected items to the Recycle Bin. No permanent deletion was attempted."
     IDS_CS_SUBTITLE         "This wizard will combine multiple images into a series of contact sheets."
     IDS_CS_TITLE            "Contact Sheet Wizard"
     IDS_DESKTOP             "Desktop"
@@ -1630,7 +1633,7 @@ END
 STRINGTABLE 
 BEGIN
     ID_EDIT_CROP            "Reset Crop\nPut the crop rectangle back around the whole picture"
-    ID_EDIT_DELETE          "Delete all selected items\nDelete"
+    ID_EDIT_DELETE          "Move selected items to the Recycle Bin\nDelete"
     ID_EDIT_GET             "Get Image\nOpen Image from folder view"
     ID_EDIT_INVERTSELECTION "Invert the current selection\nInvert Selection"
     ID_EDIT_NEW             "New Image\nNew Image"
@@ -1683,7 +1686,7 @@ BEGIN
     ID_BROWSE_FORWARD       "Next Folder\nNext Folder"
     ID_BROWSE_NEWFOLDER     "Create a new folder\nNew Folder"
     ID_BROWSE_PARENT        "Browse Parent Folder\nParent"
-    ID_BROWSE_RENAME        "Rename the currently selected item\nRename"
+    ID_BROWSE_RENAME        "Rename one item or create renamed copies of selected files\nRename"
 END
 
 STRINGTABLE 
@@ -2217,7 +2220,7 @@ BEGIN
     ID_SEARCH_TEXT          "Search by text or name\nSearch by text or name"
     ID_EDIT_ROTATELEFT      "Rotate Left\nRotate a quarter turn to the left"
     ID_EDIT_ROTATERIGHT     "Rotate Right\nRotate a quarter turn to the right"
-    IDS_ROTATING            "Rotating"
+    IDS_ROTATING            "Making rotated copies"
     ID_SCALE_FILL           "e Images To fill window\nScale Images To Fill window"
 END
 

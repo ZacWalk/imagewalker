@@ -18,9 +18,24 @@ installation yourself in an elevated PowerShell:
 .\dd.ps1 toolchain --yes
 ```
 
-To install by hand, add ATL in the Visual Studio Installer and run
+For the full collection, add ATL in the Visual Studio Installer and run
 `winget install --id Python.Python.3.13 --exact`, then open a new terminal.
 CMake checks for ATL and Python itself in a direct build.
+
+### SDK-only ImageWalker 1.0
+
+The standalone 1.0 build needs MSVC, the Windows SDK, and libfiles, not ATL,
+WTL, libdesktop, or Hunspell. From a Visual Studio Developer PowerShell in
+the repository root:
+
+```powershell
+cmake --preset x64-release -B build\iw10-sdk -DIW_BUILD_10_ONLY=ON "-DIW_OUTPUT_DIR=$PWD\out\iw10-sdk\x64"
+cmake --build build\iw10-sdk --target imagewalker10
+ctest --test-dir build\iw10-sdk -R '^imagewalker10(-sdk-boundary)?$' --output-on-failure --no-tests=error
+```
+
+In the x64-to-x86 developer environment, use `x86-release` and distinct
+build/output directories. Both configurations embed Help.
 
 ## Commands
 
@@ -47,8 +62,11 @@ waits for the process and kills its tree after 120 seconds, or after
 The project commands `check-help` and `test-app` accept `--dry-run` and
 `--json`, and need `--yes` to run; `test-app --app ID` runs `test --app ID`.
 
-The presets are `x64-debug` and `x64-release`, both Ninja with matching CTest
-presets, and `vs`, a Visual Studio solution in `build/vs` whose `vs-debug` and
+The Ninja presets `x64-debug`, `x64-release` and `x86-release` have matching
+CTest presets. Configure and build `x86-release` in the
+**x64_x86 Cross Tools Command Prompt for VS 2026**; the x86 binaries go to
+`exe\x86\` and do not replace the default x64 binaries. The `vs` preset makes
+a Visual Studio solution in `build/vs` whose `vs-debug` and
 `vs-release` build and CTest presets select Debug and RelWithDebInfo. `ide`
 generates that solution, and `--yes` opens it.
 
@@ -57,17 +75,146 @@ The applications are portable: keep the chosen executables, the dictionaries in
 folder. Each executable carries its help, and nothing needs installing,
 registering or elevation.
 
+### Timed screenshots
+
+Each edition can open a folder or photo, wait ten seconds, save its own
+window as a PNG, and exit:
+
+```powershell
+& .\exe\imagewalker23.exe --screenshot 'C:\Screenshots\imagewalker-2.3.png' 'C:\Sample Photos'
+```
+
+The folder or photo argument is optional. Give the screenshot a `.png` name
+in an existing directory. The application does not overwrite existing files
+and exits with a nonzero status if it cannot save. Keep the window unminimized
+and use a writable copy of the executable for separate screenshot preferences.
+
+### ImageWalker 3.0 MCP fixture sessions
+
+Start `imagewalker30.exe` as an MCP **stdio** server, with stdin and stdout
+redirected by the client. The process exits on stdin EOF. There is no network
+listener. Use an absolute folder on a local fixed drive that you created for
+testing, with an empty `.imagewalker-mcp-fixture` marker and generated PNG,
+JPEG or BMP photos. Optional subfolders make browse tests possible. Launch
+rejects unmarked roots, aliases (including reparse points and hard links),
+and fixtures with more than 256 entries, more than eight nested levels or
+photos over 32 MiB. Keep the fixture unchanged while the session is running.
+Only entries admitted at startup are browsable.
+
+For example, set this server entry in an MCP client:
+
+```json
+{
+  "type": "stdio",
+  "command": "C:\\ImageWalker\\imagewalker30.exe",
+  "args": ["--mcp", "--fixture-root", "C:\\Test Data\\IW30 fixture", "--mcp-allow-capture"]
+}
+```
+
+| Tool | Purpose |
+|---|---|
+| `ui_state` | Current relative folder and view, visible items, scan and thumbnail counts, selection, selected-photo decode state and task review state |
+| `browse` | Open an admitted folder using `folder`, an exact relative key (`.` for the root, `/` between components) |
+| `select_photos` | Select one to sixteen distinct names in the current folder using `names`; preview the last |
+| `open_preview` | Open `view`: `convert`, `rename`, `edit` or `sync`; Sync opens with no remote folder or analysis |
+| `close_view` | Return to Browse from a task or fullscreen; poll if task analysis has not finished |
+| `set_fullscreen` | Set `enabled` after a selected photo loads |
+| `screenshot` | Return an inline PNG of the app window, with optional `max_edge` from 128 to 896 pixels; only advertised with `--mcp-allow-capture` |
+
+Poll `ui_state` for a ready scan, thumbnail progress and a ready photo before
+capturing. Thumbnails are scheduled for the viewport and nearby items, not the
+entire folder at once. The agent uses a cloaked software-rendered window and
+never substitutes desktop pixels for a failed capture. It needs a Windows
+desktop session with DWM; renderer, theme, DPI and monitor geometry can differ
+between hosts. This is not arbitrary UI automation: there are no tools for
+input injection, dialogs, file writes, clipboard or external launches. The
+interactive INI, saved folders, tools configuration and Undo are not used.
+The pinned runtime may create its ordinary log and default empty INI under the
+separate `imagewalker30-mcp` identity.
+
+Run the end-to-end protocol smoke in PowerShell 7.4 or newer:
+
+```powershell
+.\tools\test-iw30-mcp.ps1 -Exe .\exe\imagewalker30.exe
+```
+
+The script creates disposable media and an isolated executable copy under
+`build\`. It checks denied paths and capture permissions, navigation,
+selection, previews, fullscreen, fixture pixels in the returned PNG and
+shutdown on EOF. Use `-KeepCaptures` to retain the generated fixture and
+PNGs for inspection.
+
+## Collection release
+
+Install NSIS 3.08 or later and the Windows SDK's SignTool on an x64 build PC.
+Select the thumbprint of the current code-signing certificate in the current
+user's Personal store. Run from PowerShell 7.4 or later:
+
+```powershell
+.\tools\package-release.ps1 -CollectionVersion 3.0.0.1 -CertificateThumbprint <publisher-thumbprint>
+```
+
+The script builds and tests both architectures in separate shipping trees,
+using the published dependency pins instead of any sibling checkout. It
+copies only the five release binaries per architecture, dictionaries, tools
+configuration and notices into the payload. It verifies executable version
+and architecture and requires valid timestamped Authenticode signatures.
+The portable ZIP contains `x86\` and `x64\`; setup installs only the native
+set into the current user's writable folder and adds five Start shortcuts.
+Setup and its uninstaller are signed. Uninstall leaves user settings, tools
+configuration, logs and recovery data intact.
+Update and uninstall check managed files before changing the collection and
+report the path of any locked or inaccessible file. Close every edition
+before upgrading. The preflight does not provide rollback for a later I/O
+failure.
+
+The output directory contains the installer, portable ZIP and a hash manifest.
+Before offering the binaries publicly, push and tag their exact source revision
+in the [ImageWalker repository](https://github.com/ZacWalk/imagewalker) with
+the Collection version (`v` followed by the four-part version). The matching
+tag must include these build instructions and the dependency pins needed to
+obtain the corresponding source and relink (see the
+[licence requirements](../README.md#licence)). To relink with a library you have
+modified, select its checkout with `FETCHCONTENT_SOURCE_DIR_LIBFILES` or
+`FETCHCONTENT_SOURCE_DIR_LIBDESKTOP`.
+
+Before publishing, clean-install and update on Windows 10 and 11. Launch
+all five Start shortcuts and verify their About versions, F1 topics and
+settings persistence; uninstall and confirm the shortcuts disappear and
+settings remain. Extract the portable ZIP to a writable path with spaces
+and run from both directories on x64; use a native 32-bit Windows 10
+machine or VM for the x86 setup branch. Exercise browse, zoom, and fullscreen in
+1.0, descriptions and print preview in 2.x, tagging and metadata in 2.3,
+and video/audio, Edit/Convert, Rename/Undo and Sync on expendable copies
+in 3.0. Check Windows N separately if advertising its media support.
+
+### Older Windows
+
+For the Collection, advertise Windows 10 and 11 on x86/x64, as supported
+by the architecture of the OS. The 1.0 and 2.x targets use Windows 7-era SDK
+declarations and a 6.01 subsystem header, but that is not proof of OS
+compatibility. The [v145 toolset](https://learn.microsoft.com/en-us/cpp/overview/what-s-new-for-msvc?view=msvc-180)
+does not target Windows 7, 8 or 8.1. In particular its x86 legacy builds
+import `GetSystemTimePreciseAsFileTime`, which Windows 7 does not provide.
+ImageWalker 3.0 is a modern Windows build. A Windows 7 edition would need
+a separate v143 toolchain investigation and tests on Windows
+7 SP1 (both architectures, including signed setup, browsing and Help);
+do not infer support from the manifest or linker switches.
+
 ## Compilation
 
-The four WTL applications compile as C++20 with `/permissive`, `/W4` and
-`/EHsc` through the `iw_flags` interface target. ImageWalker 3.0 sets its own
-flags in `src30/CMakeLists.txt`: `/permissive-`, `/W4`, `/EHsc`, `/guard:cf`
-outside Debug, and no warning suppressions. Every target, dependencies
+The three 2.x WTL applications compile as C++20 with `/permissive`, `/W4`
+and `/EHsc` through the `iw_flags` interface target. Only these targets
+disable C++ module scanning: they use headers, and MSVC's standard-library
+modules do not compile with `/permissive`. ImageWalker 1.0 uses
+`/permissive-`, `/W4` and `/EHsc` independently. ImageWalker 3.0 sets the same
+options and `/guard:cf` outside Debug. Every target, dependencies
 included, links the static CRT. Release is `RelWithDebInfo` and keeps PDB files
 for crash reports. See [warnings.md](warnings.md) and [porting.md](porting.md).
 
-The applications consume the header-only `iw_imaging` or `iw_legacy` interface
-targets and link libfiles and libdesktop directly; see
+The 2.x and 3.0 applications consume the header-only `iw_imaging` or
+`iw_legacy` interface targets; 1.0 links only SDK libraries and libfiles.
+See
 [imaging.md](imaging.md). libfiles owns codec callbacks and their exception
 policy. Runtime-dispatched AVX2 code is compiled privately by libdesktop;
 application headers and targets must not acquire `/arch:AVX2`.
@@ -137,11 +284,11 @@ round trip, where the system clipboard is unavailable. `/test` and CTest keep
 it.
 
 The 3.0 media suite checks metadata, poster pixels, malformed inputs,
-cancellation, optional-component failures and that no Media Foundation DLL is
-a mandatory import. It decodes a generated AVI and WAV with no window, and
-plays the AVI through pause, seek, the end of the media and stop. The WAV plays
-through the default audio endpoint; without one the suite expects the visible
-error and reports that check as skipped.
+cancellation, playback without Media Foundation and that its DLLs are not
+mandatory imports. It decodes a generated AVI and WAV with no visible window.
+It checks pause, seek, stop, and playback in Browse without leaving the item
+list. The WAV plays through the default audio endpoint; if there is none,
+the suite checks that the player reports the error and skips actual output.
 
 The native 2.x print tests need the local **Microsoft Print to PDF** printer,
 with Microsoft's PDF driver and the `PORTPROMPT:` port. They never fall back to
@@ -199,13 +346,17 @@ them, so `dd dep list` and `dd dep install` only report that ownership, and
 
 | Dependency | Pinned in | Used by |
 |---|---|---|
-| [libdesktop](https://github.com/ZacWalk/libdesktop) | `GIT_TAG` in `CMakeLists.txt` and `src30/CMakeLists.txt` | All five |
+| [libdesktop](https://github.com/ZacWalk/libdesktop) | `GIT_TAG` in `CMakeLists.txt` | 2.x and 3.0 |
 | [libfiles](https://github.com/ZacWalk/libfiles) | `IW_LIBFILES_REVISION` in `third-party/CMakeLists.txt` | All five |
 | Hunspell | `IW_HUNSPELL_VERSION` and its SHA-256 in `third-party/CMakeLists.txt` | 2.0, 2.2 and 2.3 |
-| WTL 10.01 | Vendored in `include/wtl` | 1.0, 2.0, 2.2 and 2.3 |
+| [FFmpeg](https://ffmpeg.org/) | Commit archive and SHA-256 in `third-party/FFmpeg.cmake` | 3.0 playback and Media Edit |
+| WTL 10.01 | Vendored in `include/wtl` | 2.0, 2.2 and 2.3 |
 
-A sibling checkout at `..\libdesktop` or `..\libfiles` is built instead of the
-pin, whatever its HEAD; CI and a fresh clone build the pins.
+A sibling `..\libfiles` is used instead of the pin unless
+`IW_USE_SIBLING_DEPS` is disabled. A sibling `..\libdesktop` is used only if
+it exposes `ui::style::set_palette`; the fetched pin gets the palette patch
+from `third-party/patches` without modifying the sibling checkout.
+CI and the shipping build use the pins.
 `third-party/CMakeLists.txt` owns every recipe, version, patch, archive hash,
 option and linking adapter but those of the codecs, which libfiles builds by
 its own recipes: libjpeg-turbo, libpng over zlib-ng, libwebp, giflib and
@@ -218,6 +369,19 @@ HEIF, JPEG XL and camera raw codecs are not built: ImageWalker decodes those
 formats through the installed Windows codecs. WebP needs no Windows codec.
 Archives take their extraction time, so changing a pin rebuilds the objects
 that depend on it.
+
+ImageWalker 3.0 builds selected FFmpeg decoders and the libraries for local
+playback and packet copying. The recipe uses Git for Windows' Bash and a checksum-pinned GNU Make
+archive at build time; neither is needed at runtime. Start Windows builds in
+the matching Visual Studio developer environment. FFmpeg has no enabled
+network or file protocols; the app supplies local input and staged output.
+The other editions do not link FFmpeg.
+
+FFmpeg is statically linked under LGPL 2.1 or later. Before distributing a
+3.0 binary, include FFmpeg attribution, its license, corresponding source,
+and materials and instructions to relink the exact ImageWalker build with a
+modified library. Keep the FFmpeg revision and configuration with the
+release materials; see [FFmpeg's legal guidance](https://ffmpeg.org/legal.html).
 
 ## The dd driver
 

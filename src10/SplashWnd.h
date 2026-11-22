@@ -4,40 +4,47 @@
 
 #include "Dib.h"
 
-class CSplashWnd : public CWindowImpl<CSplashWnd>
+class CSplashWnd : public SdkWindow
 {
 public:
-	DECLARE_WND_CLASS_EX(_T("IWSplash"), CS_HREDRAW | CS_VREDRAW, -1)
-
-	BEGIN_MSG_MAP(CSplashWnd)
-		MSG_WM_PAINT(OnPaint)
-		MSG_WM_TIMER(OnTimer)
-	END_MSG_MAP()
-
 	// Owned by the frame. Unowned, the splash had a blank taskbar button of its
 	// own and was the window found first by anything closing the app's main
 	// window, so the close dismissed the splash and the app ran on.
 	BOOL Show(HWND hWndOwner)
 	{
-		if (!m_dib.LoadResource(IDR_ICONMATE8, CSize(0, 0)))
+		if (!m_dib.LoadResource(IDR_SPLASH, CSize(0, 0)))
 			return FALSE;
 
 		CRect r(0, 0, m_dib.Width(), m_dib.Height());
+		MONITORINFO monitor{sizeof(monitor)};
+		if (!::GetMonitorInfo(::MonitorFromWindow(hWndOwner, MONITOR_DEFAULTTONEAREST), &monitor))
+			return FALSE;
+		const CRect work(monitor.rcWork);
+		r.OffsetRect(CPoint(work.left + (work.Width() - r.Width()) / 2, work.top + (work.Height() - r.Height()) / 2));
 
-		r.OffsetRect((::GetSystemMetrics(SM_CXSCREEN) - r.Width()) / 2,
-		             (::GetSystemMetrics(SM_CYSCREEN) - r.Height()) / 2);
-
-		if (Create(hWndOwner, r, nullptr, WS_VISIBLE | WS_POPUP | WS_BORDER, WS_EX_TOPMOST) == nullptr)
+		if (!CreateNative("IWSplash", hWndOwner, r, nullptr, WS_VISIBLE | WS_POPUP,
+		                  WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW))
 			return FALSE;
 
-		SetTimer(1, 3000);
+		if (!SetTimer(1, 3000))
+		{
+			DestroyWindow();
+			return FALSE;
+		}
 		UpdateWindow();
 
 		return TRUE;
 	}
 
 private:
-	void OnPaint(CDCHandle)
+	LRESULT WindowMessage(UINT message, WPARAM wParam, LPARAM lParam) override
+	{
+		if (message == WM_PAINT) { OnPaint(); return 0; }
+		if (message == WM_TIMER && wParam == 1) { OnTimer(wParam); return 0; }
+		return SdkWindow::WindowMessage(message, wParam, lParam);
+	}
+
+	void OnPaint()
 	{
 		CPaintDC dc(m_hWnd);
 

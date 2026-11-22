@@ -262,7 +262,7 @@ namespace
 	};
 }
 
-IW_TEST(ModalRenameAcceptanceExecutesTheReviewedFilesAndCancelDoesNot)
+IW_TEST(ModalRenameAcceptanceMakesReviewedCopiesAndCancelDoesNot)
 {
 	WorkflowRenameSettings restore;
 	for (bool accept : {false, true})
@@ -294,15 +294,17 @@ IW_TEST(ModalRenameAcceptanceExecutesTheReviewedFilesAndCancelDoesNot)
 		CLoadAny loader(state.Loaders);
 		for (int i = 0; i < 2; ++i)
 		{
-			IW_CHECK_EQ(IW::Path::FileExists(originals[i]), !accept);
 			IW_CHECK_EQ(IW::Path::FileExists(outputs[i]), accept);
-			IW::Image image;
-			IW_CHECK(loader.LoadImage(accept ? outputs[i] : originals[i], image, IW::CNullStatus::Instance));
-			if (image.IsEmpty()) continue;
-			COLORREF pixel = 0;
-			image.GetFirstPage().GetSurfaceLock()->GetLine(&pixel, 0, 0, 1);
-			IW_CHECK_EQ(IW::GetR(pixel), i == 0 ? 255u : 0u);
-			IW_CHECK_EQ(IW::GetG(pixel), i == 1 ? 255u : 0u);
+			for (const CString &path : {originals[i], accept ? outputs[i] : originals[i]})
+			{
+				IW::Image image;
+				IW_CHECK(loader.LoadImage(path, image, IW::CNullStatus::Instance));
+				if (image.IsEmpty()) continue;
+				COLORREF pixel = 0;
+				image.GetFirstPage().GetSurfaceLock()->GetLine(&pixel, 0, 0, 1);
+				IW_CHECK_EQ(IW::GetR(pixel), i == 0 ? 255u : 0u);
+				IW_CHECK_EQ(IW::GetG(pixel), i == 1 ? 255u : 0u);
+			}
 		}
 	}
 }

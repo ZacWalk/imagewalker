@@ -6,7 +6,7 @@
 #include "Files.h"
 #include "Format.h"
 #include "Paths.h"
-#include "TaskMedia.h"
+#include "Media.h"
 #include "Undo.h"
 
 #include <algorithm>
@@ -59,6 +59,7 @@ namespace iw
 		confirmation.warning = true;
 		if (platform::show_choice(frame_, confirmation) != 1) return;
 
+		canvas_.stop_media();
 		undo::Report report;
 		const bool processed = platform::run_with_status(frame_, L"Undo file task", L"Restoring previous file state...",
 		                                                 [&]
@@ -117,31 +118,69 @@ namespace iw
 		frame_ = platform::create_top_level_frame(shared_from_this(), options);
 		if (!frame_) return false;
 
-		std::error_code error;
+		open_startup_folder(initialPath);
+		return true;
+	}
+
+	void MainWindow::open_startup_folder(const std::filesystem::path& initialPath)
+	{
 		if (!initialPath.empty())
 		{
-			if (std::filesystem::is_directory(files::native_path(initialPath), error)) open_folder(initialPath);
-			else
-			{
-				const auto parent = initialPath.parent_path();
-				if (!parent.empty() && std::filesystem::is_directory(files::native_path(parent), error))
-				{
-					open_folder(parent);
-					open_image(initialPath);
-				}
-			}
+			std::error_code error;
+			const auto absolute = std::filesystem::absolute(initialPath, error);
+			if (!error && open_folder(absolute)) return;
+			if (!error && std::filesystem::is_regular_file(files::native_path(absolute), error) &&
+			    open_folder(absolute.parent_path(), true, true, absolute))
+				return;
+			platform::write_diagnostic(L"Could not open the requested startup path.\n");
 		}
-		if (folder_.empty())
+		if (!lastFolder_.empty() && open_folder(lastFolder_))
 		{
-			wchar_t* profile = nullptr;
-			size_t profileLength = 0;
-			_wdupenv_s(&profile, &profileLength, L"USERPROFILE");
-			const auto pictures = std::filesystem::path(profile ? profile : L".") / L"Pictures";
-			free(profile);
-			open_folder(std::filesystem::is_directory(pictures, error) ? pictures
-			                                                           : std::filesystem::current_path(error));
+			rememberedScan_ = folderScanGeneration_.load();
+			return;
 		}
+		if (!open_pictures_folder())
+			platform::write_diagnostic(L"Could not open the Pictures, Desktop or current folder at startup.\n");
+	}
+
+	bool MainWindow::open_pictures_folder()
+	{
+		for (const auto folder : {platform::KnownFolder::pictures, platform::KnownFolder::desktop})
+			if (const auto path = platform::known_folder(folder); !path.empty() && open_folder(path)) return true;
+		std::error_code error;
+		const auto current = std::filesystem::current_path(error);
+		return !error && open_folder(current);
+	}
+
+	bool MainWindow::escape_active_view()
+	{
+		const auto task = task_;
+		if (!task) return false;
+		task->escape();
 		return true;
+	}
+
+	bool MainWindow::view_shortcut(const char32_t key, const bool control, const bool shift, const bool alt)
+	{
+		namespace keys = ::platform::keys;
+		if (alt) return false;
+		if (control && !shift && key == keys::F4)
+		{
+			if (!escape_active_view() && !canvas_.back_out()) request_exit();
+			return true;
+		}
+		if (task_) return false;
+		if (control && shift && key == keys::SPACE)
+		{
+			set_fullscreen(!fullscreen_);
+			return true;
+		}
+		if (!control && !shift && key == keys::BACK)
+		{
+			navigate_history(-1);
+			return true;
+		}
+		return false;
 	}
 
 	platform::MessageResult MainWindow::message(const platform::WindowFramePtr& frame,
@@ -159,14 +198,15 @@ namespace iw
 			if (task_ && task_->frame()) task_->frame()->set_focus();
 			else if (canvas_.frame()) canvas_.frame()->set_focus();
 			return 0;
+		case platform::WindowMessage::captureLost:
+			draggingTreeSplitter_ = false;
+			frame_->invalidate(treeSplitterBounds_);
+			return 0;
 		case platform::WindowMessage::destroy:
 			++folderScanGeneration_;
 			if (task_ && task_->frame()) task_->frame()->set_reactor({});
 			if (modeBar_ && modeBar_->frame()) modeBar_->frame()->set_reactor({});
 			if (canvas_.frame()) canvas_.frame()->set_reactor({});
-			if (centerFrame_) centerFrame_->set_reactor({});
-			if (treeSplitterFrame_) treeSplitterFrame_->set_reactor({});
-			if (contentFrame_) contentFrame_->set_reactor({});
 			shellTree_.reset();
 			chrome_.reset();
 			save_settings();
@@ -178,62 +218,51 @@ namespace iw
 	platform::MessageResult MainWindow::mouse(const platform::WindowFramePtr& frame,
 	                                          const platform::MouseMessage message, const platform::MouseInput& input)
 	{
-		if (frame == treeSplitterFrame_)
+		if (frame != frame_) return 0;
+		const bool over = treeSplitterBounds_.contains(input.point);
+		if (draggingTreeSplitter_ || over) frame->set_cursor(platform::CursorShape::sizeHorizontal);
+		if (message == platform::MouseMessage::move || message == platform::MouseMessage::leave)
 		{
-			frame->set_cursor(platform::CursorShape::sizeHorizontal);
-			if (message == platform::MouseMessage::move)
+			const bool hover = message == platform::MouseMessage::move && over;
+			if (hover != hoveringTreeSplitter_)
 			{
-				frame->track_mouse_leave();
-				if (!hoveringTreeSplitter_)
-				{
-					hoveringTreeSplitter_ = true;
-					frame->invalidate();
-				}
+				hoveringTreeSplitter_ = hover;
+				if (hover) frame->track_mouse_leave();
+				frame->invalidate(treeSplitterBounds_);
 			}
-			else if (message == platform::MouseMessage::leave)
-			{
-				hoveringTreeSplitter_ = false;
-				frame->invalidate();
-			}
-			if (message == platform::MouseMessage::leftButtonDown)
-			{
-				draggingTreeSplitter_ = true;
-				treeSplitterDragOffset_ = input.point.x;
-				frame->set_capture();
-				frame->invalidate();
-			}
-			else if (message == platform::MouseMessage::move && draggingTreeSplitter_)
-			{
-				const app::pointi contentPoint = contentFrame_->screen_to_client(frame->client_to_screen(input.point));
-				const int width = (std::max)(0, contentPoint.x - treeSplitterDragOffset_);
-				folderTreeWidth_ = std::clamp(ui::unscale_metric(width, dpi_), 140, 1000);
-				on_size();
-			}
-			else if (message == platform::MouseMessage::leftButtonUp && draggingTreeSplitter_)
-			{
-				draggingTreeSplitter_ = false;
-				frame->release_capture();
-				frame->invalidate();
-			}
-			return 0;
+		}
+		if (over && message == platform::MouseMessage::leftButtonDown)
+		{
+			draggingTreeSplitter_ = true;
+			treeSplitterDragOffset_ = input.point.x - treeSplitterBounds_.x;
+			frame->set_capture();
+			frame->invalidate(treeSplitterBounds_);
+		}
+		else if (message == platform::MouseMessage::move && draggingTreeSplitter_)
+		{
+			const int modes = modeBar_ && showModeBar_ ? modeBar_->width() : 0;
+			const int width = (std::max)(0, input.point.x - contentBounds_.x - modes - treeSplitterDragOffset_);
+			folderTreeWidth_ = std::clamp(ui::unscale_metric(width, dpi_), 140, 1000);
+			on_size();
+		}
+		else if (message == platform::MouseMessage::leftButtonUp && draggingTreeSplitter_)
+		{
+			draggingTreeSplitter_ = false;
+			frame->release_capture();
+			frame->invalidate(treeSplitterBounds_);
 		}
 		return 0;
 	}
 
 	void MainWindow::paint(const platform::WindowFramePtr& frame, platform::DrawContext& draw)
 	{
-		if (frame == treeSplitterFrame_)
-			draw.fill(frame->client_rect(),
+		if (frame == frame_ && treeSplitterBounds_.width > 0)
+			draw.fill(treeSplitterBounds_,
 			          platform::calc_hande_color(hoveringTreeSplitter_, draggingTreeSplitter_, false));
 	}
 
 	void MainWindow::size(const platform::WindowFramePtr& frame, const app::sizei, platform::MeasureContext&)
 	{
-		if (frame == treeSplitterFrame_)
-		{
-			frame->invalidate();
-			return;
-		}
 		if (frame_ && frame != frame_) return;
 		frame_ = frame;
 		on_size();
@@ -245,33 +274,13 @@ namespace iw
 		chrome_ = platform::create_command_surface(frame_);
 		configure_chrome();
 
-		platform::WindowOptions contentOptions;
-		contentOptions.className = "ImageWalker30.Content";
-		contentOptions.child = true;
-		contentOptions.visible = true;
-		contentOptions.clipChildren = true;
-		contentOptions.eraseBackground = false;
-		contentFrame_ = frame_->create_child({}, contentOptions);
 		modeBar_ = std::make_shared<ModeBar>();
-		if (!contentFrame_ || !modeBar_->create(contentFrame_)) return false;
+		if (!modeBar_->create(frame_)) return false;
 		modeBar_->set_command_handler([this](const ModeBar::Button& button) { mode_bar_command(button); });
 		modeBar_->set_remove_handler([this](const ModeBar::Button& button) { remove_shortcut(button); });
-		shellTree_ = platform::create_shell_tree(contentFrame_, {[this](const auto& path)
+		shellTree_ = platform::create_shell_tree(frame_, {[this](const auto& path)
 		{ open_folder(path, true, false); }, [this] { open_folder(folder_, false); }});
-		platform::WindowOptions splitterOptions;
-		splitterOptions.className = "ImageWalker30.TreeSplitter";
-		splitterOptions.child = true;
-		splitterOptions.visible = true;
-		treeSplitterFrame_ = contentFrame_->create_child(shared_from_this(), splitterOptions);
-		platform::WindowOptions centerOptions;
-		centerOptions.className = "ImageWalker30.Center";
-		centerOptions.child = true;
-		centerOptions.visible = true;
-		centerOptions.clipChildren = true;
-		centerOptions.eraseBackground = false;
-		centerFrame_ = contentFrame_ ? contentFrame_->create_child({}, centerOptions) : nullptr;
-		if (!chrome_ || !contentFrame_ || !shellTree_ || !treeSplitterFrame_ || !centerFrame_ ||
-		    !canvas_.create(centerFrame_))
+		if (!chrome_ || !shellTree_ || !canvas_.create(frame_))
 			return false;
 		canvas_.set_dpi(dpi_);
 		canvas_.set_activation_handler([this](const auto& path) { activate_item(path); });
@@ -296,7 +305,7 @@ namespace iw
 		{
 			canvas_.set_thumbnail_selector_visible(!canvas_.thumbnail_selector_visible());
 			update_fullscreen_menu_checks();
-		}});
+		}, [this](const int value) { set_thumbnail_size(value); }, [this] { open_with_chooser(); }});
 		canvas_.set_sort_handler([this](const files::SortField field, const bool ascending)
 		{
 			collection_.set_sort(field, ascending);
@@ -423,20 +432,25 @@ namespace iw
 		const auto rename = command(L"&Rename", [this] { rename_selected(); }, {f2}, {}, {}, canvasHasOneSelection);
 		const auto deleteItem = command(L"&Delete", [this] { delete_selected(); }, {deleteKey}, {}, {},
 		                                canvasHasSelection);
-		const auto refresh = command(L"&Refresh", [this] { open_folder(folder_, false); }, {f5}, L"Refresh",
-		                             platform::CommandBitmap::refresh, [this] { return !folder_.empty(); });
-		const auto fit = command(L"&Fit image", [this] { canvas_.set_fit(true); }, {}, L"Fit image", {},
-		                         [this] { return !files_.empty(); }, [this] { return canvas_.fit(); });
-		const auto zoomIn = command(L"Zoom &in", [this] { canvas_.zoom(1.25); }, {}, L"Zoom in", {},
-		                            [this] { return !files_.empty(); });
-		const auto zoomOut = command(L"Zoom &out", [this] { canvas_.zoom(0.8); }, {}, L"Zoom out", {},
-		                             [this] { return !files_.empty(); });
+		const auto refresh = command(L"&Refresh", [this]
+		{
+			if (open_folder(folder_, false)) canvas_.invalidate_all_files();
+		}, {f5}, L"Refresh", platform::CommandBitmap::refresh, [this] { return !folder_.empty(); });
+		const auto fit = command(L"&Fit image", [this] { canvas_.set_fit(true); }, {}, L"Fit image",
+		                         platform::CommandBitmap::fit, [this] { return canvas_.can_zoom(); },
+		                         [this] { return canvas_.fit(); });
+		const auto zoomIn = command(L"Zoom &in", [this] { canvas_.zoom(1.25); }, {}, L"Zoom in",
+		                            platform::CommandBitmap::zoomIn, [this] { return canvas_.can_zoom(); });
+		const auto zoomOut = command(L"Zoom &out", [this] { canvas_.zoom(0.8); }, {}, L"Zoom out",
+		                             platform::CommandBitmap::zoomOut, [this] { return canvas_.can_zoom(); });
 		const auto tree = command(L"Folder &tree", [this]
 		{
 			showTree_ = !showTree_;
 			update_visibility();
 			update_toolbar_state();
-		}, {}, L"Show folder tree", platform::CommandBitmap::folderTree, {}, [this] { return showTree_; });
+		}, {f4, false, true}, L"Show folder tree", platform::CommandBitmap::folderTree, {}, [this] { return showTree_; });
+		const auto fullscreen = command(L"&Full screen", [this] { set_fullscreen(!fullscreen_); }, {f11},
+		                                L"Full screen", {}, [this] { return !task_; }, [this] { return fullscreen_; });
 		const auto modeStrip = command(L"&Mode bar", [this]
 		{
 			showModeBar_ = !showModeBar_;
@@ -498,14 +512,14 @@ namespace iw
 		const auto undoCommand = command(L"&Undo", [this] { undo_last_action(); }, {z, true},
 		                                 L"Undo the current photo draft or the last completed file task",
 		                                 platform::CommandBitmap::none, [this] { return can_undo_last_action(); });
-		const auto convert = command(L"&Convert or Resize...", [this] { open_convert_task(); }, {}, {}, {},
+		const auto convert = command(L"&Convert or Resize...", [this] { open_convert_task(); }, {f8, true}, {}, {},
 		                             [this] { return !task_active() && has_photo_selection(); });
-		const auto batchRename = command(L"&Batch Rename...", [this] { open_rename_task(); }, {f7}, {}, {},
+		const auto batchRename = command(L"&Batch Rename...", [this] { open_rename_task(); }, {r, true, true}, {}, {},
 		                                 [this] { return !task_active() && canvas_.selection_count() > 0; });
-		const auto synchronize = command(L"&Synchronize...", [this] { open_sync_task(); }, {}, {}, {},
+		const auto synchronize = command(L"&Synchronize...", [this] { open_sync_task(); }, {f9, true, true}, {}, {},
 		                                 [this] { return !task_active(); });
-		const auto editPhoto = command(L"&Edit photo", [this] { open_edit_task(); }, {f12}, {}, {},
-		                               [this] { return !task_active() && !editable_photo().empty(); });
+		const auto editPhoto = command(L"&Edit photo", [this] { open_edit_task(); }, {e}, {}, {},
+		                               [this] { return !task_active() && !editable_item().empty(); });
 		const auto copyTo = command(L"Cop&y to folder...", [this] { copy_or_move_to_folder(false); }, {c, true, true},
 		                            {}, {}, canvasHasSelection);
 		const auto moveTo = command(L"&Move to folder...", [this] { copy_or_move_to_folder(true); }, {x, true, true},
@@ -514,14 +528,16 @@ namespace iw
 		                              canvasHasSelection);
 		const auto openWithMenu = command(L"Open with apps and tools", [this]
 		{ show_open_with_menu(frame_->client_to_screen({0, 0})); }, {}, {}, {}, canvasHasSelection);
-		const auto back = command(L"Back", [this] { navigate_history(-1); }, {}, L"Back", platform::CommandBitmap::back,
-		                          [this] { return history_.can_go_back(); });
-		const auto forward = command(L"Forward", [this] { navigate_history(1); }, {}, L"Forward",
+		const auto back = command(L"Back", [this] { navigate_history(-1); }, {left, false, false, true}, L"Back",
+		                          platform::CommandBitmap::back, [this] { return history_.can_go_back(); });
+		const auto forward = command(L"Forward", [this] { navigate_history(1); }, {right, false, false, true}, L"Forward",
 		                             platform::CommandBitmap::forward, [this] { return history_.can_go_forward(); });
-		const auto up = command(L"Up one level", [this]
+		const auto parent = command(L"Parent folder", [this]
 		{
-			if (const auto parent = parent_folder(folder_)) open_folder(*parent);
-		}, {}, L"Up one level", platform::CommandBitmap::parent, [this] { return parent_folder(folder_).has_value(); });
+			const auto path = folder_.parent_path();
+			if (!path.empty() && path != folder_ && !open_folder(path))
+				platform::show_error(L"The parent folder could not be opened.", L"ImageWalker 3.0", frame_);
+		}, {up, false, false, true}, {}, {}, [this] { return !folder_.empty() && folder_.has_relative_path(); });
 		const auto openFolder = command(L"Open folder", [this] { open_folder_picker(); }, {}, L"Open folder",
 		                                platform::CommandBitmap::openFolder);
 		const auto userGuide = command(L"&User guide", [this] { platform::show_help(frame_); }, {f1});
@@ -532,6 +548,8 @@ namespace iw
 			platform::DialogDefinition dialog;
 			dialog.title = L"Tool configuration";
 			dialog.message = tools_.issue_summary();
+			dialog.acceptText = L"Close";
+			dialog.cancelText.clear();
 			platform::show_modal_dialog(frame_, std::move(dialog));
 		});
 		const auto sortMenu = command(L"Sort items", [] {}, {}, L"Sort items", platform::CommandBitmap::sort);
@@ -552,7 +570,7 @@ namespace iw
 			open, copy, cut, paste, selectAll, rename, deleteItem, refresh, fit, zoomIn, zoomOut,
 			details, thumbnails, matrix, fullscreenProperties, fullscreenThumbnails, photosOnly,
 			sortName, sortModified, sortType, sortSize, sortDimensions, sortDuration, thumbnail64, thumbnail128,
-			thumbnail256, copyTo, moveTo, openWith, openWithMenu, back, forward, up, openFolder, sortMenu})
+			thumbnail256, copyTo, moveTo, openWith, openWithMenu, back, forward, parent, openFolder, sortMenu})
 		// clang-format on
 		{
 			item->enabled = [this, enabled = item->enabled]
@@ -574,7 +592,9 @@ namespace iw
 		       MenuItem::action(paste), MenuItem::separator(), MenuItem::action(selectAll), MenuItem::action(rename),
 		       MenuItem::action(deleteItem)}},
 		     {L"&View",
-		      {MenuItem::action(refresh), MenuItem::action(fit), MenuItem::action(zoomIn), MenuItem::action(zoomOut),
+		      {MenuItem::submenu(L"&Go to", {MenuItem::action(back), MenuItem::action(forward), MenuItem::action(parent)}),
+		       MenuItem::action(refresh), MenuItem::action(fullscreen), MenuItem::action(fit),
+		       MenuItem::action(zoomIn), MenuItem::action(zoomOut),
 		       MenuItem::separator(), MenuItem::action(tree), MenuItem::action(modeStrip), MenuItem::separator(),
 		       MenuItem::action(details), MenuItem::action(thumbnails), MenuItem::action(matrix), MenuItem::separator(),
 		       MenuItem::action(fullscreenProperties), MenuItem::action(fullscreenThumbnails),
@@ -589,10 +609,11 @@ namespace iw
 		      {MenuItem::action(userGuide), MenuItem::action(toolConfiguration), MenuItem::separator(),
 		       MenuItem::action(about)}}});
 		chrome_->set_toolbar({platform::ToolbarItem::action(back), platform::ToolbarItem::action(forward),
-		                      platform::ToolbarItem::action(up), platform::ToolbarItem::action(refresh),
-		                      platform::ToolbarItem::action(tree), platform::ToolbarItem::action(openFolder),
-		                      platform::ToolbarItem::action(about)});
-		chrome_->set_status_toolbar({platform::ToolbarItem::action(photosOnly),
+		                      platform::ToolbarItem::action(refresh), platform::ToolbarItem::action(tree),
+		                      platform::ToolbarItem::action(openFolder), platform::ToolbarItem::action(about)});
+		chrome_->set_status_toolbar({platform::ToolbarItem::action(zoomOut), platform::ToolbarItem::action(fit),
+		                             platform::ToolbarItem::action(zoomIn), platform::ToolbarItem::separator(),
+		                             platform::ToolbarItem::action(photosOnly),
 		                             platform::ToolbarItem::menu(sortMenu, sortItems),
 		                             platform::ToolbarItem::separator(), platform::ToolbarItem::action(details),
 		                             platform::ToolbarItem::action(thumbnails), platform::ToolbarItem::action(matrix)});
@@ -602,18 +623,17 @@ namespace iw
 
 	void MainWindow::on_size()
 	{
-		if (!chrome_ || !contentFrame_) return;
+		if (!chrome_ || !canvas_.frame()) return;
 		const app::recti content = chrome_->layout(frame_->client_rect(), !task_ && (fullscreen_ || zoomMode_));
-		contentFrame_->move(content);
-		const app::recti contentClient = contentFrame_->client_rect();
-		const int contentWidth = (std::max)(0, contentClient.width);
-		const int paneHeight = (std::max)(0, contentClient.height);
-		const bool showModes = !fullscreen_ && (!zoomMode_ || task_) && showModeBar_;
+		contentBounds_ = content;
+		const int contentWidth = (std::max)(0, content.width);
+		const int paneHeight = (std::max)(0, content.height);
+		const bool showModes = !fullscreen_ && !zoomMode_ && !task_ && showModeBar_;
 		const int modeWidth = showModes && modeBar_ ? modeBar_->width() : 0;
 		if (modeBar_ && modeBar_->frame())
 		{
 			modeBar_->frame()->show(showModes);
-			modeBar_->frame()->move({0, 0, modeWidth, paneHeight});
+			modeBar_->frame()->move({content.x, content.y, modeWidth, paneHeight});
 		}
 		const bool showTreePane = !fullscreen_ && showTree_ && !zoomMode_ && !task_;
 		const int splitterWidth = showTreePane ? scale_metric(6) : 0;
@@ -624,16 +644,21 @@ namespace iw
 		                          ? std::clamp(scale_metric(folderTreeWidth_), minimumTreeWidth, maximumTreeWidth)
 		                          : 0;
 		const int centerLeft = modeWidth + treeWidth + splitterWidth;
-		if (shellTree_) shellTree_->set_bounds({modeWidth, 0, treeWidth, paneHeight});
-		treeSplitterFrame_->move({modeWidth + treeWidth, 0, splitterWidth, paneHeight});
-		centerFrame_->move({centerLeft, 0, contentWidth - centerLeft, paneHeight});
+		if (shellTree_) shellTree_->set_bounds({content.x + modeWidth, content.y, treeWidth, paneHeight});
+		const auto previousSplitter = treeSplitterBounds_;
+		treeSplitterBounds_ = {content.x + modeWidth + treeWidth, content.y, splitterWidth, paneHeight};
+		if (previousSplitter.width > 0) frame_->invalidate(previousSplitter);
+		if (splitterWidth > 0) frame_->invalidate(treeSplitterBounds_);
+		centerBounds_ = {content.x + centerLeft, content.y, contentWidth - centerLeft, paneHeight};
 
 		layout_center();
 		if (task_) update_toolbar_state();
 	}
 
-	bool MainWindow::open_folder(const std::filesystem::path& path, const bool addHistory, const bool synchronizeTree)
+	bool MainWindow::open_folder(const std::filesystem::path& path, const bool addHistory, const bool synchronizeTree,
+	                             const std::filesystem::path& initialItem)
 	{
+		if (path.empty()) return false;
 		// NOLINTNEXTLINE(performance-unnecessary-copy-initialization): path may alias state that close_task() changes.
 		const auto requested = path;
 		if (task_ && (addHistory || !paths::equal(requested, folder_)) && !close_task()) return false;
@@ -651,6 +676,7 @@ namespace iw
 		{
 			files_.clear();
 			collection_.clear();
+			canvas_.clear_preview();
 			canvas_.set_files({});
 		}
 		collection_.begin_load();
@@ -666,7 +692,8 @@ namespace iw
 		update_toolbar_state();
 
 		const auto generation = ++folderScanGeneration_;
-		platform::queue_work(platform::WorkQueue::folder, [this, weak, generation, folder = folder_]
+		rememberedScan_ = 0;
+		platform::queue_work(platform::WorkQueue::folder, [this, weak, generation, folder = folder_, initialItem]
 		{
 			// The progress callback doubles as the cancellation check for a superseded scan.
 			std::stop_source cancellation;
@@ -687,10 +714,10 @@ namespace iw
 			},
 			                                      &scanError);
 			if (cancellation.stop_requested()) return;
-			platform::queue_ui([weak, generation, folder, scanError, items = std::move(items)]() mutable
+			platform::queue_ui([weak, generation, folder, scanError, initialItem, items = std::move(items)]() mutable
 			{
 				if (const auto self = weak.lock())
-					self->finish_folder_scan(generation, folder, std::move(items), scanError);
+					self->finish_folder_scan(generation, folder, std::move(items), scanError, initialItem);
 			});
 		});
 		return true;
@@ -704,19 +731,47 @@ namespace iw
 	}
 
 	void MainWindow::finish_folder_scan(const std::uint64_t generation, const std::filesystem::path& folder,
-	                                    std::vector<files::FolderItem> items, const std::error_code error)
+	                                    std::vector<files::FolderItem> items, const std::error_code error,
+	                                    const std::filesystem::path& initialItem)
 	{
 		if (generation != folderScanGeneration_ || !paths::equal(folder, folder_)) return;
 		scanning_ = false;
 		if (error)
 		{
+			if (rememberedScan_ == generation)
+			{
+				rememberedScan_ = 0;
+				history_ = {};
+				platform::write_diagnostic(L"Could not read the last folder; trying Pictures.\n");
+				if (open_pictures_folder()) return;
+			}
 			collection_.fail_load(error);
 			progressPercent_ = 100;
 			update_selection_status();
 			return;
 		}
+		rememberedScan_ = 0;
+		lastFolder_ = folder;
 		collection_.set_items(std::move(items));
 		apply_collection_view();
+		if (!initialItem.empty())
+		{
+			const auto found = std::ranges::find_if(files_, [&initialItem](const auto& file)
+			{ return paths::equal(file, initialItem); });
+			if (found != files_.end())
+			{
+				canvas_.select_index(static_cast<int>(found - files_.begin()), false, false);
+				open_image(initialItem);
+			}
+			else if (std::ranges::any_of(collection_.items(), [&initialItem](const files::FolderItem& item)
+			         { return media::is_media(item.kind) && paths::equal(item.path, initialItem); }))
+				open_image(initialItem);
+			else
+			{
+				statusText_ = L"The requested file is not in this view. Check the current filters.";
+				update_status_surface();
+			}
+		}
 		probe_dimensions();
 	}
 
@@ -724,9 +779,7 @@ namespace iw
 	{
 		if (media::is_media(files::classify(path)))
 		{
-			auto task = std::make_shared<TaskMedia>();
-			task->set_media(path);
-			set_task(std::move(task));
+			canvas_.play_media(path);
 			return;
 		}
 		canvas_.load(path);
@@ -886,7 +939,7 @@ namespace iw
 		             L"*.avi;*.m4v;*.mkv;*.mov;*.mp4;*.mpeg;*.mpg;*.wmv;*.webm;*.mts;*.m2ts;*.asf;*.3gp;*.3g2;*.ts;"
 		             L"*.aac;*.flac;*.m4a;*.mp3;*.ogg;*.wav;*.wma;*.opus;*.aif;*.aiff"});
 		if (!path) return;
-		if (open_folder(path->parent_path())) open_image(*path);
+		open_folder(path->parent_path(), true, true, *path);
 	}
 
 	void MainWindow::show_about()
@@ -915,13 +968,11 @@ namespace iw
 		};
 		platform::DialogDefinition definition;
 		definition.title = L"About ImageWalker";
-		definition.message =
-			L"ImageWalker 3.0 - released 2026\nWindows image viewer and manager\nCopyright (C) Zac Walker\n\n"
-			L"Choose a folder to browse its images. Select an image to preview it, and use the toolbar "
-			L"or menus to change views, manage files, and navigate your collection.\n\n"
-			L"Free software. No registration, no reminders, no limits.";
+		definition.message = L"ImageWalker 3.0 (2026)\nA lightweight Windows photo browser and editor.\n"
+							 L"Copyright (C) Zac Walker";
 		definition.fields.push_back(std::move(website));
 		definition.fields.push_back(std::move(song));
+		definition.acceptText = L"Close";
 		definition.cancelText.clear();
 		return definition;
 	}
@@ -971,7 +1022,6 @@ namespace iw
 	{
 		const bool showTreePane = !fullscreen_ && !zoomMode_ && showTree_ && !task_;
 		if (shellTree_) shellTree_->show(showTreePane);
-		if (treeSplitterFrame_) treeSplitterFrame_->show(showTreePane);
 		on_size();
 	}
 
@@ -1012,10 +1062,8 @@ namespace iw
 
 	void MainWindow::layout_center()
 	{
-		if (!centerFrame_) return;
-		const app::recti bounds = centerFrame_->client_rect();
-		if (task_) task_->set_bounds(bounds);
-		if (canvas_.frame()) canvas_.frame()->move(bounds);
+		if (task_) task_->set_bounds(centerBounds_);
+		else if (canvas_.frame()) canvas_.frame()->move(centerBounds_);
 	}
 
 	void MainWindow::set_view_mode(const ViewMode mode)
@@ -1032,11 +1080,13 @@ namespace iw
 
 	void MainWindow::set_thumbnail_size(const int size)
 	{
-		thumbnailSize_ = std::clamp(size, 64, 256);
+		const int value = std::clamp(size, 64, 256);
+		if (thumbnailSize_ == value && canvas_.thumbnail_size() == value) return;
+		thumbnailSize_ = value;
 		canvas_.set_thumbnail_size(thumbnailSize_);
 		if (chrome_)
 		{
-			chrome_->set_thumbnail_size(thumbnailSize_, [this](const int value) { set_thumbnail_size(value); });
+			chrome_->set_thumbnail_size(thumbnailSize_, [this](const int next) { set_thumbnail_size(next); });
 			chrome_->refresh();
 		}
 	}
@@ -1093,11 +1143,12 @@ namespace iw
 		thumbnailSize_ = std::clamp(read(L"ThumbnailSize", 128), 64, 256);
 		pasteImageFormat_ = static_cast<files::ImageSaveFormat>(
 			std::clamp(read(L"PasteImageFormat", 0), 0, static_cast<int>(files::ImageSaveFormat::webp)));
-		collection_.set_photos_only(read(L"PhotosOnly", 1) != 0);
+		collection_.set_photos_only(read(L"PhotosOnly", 0) != 0);
 		collection_.set_sort_field(static_cast<files::SortField>(std::clamp(read(L"SortField", 0), 0, 5)));
 		showModeBar_ = read(L"ShowModeBar", 1) != 0;
 		openDestinationAfterTransfer_ = read(L"OpenDestinationAfterTransfer", 0) != 0;
 		lastTransferFolder_ = platform::read_text_setting(section, L"LastTransferFolder");
+		lastFolder_ = platform::read_text_setting(section, L"LastFolder");
 	}
 
 	void MainWindow::save_settings() const
@@ -1122,7 +1173,8 @@ namespace iw
 		                        platform::IntegerSetting{L"OpenDestinationAfterTransfer",
 		                                                 openDestinationAfterTransfer_}};
 		platform::write_integer_settings(L"ImageWalker30", values);
-		const std::array text{platform::TextSetting{L"LastTransferFolder", lastTransferFolder_}};
+		const std::array text{platform::TextSetting{L"LastTransferFolder", lastTransferFolder_},
+		                      platform::TextSetting{L"LastFolder", lastFolder_.wstring()}};
 		platform::write_text_settings(L"ImageWalker30", text);
 	}
 }

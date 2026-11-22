@@ -47,7 +47,10 @@ public:
 	CImageView();
 	~CImageView();
 
-	DECLARE_WND_CLASS_EX(_T("IWImageView"), CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS, -1)
+	HWND Create(HWND parent, RECT bounds, LPCTSTR title, DWORD style)
+	{
+		return CreateNative("IWImageView", parent, bounds, title, style, 0, CS_DBLCLKS);
+	}
 
 	// 2.2's scale model: the three fit modes work out their own size on every
 	// layout, eNormal keeps the percentage the user asked for.
@@ -71,37 +74,7 @@ public:
 		kMaxCells = 24,
 	};
 
-	BEGIN_MSG_MAP(CImageView)
-		MSG_WM_CREATE(OnCreate)
-		MSG_WM_DESTROY(OnDestroy)
-		MSG_WM_SIZE(OnSize)
-		MSG_WM_HSCROLL(OnHScroll)
-		MSG_WM_LBUTTONDOWN(OnLButtonDown)
-		MSG_WM_LBUTTONUP(OnLButtonUp)
-		MSG_WM_MOUSEMOVE(OnMouseMove)
-		MSG_WM_CAPTURECHANGED(OnCaptureChanged)
-		MSG_WM_SETCURSOR(OnSetCursor)
-		COMMAND_ID_HANDLER_EX(ID_MODE_FITTOWINDOW, OnModeFit)
-		COMMAND_ID_HANDLER_EX(ID_MODE_ACTUALSIZE, OnModeActualSize)
-		COMMAND_ID_HANDLER_EX(ID_MODE_SCALEDOWNTOFIT, OnModeScaleDown)
-		COMMAND_ID_HANDLER_EX(ID_MODE_SCALEUPTOFIT, OnModeScaleUp)
-		COMMAND_ID_HANDLER_EX(ID_MODE_ZOOM, OnModeMenu)
-		COMMAND_ID_HANDLER_EX(ID_NAVIGATE, OnNavigate)
-		COMMAND_RANGE_HANDLER_EX(ID_MODE_25, ID_MODE_200, OnModeZoom)
-		COMMAND_HANDLER_EX(kScaleEditId, EN_KILLFOCUS, OnScaleKillFocus)
-		NOTIFY_CODE_HANDLER_EX(TTN_GETDISPINFO, OnToolTipText)
-		CHAIN_MSG_MAP(CViewBase<CImageView>)
-
-	// The strip, subclassed. The navigator has to open on the press, and a
-	// toolbar reports a click only on the release.
-	//
-	// MESSAGE_HANDLER, not MSG_WM_LBUTTONDOWN: every WTL _EX macro calls
-	// SetMsgHandled, which writes through this object's m_pCurrentMsg - and a
-	// contained window's WindowProc sets that on itself, not on its owner, so
-	// the write goes to null.
-	ALT_MSG_MAP(1)
-		MESSAGE_HANDLER(WM_LBUTTONDOWN, OnToolBarDown)
-	END_MSG_MAP()
+	bool Command(int id);
 
 	// The one entry point. An empty selection clears the pane.
 	void Show(const CPreviewSelection& selection);
@@ -112,19 +85,29 @@ public:
 	ScaleType GetScaleType() const { return m_eScaleType; }
 	bool IsFit() const { return m_eScaleType == eFit; }
 	bool IsActualSize() const { return m_eScaleType == eNormal && m_nScaleSet == 100; }
+	void SetFullscreen(bool fullscreen);
+	bool PanWithKey(WPARAM key);
+	bool EndPan();
 
 	// Reads the scale edit box and applies it. The frame calls this on Enter.
 	void ApplyScaleText();
 	bool ScaleEditHasFocus() const { return ::GetFocus() == m_editScale.m_hWnd; }
 
 	void OnDraw(CDibDC& ddc);
-	void LayoutControls(const CRect& rectClient);
+	bool CreateFooterControls(HWND footer);
+	// Returns the right edge of the controls' status-bar part.
+	int LayoutFooterControls(const CRect& rectClient);
 
 	void OnLoaded(CJobLoad& job);
 	void OnScaled(CJobScale& job);
 	void OnCellLoaded(CJobCell& job);
 
 private:
+	LRESULT WindowMessage(UINT message, WPARAM wParam, LPARAM lParam) override;
+	static LRESULT CALLBACK FooterProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
+	                                    UINT_PTR id, DWORD_PTR context);
+	static LRESULT CALLBACK ToolbarProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
+	                                     UINT_PTR id, DWORD_PTR context);
 	// One tile of the multi-selection collage. Each cell decodes at its own
 	// size rather than borrowing the items pane's thumbnail, which is capped
 	// far below the size a cell reaches.
@@ -158,7 +141,7 @@ private:
 	void OnModeMenu(UINT, int, CWindow);
 	void OnNavigate(UINT, int, CWindow);
 	void OnScaleKillFocus(UINT, int, CWindow);
-	LRESULT OnToolBarDown(UINT, WPARAM, LPARAM lParam, BOOL& bHandled);
+	bool OnToolBarDown(CPoint point);
 	LRESULT OnToolTipText(LPNMHDR pnmh);
 
 	CRect ButtonRect(int nID);
@@ -192,7 +175,7 @@ private:
 	CSize CalcScaledSize(CSize sizeImage) const;
 	void StartScaleJob(const CDib& dib, CSize size, BOOL bPromote);
 
-	CContainedWindowT<CToolBarCtrl> m_toolBar;
+	CToolBarCtrl m_toolBar;
 	CEdit m_editScale;
 	CTrackBarCtrl m_trackZoom;
 
@@ -225,6 +208,7 @@ private:
 	// collage, the file's name and size otherwise.
 	CString m_strCaption;
 	LONGLONG m_nBytes = 0;
+	unsigned m_nPixelBits = 0;
 	int m_nCaptionHeight = 22;
 	bool m_bCollage = false;
 
@@ -234,6 +218,9 @@ private:
 	ScaleType m_eScaleType = eFit;
 	int m_nScaleSet = 100; // what the user asked for
 	int m_nScale = 100;    // what is on screen, as a percentage, for display
+	ScaleType m_windowScaleType = eFit;
+	int m_windowScale = 100;
+	bool m_fullscreen = false;
 
 	// The source picture's own pixel size, which is known from the stand-in
 	// thumbnail before the decode lands.

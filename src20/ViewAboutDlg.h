@@ -29,12 +29,15 @@ public:
 		str.Format(_T("%s - released 2001\nCopyright © Zac Walker"), _T(APP_VERSION_NAME));
 		SetDlgItemText(IDC_TITLE, str);
 
-		// Describes the 2001 release, not this binary -- see docs/versions.md.
 		SetDlgItemText(IDC_ABOUT_DETAILS,
-		               _T("The first release under the ImageWalker name: thumbnail browsing, ")
-		               _T("descriptions, print preview and a slide show.\r\n\r\n")
+		               _T("Browse thumbnails, add descriptions and preview prints.\r\n\r\n")
 		               _T("Free software. No registration, no reminders, no limits. ")
-		               _T("64-bit build of ") _T(__DATE__) _T("."));
+#if defined(_WIN64)
+		               _T("64-bit build of ")
+#else
+		               _T("32-bit build of ")
+#endif
+		               _T(__DATE__) _T("."));
 
 		_link.SetHyperLink(_T("www.ImageWalker.com"));
 		_link.SetLabel(_T("www.ImageWalker.com"));

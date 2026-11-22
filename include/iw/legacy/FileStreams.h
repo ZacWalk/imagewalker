@@ -8,8 +8,15 @@
 
 #pragma once
 
+#include "core/file_publication.h"
+
+#include <array>
+#include <bcrypt.h>
+
 #include "UtilBase.h"
 #include "Imaging.h"
+
+#pragma comment(lib, "bcrypt.lib")
 
 namespace IW
 {
@@ -292,6 +299,72 @@ namespace IW
 
 
 
+	using FileDigest = std::array<BYTE, 32>;
+
+	struct EditFileStamp
+	{
+		iw::publication::Stamp file;
+		FileDigest digest;
+
+		bool operator==(const EditFileStamp &other) const
+		{
+			auto left = file, right = other.file;
+			// A read can change access time and therefore ChangeTime on NTFS.
+			// Keep checking the actual bytes, even if a writer restored mtime.
+			left.changed = right.changed = 0;
+			return left == right && digest == other.digest;
+		}
+	};
+
+	// Call while the handle denies other writers. Leave the stream position
+	// where the decoder/encoder left it.
+	inline std::optional<FileDigest> DigestOpenFile(HANDLE file, IStatus *status)
+	{
+		struct Hash
+		{
+			BCRYPT_ALG_HANDLE algorithm = nullptr;
+			BCRYPT_HASH_HANDLE handle = nullptr;
+			~Hash()
+			{
+				if (handle) BCryptDestroyHash(handle);
+				if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
+			}
+		} hash;
+		if (!BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(&hash.algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0)) ||
+			!BCRYPT_SUCCESS(BCryptCreateHash(hash.algorithm, &hash.handle, nullptr, 0, nullptr, 0, 0)))
+			return {};
+
+		std::vector<BYTE> bytes(64 * 1024);
+		LARGE_INTEGER zero{}, position{};
+		if (!SetFilePointerEx(file, zero, &position, FILE_CURRENT) ||
+			!SetFilePointerEx(file, zero, nullptr, FILE_BEGIN))
+			return {};
+
+		// QueryCancel may pump messages; restore the position even if it throws.
+		struct RestorePosition
+		{
+			HANDLE file;
+			LARGE_INTEGER position;
+			~RestorePosition() { SetFilePointerEx(file, position, nullptr, FILE_BEGIN); }
+		} restore{file, position};
+		for (;;)
+		{
+			if (status && status->QueryCancel())
+				return {};
+			DWORD read = 0;
+			if (!ReadFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr))
+				return {};
+			if (!read)
+				break;
+			if (!BCRYPT_SUCCESS(BCryptHashData(hash.handle, bytes.data(), read, 0)))
+				return {};
+		}
+		FileDigest digest;
+		if (!BCRYPT_SUCCESS(BCryptFinishHash(hash.handle, digest.data(), static_cast<ULONG>(digest.size()), 0)))
+			return {};
+		return digest;
+	}
+
 	///////////////////////////////////////////////////////////////
 	//
 	// Class to wrapper file API
@@ -332,6 +405,16 @@ namespace IW
 		bool OpenForRead(const CString &strFileName)
 		{
 			return Open(strFileName, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING);
+		}
+
+		std::optional<iw::publication::Stamp> FileStamp() const { return iw::publication::stamp(_hFile); }
+
+		std::optional<EditFileStamp> CaptureEditStamp(IStatus *status) const
+		{
+			const auto info = FileStamp();
+			if (!info) return {};
+			const auto digest = DigestOpenFile(_hFile, status);
+			return digest ? std::optional<EditFileStamp>(EditFileStamp{*info, *digest}) : std::nullopt;
 		}
 
 	protected:
@@ -575,20 +658,35 @@ namespace IW
 	inline CFile& CFile::operator>>(LONG& l)
 	{ Read(&l, sizeof(l)); return *this; }
 
+	class CFileWriteStatus : public CNullStatus
+	{
+	public:
+		CString error;
+		void SetError(const CString& value) override { error = value; }
+	};
+
 	// Everything written lands in a temporary file beside the destination, and is
 	// only put in place by an explicit Close. A failed write, a loader that throws
 	// or an early return leaves the original file exactly as it was.
 	class CFileTemp : public IW::CFile
 	{
 	protected:
-		IW::CFilePath _pathTempFileName;
-		IW::CFilePath _pathRealFileName;
+		std::filesystem::path _pathTempFileName;
+		std::filesystem::path _pathRealFileName;
+		std::optional<iw::publication::Stamp> _expected;
+		std::optional<FileDigest> _expectedDigest;
+		std::optional<EditFileStamp> _committed;
+		bool _captureStamp = false;
+		bool _ownsTemporary = false;
 		DWORD _writeError = NO_ERROR;
 
 	public:
 		CFileTemp()
 		{
 		}
+
+		CFileTemp(const CFileTemp&) = delete;
+		CFileTemp& operator=(const CFileTemp&) = delete;
 
 		~CFileTemp()
 		{
@@ -633,77 +731,130 @@ namespace IW
 				Abort();
 				return false;
 			}
-			CFile::Close(pStatus);
-
-			const DWORD dwError = Commit();
+			const auto digest = _captureStamp ? DigestOpenFile(_hFile, pStatus) : std::nullopt;
+			if (pStatus && pStatus->QueryCancel())
+			{
+				Abort();
+				return false;
+			}
+			CString recovery;
+			const DWORD dwError = Commit(recovery);
 
 			if (dwError != NO_ERROR)
 			{
+				_writeError = dwError;
 				if (pStatus != nullptr)
-					pStatus->SetError(FormatOsError(dwError));
+					pStatus->SetError(recovery.IsEmpty() ? FormatOsError(dwError) : recovery);
 
 				Abort();
 				return false;
 			}
 
-			return true;
+			_ownsTemporary = false;
+			if (digest)
+			{
+				if (const auto info = FileStamp())
+					_committed = EditFileStamp{*info, *digest};
+			}
+			return CFile::Close(pStatus);
 		}
 
-		bool OpenForWrite(const CString &strFileName)
+		std::optional<EditFileStamp> CommittedStamp() const { return _committed; }
+
+		bool OpenForWrite(const CString &strFileName, bool captureStamp = false)
 		{
-			return Open(strFileName, GENERIC_WRITE, 0, CREATE_ALWAYS);
+			return Open(strFileName, {}, {}, captureStamp);
+		}
+
+		bool OpenForReplace(const CString& strFileName, const iw::publication::Stamp& expected)
+		{
+			return Open(strFileName, expected, {}, false);
+		}
+
+		bool OpenForReplace(const CString& strFileName, const EditFileStamp& expected)
+		{
+			return Open(strFileName, expected.file, expected.digest, true);
+		}
+
+		static CString RotatedCopyPath(const CString& name)
+		{
+			const std::filesystem::path source(static_cast<LPCTSTR>(name));
+			if (source.filename().empty()) return {};
+			const auto stem = source.stem().wstring() + L"-rotated";
+			const auto extension = source.extension().wstring();
+			for (int index = 1; index <= 1000; ++index)
+			{
+				const auto suffix = index == 1 ? L"" : L" (" + std::to_wstring(index) + L")";
+				const auto candidate = source.parent_path() / (stem + suffix + extension);
+				if (GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES) continue;
+				if (GetLastError() != ERROR_FILE_NOT_FOUND) return {};
+				return CString(candidate.c_str());
+			}
+			return {};
 		}
 
 		bool Abort()
 		{
 			if (_hFile != INVALID_HANDLE_VALUE)
 			{
+				if (_ownsTemporary) iw::publication::remove(_hFile);
 				// close but ignore errors
 				::CloseHandle(_hFile);
 				_hFile = INVALID_HANDLE_VALUE;
 				m_bCloseOnDelete = FALSE;
 			}
 
-			if (!_pathTempFileName.ToString().IsEmpty())
-			{
-				::DeleteFile(_pathTempFileName);
-				_pathTempFileName = CString();
-			}
-
+			_ownsTemporary = false;
 			return true;
 		}
 
 
 	private:
 
-		// ReplaceFile keeps the destination's security descriptor, attributes and
-		// alternate streams, and leaves the original alone if any step of it fails.
-		DWORD Commit()
+		DWORD Commit(CString& recovery)
 		{
-			if (::ReplaceFile(_pathRealFileName, _pathTempFileName, nullptr,
-			                  REPLACEFILE_IGNORE_MERGE_ERRORS, nullptr, nullptr))
+			using namespace iw::publication;
+			AvailableName destination(_pathRealFileName);
+			if (!_expected) return destination.move(_hFile);
+
+			// Pin the original against edits and rename it by handle. A late arrival still wins the target name.
+			const auto originalPath = extended(_pathRealFileName);
+			const File original(CreateFileW(originalPath.c_str(), GENERIC_READ | DELETE, FILE_SHARE_READ,
+			                                nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+			if (!original) return GetLastError();
+			BY_HANDLE_FILE_INFORMATION info{};
+			if (!::GetFileInformationByHandle(original.get(), &info)) return GetLastError();
+			if (info.dwFileAttributes & FILE_ATTRIBUTE_READONLY) return ERROR_ACCESS_DENIED;
+			const auto observed = stamp(original.get());
+			bool matches = observed == _expected;
+			if (observed && _expectedDigest)
 			{
-				_pathTempFileName = CString();
-				return NO_ERROR;
+				const auto observedDigest = DigestOpenFile(original.get(), nullptr);
+				matches = observedDigest &&
+					EditFileStamp{*observed, *observedDigest} == EditFileStamp{*_expected, *_expectedDigest};
 			}
-
-			const DWORD dwError = ::GetLastError();
-
-			// The first time a name is written there is nothing to replace, and
-			// nothing to preserve either, so a rename is the whole job.
-			if (dwError == ERROR_FILE_NOT_FOUND || dwError == ERROR_PATH_NOT_FOUND)
+			if (!matches)
 			{
-				if (::MoveFileEx(_pathTempFileName, _pathRealFileName,
-				                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED))
-				{
-					_pathTempFileName = CString();
-					return NO_ERROR;
-				}
-
-				return ::GetLastError();
+				recovery = _T("That file changed after it was opened or approved. Save a new copy instead.");
+				return ERROR_FILE_EXISTS;
 			}
+			const auto stem = _pathRealFileName.stem().wstring() + L"-original";
+			const auto extension = _pathRealFileName.extension().wstring();
+			for (int index = 1; index <= 1000; ++index)
+			{
+				const auto suffix = index == 1 ? L"" : L" (" + std::to_wstring(index) + L")";
+				const auto backup = _pathRealFileName.parent_path() / (stem + suffix + extension);
+				AvailableName backupName(backup);
+				const DWORD staged = backupName.move(original.get());
+				if (staged == ERROR_FILE_EXISTS || staged == ERROR_ALREADY_EXISTS) continue;
+				if (staged != ERROR_SUCCESS) return staged;
 
-			return dwError;
+				const DWORD published = destination.move(_hFile);
+				if (published != ERROR_SUCCESS && destination.move(original.get()) != ERROR_SUCCESS)
+					recovery.Format(_T("Nothing was overwritten. The original is retained at:\n%s"), backup.c_str());
+				return published;
+			}
+			return ERROR_FILE_EXISTS;
 		}
 
 		static CString FormatOsError(DWORD dwError)
@@ -731,42 +882,26 @@ namespace IW
 			return str;
 		}
 
-		bool Open(const CString &strFileName, DWORD dwAccess, DWORD dwShareMode, DWORD dwCreateFlag)
+		bool Open(const CString& strFileName, std::optional<iw::publication::Stamp> expected,
+		          std::optional<FileDigest> expectedDigest, bool captureStamp)
 		{
 			Abort();
 			_writeError = NO_ERROR;
-			_pathRealFileName = strFileName;
-
-			// The temp must share a volume with the destination or ReplaceFile
-			// cannot rename it into place.
-			if (!MakeTempPathBeside(strFileName))
-				_pathTempFileName.GetTempFilePath();
-
-			if (CFile::Open(_pathTempFileName, dwAccess, dwShareMode, dwCreateFlag))
-				return true;
-
-			::DeleteFile(_pathTempFileName);
-			_pathTempFileName = CString();
-			return false;
-		}
-
-		bool MakeTempPathBeside(const CString &strFileName)
-		{
-			IW::CFilePath pathFolder(strFileName);
-			pathFolder.RemoveFileName();
-
-			if (pathFolder.ToString().IsEmpty())
+			_committed.reset();
+			_expected = std::move(expected);
+			_expectedDigest = std::move(expectedDigest);
+			_captureStamp = captureStamp;
+			std::error_code error;
+			_pathRealFileName = std::filesystem::absolute(static_cast<LPCTSTR>(strFileName), error).lexically_normal();
+			if (error || _pathRealFileName.filename().empty() ||
+			    _pathRealFileName.filename().wstring().find(L':') != std::wstring::npos)
 				return false;
-
-			TCHAR szTempFileName[MAX_PATH] = { 0 };
-
-			// A zero unique number makes the call create the file, so the name
-			// cannot be handed out twice.
-			if (::GetTempFileName(pathFolder, _T("IW"), 0, szTempFileName) == 0)
-				return false;
-
-			_pathTempFileName = szTempFileName;
-			return true;
+			_pathTempFileName = iw::publication::temporary_sibling(_pathRealFileName, L".iw-output-");
+			if (_pathTempFileName.empty()) return false;
+			_ownsTemporary = CFile::Open(iw::publication::extended(_pathTempFileName).c_str(),
+			                            GENERIC_WRITE | FILE_READ_ATTRIBUTES | DELETE | (captureStamp ? GENERIC_READ : 0),
+			                            FILE_SHARE_READ, CREATE_NEW);
+			return _ownsTemporary;
 		}
 	};
 }

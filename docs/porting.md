@@ -1,23 +1,28 @@
 # Modern Windows build constraints
 
-Follow these rules when building the WTL releases, ImageWalker 1.0 to 2.3, on
-modern 64-bit Windows.
+Follow these rules when building ImageWalker 1.0 and the WTL releases (2.0,
+2.2, and 2.3). See [build.md](build.md#older-windows) for OS support.
 
+- ImageWalker 1.0 uses the Windows SDK, the C++ standard library and libfiles.
+  Keep ATL, WTL and libdesktop out of its headers, resources and link graph.
+  Use the native menu, message loop and controls, not a second GUI framework.
 - MSVC compiles the WTL trees as C++20 with `/permissive`.
-- ImageWalker 1.0 is MBCS; ImageWalker 2.0, 2.2 and 2.3 are Unicode. Convert
-  1.0's paths explicitly at its imaging adapter, and keep the modern
+- ImageWalker 1.0 uses the UTF-8 process code page where available;
+  ImageWalker 2.0, 2.2 and 2.3 are Unicode. Convert 1.0's paths explicitly at
+  shell, file and clipboard boundaries, and keep the modern
   `include/iw/imaging` API free of `TCHAR`, ATL and WTL types and application
   precompiled headers; historical adapters stay under `include/iw/legacy`.
-- STL headers precede ATL, WTL and application headers in each precompiled
-  header, and `<wininet.h>` precedes `<shlobj.h>`.
+- For the WTL targets, STL headers precede ATL, WTL and application headers
+  in each precompiled header, and `<wininet.h>` precedes `<shlobj.h>`.
 - CMake source lists preserve extension case and match one original translation
   unit per implementation.
 - Do not introduce application COM servers, ActiveX controls, shell extensions,
   licensed TWAIN code, x86 assembly or obsolete imaging libraries.
 - Use operating-system COM clients for shell folders, data objects, drop
   targets and shell links wherever Windows supplies the service.
-- Use the shared ATL-based clipboard format enumerator, which keeps independent
-  target-device storage and the standard Skip and Clone behaviour.
+- In the 2.x apps use the shared ATL-based clipboard format enumerator, which
+  keeps independent target-device storage and the standard Skip and Clone
+  behaviour. ImageWalker 1.0 puts Unicode file paths in `CF_HDROP`.
 - Resource scripts embed the manifest and keep the application icon as the
   lowest-numbered icon group.
 - WTL command bars use classic menu rendering. Callbacks run with a valid

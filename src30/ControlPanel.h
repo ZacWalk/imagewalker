@@ -26,7 +26,8 @@ namespace iw::ui
 		text,
 		button,
 		link,
-		separator
+		separator,
+		custom
 	};
 
 	struct Control
@@ -34,21 +35,28 @@ namespace iw::ui
 		int id{};
 		ControlKind kind{ControlKind::label};
 		std::wstring label;
-		std::wstring text;    // folder path, chosen choice, or edited text
-		std::wstring suffix;  // slider value readout unit
+		std::wstring text;   // folder path, chosen choice, or edited text
+		std::wstring suffix; // slider value readout unit
+		std::wstring badge;
 		bool showValue{true}; // a slider whose label carries its own readout hides the raw value
+		bool visible{true};
 		bool checked{};
 		int value{};
 		int minimum{};
 		int maximum{100};
 		int group{}; // radio exclusivity, and nothing else
 		int indent{};
+		int buttonRow{};
 		bool enabled{true};
 		std::vector<std::wstring> choices;
 		std::function<void()> changed;
+		std::function<std::wstring(int)> readout;
+		std::function<void(const CanvasRenderer&, app::recti)> draw;
+		std::function<bool(platform::MouseMessage, app::recti, app::pointi)> mouse;
 
-		app::recti bounds;                 // whole row, filled by layout
-		app::recti hit;                    // the part that responds to the mouse
+		app::recti bounds; // whole row, filled by layout
+		app::recti hit;    // the part that responds to the mouse
+		app::recti valueHit;
 		std::vector<std::wstring> wrapped; // label lines, filled by layout
 	};
 
@@ -58,6 +66,7 @@ namespace iw::ui
 	{
 	public:
 		void set_dpi(const unsigned int dpi) { dpi_ = dpi ? dpi : 96; }
+		void set_compact(const bool value) { compact_ = value; }
 		unsigned int dpi() const { return dpi_; }
 		void clear()
 		{
@@ -82,6 +91,8 @@ namespace iw::ui
 		bool mouse_move(app::pointi point);
 		bool mouse_down(app::pointi point);
 		bool mouse_up(app::pointi point);
+		bool double_click(app::pointi point);
+		bool cancel_drag();
 		void mouse_leave();
 		bool dragging() const { return dragging_; }
 		int hot_id() const { return hotId_; }
@@ -118,5 +129,7 @@ namespace iw::ui
 		int focusedId_{};
 		bool dragging_{};
 		bool interactive_{true};
+		bool compact_{};
+		int dragValue_{};
 	};
 }

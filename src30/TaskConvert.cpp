@@ -48,7 +48,6 @@ namespace iw
 			{
 			case 1: return tasks::CollisionPolicy::skip;
 			case 2: return tasks::CollisionPolicy::autoRename;
-			case 3: return tasks::CollisionPolicy::replace;
 			default: return tasks::CollisionPolicy::block;
 			}
 		}
@@ -235,8 +234,8 @@ namespace iw
 		collision.id = idCollision;
 		collision.kind = ui::ControlKind::choice;
 		collision.label = L"Existing files";
-		collision.choices = {L"Block run", L"Skip", L"Auto-rename", L"Replace"};
-		collision.value = 0;
+		collision.choices = {L"Block run", L"Skip", L"Auto-rename"};
+		collision.value = 2;
 		collision.changed = changed;
 		panel_.add(std::move(collision));
 
@@ -512,7 +511,9 @@ namespace iw::convert
 			plan.rows.push_back(std::move(row));
 			if (progress) progress(plan.rows.size(), sources.size());
 		}
-		tasks::resolve_collisions(plan, settings.policy, [](const std::filesystem::path& path)
+		const auto policy = settings.policy == tasks::CollisionPolicy::replace ? tasks::CollisionPolicy::block
+		                                                                       : settings.policy;
+		tasks::resolve_collisions(plan, policy, [](const std::filesystem::path& path)
 		{
 			std::error_code ec;
 			const auto status = std::filesystem::symlink_status(files::native_path(path), ec);
@@ -526,7 +527,7 @@ namespace iw::convert
 			auto reviewed = std::make_shared<Reviewed>(*std::static_pointer_cast<const Reviewed>(row.context));
 			reviewed->destination = files::snapshot_file(row.destination);
 			row.context = reviewed;
-			if (!reviewed->destination || reviewed->destination->exists != row.replace)
+			if (!reviewed->destination || reviewed->destination->exists)
 			{
 				row.state = tasks::RowState::blocked;
 				row.change =
@@ -539,17 +540,6 @@ namespace iw::convert
 				row.state = tasks::RowState::blocked;
 				row.change = L"An original photo cannot be replaced. Choose another folder or Auto-rename.";
 				plan.blockReason = row.change;
-			}
-			else if (row.replace)
-			{
-				const auto destination = files::snapshot_file(row.destination);
-				if (!destination || !destination->exists || destination->directory || destination->readOnly ||
-				    destination->reparse)
-				{
-					row.state = tasks::RowState::blocked;
-					row.change = L"The replacement destination is not a writable regular file.";
-					plan.blockReason = row.change;
-				}
 			}
 		}
 		return plan;
@@ -581,10 +571,9 @@ namespace iw::convert
 				row.detail = L"The source photo changed after Review. Analyze again.";
 				return false;
 			}
-			if (row.replace && (!reviewed || !reviewed->destination ||
-			                    !files::matches_snapshot(row.destination, *reviewed->destination)))
+			if (row.replace)
 			{
-				row.detail = L"The approved replacement changed after Review. Analyze again.";
+				row.detail = L"Convert writes new files only. Analyze again and choose unused names.";
 				return false;
 			}
 			if (reviewed && !paths::equal(resolved_path(row.destination.parent_path()), reviewed->parent))
@@ -602,9 +591,15 @@ namespace iw::convert
 		};
 		options.act = [settings, originals](tasks::TaskRow& row)
 		{
+			if (row.replace)
+			{
+				row.state = tasks::RowState::failed;
+				row.detail = L"Convert writes new files only.";
+				return;
+			}
 			std::error_code error;
 			// A destination reviewed as free is checked again: an unreviewed file is never replaced.
-			if (!row.replace && std::filesystem::exists(files::native_path(row.destination), error))
+			if (std::filesystem::exists(files::native_path(row.destination), error))
 			{
 				row.state = tasks::RowState::skipped;
 				row.change = L"Skipped - the destination appeared after review";
@@ -639,22 +634,18 @@ namespace iw::convert
 			// metadata such as GPS is deliberately not copied into converted output.
 			if (!files::save_image(image, row.destination, settings.format,
 			                       {settings.quality, settings.lossless, row.source, files::CarryMetadata::profile},
-			                       row.replace, [&]
+			                       false, [&]
 			{
 				if (is_original(row.destination, originals) ||
 				    (reviewed && (!unchanged_source(row.source, *reviewed) ||
 				                  !paths::equal(resolved_path(row.destination.parent_path()), reviewed->parent))))
 					throw std::runtime_error(
 						"The source or destination changed before the output was committed. Analyze again.");
-				if (row.replace && (!reviewed || !reviewed->destination ||
-				                    !files::matches_snapshot(row.destination, *reviewed->destination)))
-					throw std::runtime_error(
-						"The approved replacement changed before the output was committed. Analyze again.");
 				return true;
 			}))
 			{
 				error.clear();
-				if (!row.replace && std::filesystem::exists(files::native_path(row.destination), error))
+				if (std::filesystem::exists(files::native_path(row.destination), error))
 				{
 					row.state = tasks::RowState::skipped;
 					row.change = L"Skipped - the destination appeared after review";

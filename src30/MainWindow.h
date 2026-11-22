@@ -33,11 +33,14 @@ namespace iw
 		// An injected history must outlive the window; an absent service disables file Undo.
 		explicit MainWindow(undo::History* history = nullptr) : undoHistory_(history) {}
 		bool create(int showCommand, const std::filesystem::path& initialPath);
+		bool escape_active_view();
+		bool view_shortcut(char32_t key, bool control, bool shift, bool alt);
 		bool can_exit();
 		const platform::WindowFramePtr& frame() const { return frame_; }
 
 	private:
 		friend class tests::MainWindowAccess;
+		friend class AgentSession;
 
 		enum class ViewMode
 		{
@@ -95,10 +98,14 @@ namespace iw
 		void update_status_surface();
 		void open_file_picker();
 		void open_folder_picker();
-		bool open_folder(const std::filesystem::path& path, bool addHistory = true, bool synchronizeTree = true);
+		void open_startup_folder(const std::filesystem::path& initialPath);
+		bool open_pictures_folder();
+		bool open_folder(const std::filesystem::path& path, bool addHistory = true, bool synchronizeTree = true,
+		                 const std::filesystem::path& initialItem = {});
 		void report_scan_progress(std::uint64_t generation, size_t entries, size_t images);
 		void finish_folder_scan(std::uint64_t generation, const std::filesystem::path& folder,
-		                        std::vector<files::FolderItem> items, std::error_code error);
+		                        std::vector<files::FolderItem> items, std::error_code error,
+		                        const std::filesystem::path& initialItem = {});
 		void open_image(const std::filesystem::path& path);
 		void activate_item(const std::filesystem::path& path);
 		void apply_collection_view();
@@ -148,7 +155,7 @@ namespace iw
 		void open_edit_task();
 		bool has_photo_selection() const;
 		std::vector<std::filesystem::path> photo_selection() const;
-		std::filesystem::path editable_photo() const;
+		std::filesystem::path editable_item() const;
 
 		// MainWindowFiles.cpp
 		void copy_or_move_to_folder(bool move);
@@ -157,10 +164,10 @@ namespace iw
 
 		platform::WindowFramePtr frame_;
 		platform::CommandSurfacePtr chrome_;
-		platform::WindowFramePtr contentFrame_;
 		platform::ShellTreePtr shellTree_;
-		platform::WindowFramePtr treeSplitterFrame_;
-		platform::WindowFramePtr centerFrame_;
+		app::recti treeSplitterBounds_;
+		app::recti centerBounds_;
+		app::recti contentBounds_;
 		ModeBarPtr modeBar_;
 		TaskViewPtr task_;
 		bool closeApplicationAfterTask_{};
@@ -175,7 +182,9 @@ namespace iw
 		// Read from the scan queue to cancel a superseded scan, so it stays atomic.
 		std::atomic_uint64_t folderScanGeneration_{};
 		std::uint64_t dimensionProbeGeneration_{};
+		std::uint64_t rememberedScan_{};
 		std::filesystem::path folder_;
+		std::filesystem::path lastFolder_;
 
 		std::vector<platform::Breadcrumb> breadcrumbParts_;
 		std::wstring statusText_;

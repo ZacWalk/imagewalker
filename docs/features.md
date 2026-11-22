@@ -2,13 +2,14 @@
 
 What each release offers. The 1.0 and 2.x entries describe each release as
 first published, and each 2.x entry lists what that release added to its
-predecessor; [known-issues.md](known-issues.md) lists what their x64 builds
+predecessor; [known-issues.md](known-issues.md) lists what their rebuilt editions
 lack.
 
 ## ImageWalker 1.0
 
 - Thumbnail and detail browsing beside an image preview.
 - Fit-to-window and fixed zoom, panning and multi-image collages.
+- Read-only fullscreen photo viewing with native keyboard navigation.
 - Clipboard copy, and address, tool and status bars shown or hidden
   individually.
 - BMP, GIF, JPEG, PCX, PNG and TIFF viewing.
@@ -37,9 +38,11 @@ printing or search.
 
 ## ImageWalker 3.0
 
-Media browsing, photo editing and reviewed file operations:
+Media browsing, photo and media editing, and reviewed file operations:
 
-- Video and audio playback with play/pause, stop, seek and volume controls.
+- Light and dark appearance following the Windows app theme, with support for Windows contrast themes.
+- About and Options open in owned popup windows, separate from the browsing and task panes.
+- Video and audio playback in Browse, with a timeline and volume control beside the item list.
 - Video poster thumbnails, media properties and sorting by duration.
 - Static WebP reading and writing, including lossless output and transparency.
 - RAW viewing when the camera's Windows codec is installed.
@@ -49,7 +52,8 @@ Media browsing, photo editing and reviewed file operations:
 - External tools that accept multiple selected files.
 - Copy and Move with sidecar companions and collision previews.
 - Photo Edit with perspective correction, interactive crop handles, automatic
-  document detection and draft Undo/Redo.
+  document detection, live colour histogram, before/after comparison and draft Undo/Redo.
+- Media Edit with packet-copy trimming, sound removal, and rotation for supported video containers.
 - Upright photo viewing and editing using the camera's orientation, with saves
   that keep the photo's metadata in every format but BMP and WebP.
 - Session Undo for file tasks, with conflict checks and recovery copies.

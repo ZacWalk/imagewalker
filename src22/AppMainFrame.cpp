@@ -11,6 +11,7 @@
 #include "stdafx.h"
 
 #include "iw/logfile.h"
+#include "window_screenshot.h"
 
 #pragma comment(lib, "Wininet")
 #pragma comment(lib, "HtmlHelp")
@@ -78,16 +79,18 @@ Search::Spec Search::Any;
 
 // The window's whole life, so main.cpp never needs the complete frame type and
 // therefore never needs the fifty headers above.
-int RunMainWindow(LPTSTR lpCmdLine)
+int RunMainWindow(LPTSTR lpCmdLine, const iw::screenshot::Request& screenshot)
 {
-	g_pMainWin = new CMainFrame(lpCmdLine);
+	std::wstring captureInput = screenshot.input.native();
+	g_pMainWin = new CMainFrame(screenshot.enabled ? captureInput.data() : lpCmdLine);
+	iw::screenshot::Timer capture(screenshot);
 
 	CMessageLoop theLoop;
 	_Module.AddMessageLoop(&theLoop);
 
 	try
 	{
-		CMainFrame::CreateMainWindow();
+		CMainFrame::CreateMainWindow(screenshot.enabled ? SW_SHOWNOACTIVATE : SW_SHOWDEFAULT);
 	}
 	catch (...)
 	{
@@ -97,7 +100,12 @@ int RunMainWindow(LPTSTR lpCmdLine)
 		throw;
 	}
 
-	const int nRet = theLoop.Run();
+	if (!capture.start(*g_pMainWin))
+	{
+		iw::screenshot::report(L"could not start the capture timer.");
+		g_pMainWin->DestroyWindow();
+	}
+	const int nRet = capture.result(theLoop.Run());
 
 	_Module.RemoveMessageLoop();
 
@@ -233,7 +241,7 @@ bool CMainFrame::InvokeCommand(DWORD id)
 		return true;
 
 	case ID_HELP_FINDER:
-		App.InvokeHelp(IW::GetMainWindow(), 0);
+		App.InvokeHelp(IW::GetMainWindow(), HELP_MAINFRAME);
 		return true;
 
 	case ID_HELP_IMAGEWALKERHOMEPAGE:
@@ -958,8 +966,19 @@ static bool IsEditControlMessage(const MSG* pMsg)
 
 BOOL CMainFrame::PreTranslateMessage(MSG* pMsg)
 {
+	if (IW::CAddressBar<CMainFrame>::PreTranslateMessage(pMsg))
+		return TRUE;
+
 	if (IsPreTranslateMessageMessage(pMsg->message))
 	{
+		const bool control = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
+		const bool shift = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+		if (!m_CmdBar.m_bMenuActive && pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_F4 && control && !shift)
+		{
+			if (!OnEscape()) PostMessage(WM_CLOSE);
+			return TRUE;
+		}
+
 		if (IsEditControlMessage(pMsg))
 			return FALSE;
 
@@ -970,10 +989,25 @@ BOOL CMainFrame::PreTranslateMessage(MSG* pMsg)
 
 			if (_pView->PreTranslateMessage(pMsg))
 				return TRUE;
-		}
 
-		if (IW::CAddressBar<CMainFrame>::PreTranslateMessage(pMsg))
-			return TRUE;
+			if (!control && !shift && pMsg->message == WM_SYSKEYDOWN && pMsg->wParam == VK_RETURN &&
+				_mode == Mode::Edit)
+			{
+				SendMessage(WM_COMMAND, ID_EDIT_SAVE);
+				return TRUE;
+			}
+			if (!control && !shift && pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN && IsNormalView())
+			{
+				if (IsFullScreen()) { SendMessage(WM_COMMAND, ID_IMAGE_NEXT); return TRUE; }
+				if (pMsg->hwnd == _viewNormal._image) { _viewNormal._folder.OpenFocusItem(true, true); return TRUE; }
+			}
+			if (!control && !shift && pMsg->message == WM_KEYDOWN &&
+				pMsg->hwnd == _viewNormal._image && IsNormalView())
+			{
+				if (pMsg->wParam == 'Z') { SendMessage(WM_COMMAND, ID_SCALE_TOGGLE); return TRUE; }
+				if (pMsg->wParam == 'E') { SendMessage(WM_COMMAND, ID_VIEW_EDIT); return TRUE; }
+			}
+		}
 
 		if (pMsg->message == WM_KEYDOWN)
 		{
@@ -1311,6 +1345,9 @@ LRESULT CMainFrame::OnLoadComplete(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL
 
 LRESULT CMainFrame::OnThumbnailing(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& bHandled)
 {
+	if (_state.Folder.IsSearchMode)
+		return 0;
+
 	_logo.SetWorking(true);
 	_viewNormal.OnThumbsLoaded();
 	UpdateSelectStatus();
@@ -1319,6 +1356,9 @@ LRESULT CMainFrame::OnThumbnailing(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lP
 
 LRESULT CMainFrame::OnThumbnailingComplete(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& bHandled)
 {
+	if (_state.Folder.IsSearchMode)
+		return 0;
+
 	_logo.SetWorking(false);
 	_viewNormal.OnThumbsLoaded();
 	UpdateSelectStatus();
@@ -1326,16 +1366,22 @@ LRESULT CMainFrame::OnThumbnailingComplete(UINT /*uMsg*/, WPARAM /*wParam*/, LPA
 }
 
 
-LRESULT CMainFrame::OnSearching(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& bHandled)
+LRESULT CMainFrame::OnSearching(UINT /*uMsg*/, WPARAM generation, LPARAM /*lParam*/, BOOL& bHandled)
 {
+	if (!_decodeThumbs1.IsCurrentSearch(generation))
+		return 0;
+
 	_logo.SetWorking(true);
 	_viewNormal.OnThumbsLoaded();
 	UpdateSelectStatus();
 	return 0;
 }
 
-LRESULT CMainFrame::OnSearchingComplete(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM /*lParam*/, BOOL& bHandled)
+LRESULT CMainFrame::OnSearchingComplete(UINT /*uMsg*/, WPARAM generation, LPARAM /*lParam*/, BOOL& bHandled)
 {
+	if (!_decodeThumbs1.IsCurrentSearch(generation))
+		return 0;
+
 	_viewNormal.OnThumbsLoaded();
 	_logo.SetWorking(false);
 	UpdateSelectStatus();
@@ -1344,11 +1390,16 @@ LRESULT CMainFrame::OnSearchingComplete(UINT /*uMsg*/, WPARAM /*wParam*/, LPARAM
 	return 0;
 }
 
-LRESULT CMainFrame::OnSearchingFolder(UINT /*uMsg*/, WPARAM wParam, LPARAM /*lParam*/, BOOL& bHandled)
+LRESULT CMainFrame::OnSearchingFolder(UINT /*uMsg*/, WPARAM wParam, LPARAM lParam, BOOL& bHandled)
 {
-	_viewNormal.OnThumbsLoaded();
-
 	auto szFolder = (LPTSTR)wParam;
+	if (!_decodeThumbs1.IsCurrentSearch(static_cast<UINT_PTR>(lParam)))
+	{
+		IW::Free(szFolder);
+		return 0;
+	}
+
+	_viewNormal.OnThumbsLoaded();
 
 	if (!IW::IsNullOrEmpty(szFolder))
 	{
@@ -1661,20 +1712,20 @@ void CMainFrame::SetFocusItem(int nFocusItem, bool bSignalEvent) { _state.Folder
 // Not CWindow::PostMessage: with a NULL m_hWnd that degrades to
 // PostThreadMessage on the worker's own queue and reports success, so the
 // notification is never seen.
-void CMainFrame::PostFromWorker(UINT msg)
+void CMainFrame::PostFromWorker(UINT msg, WPARAM wParam)
 {
 	if (m_hWnd != nullptr && ::IsWindow(m_hWnd))
-		::PostMessage(m_hWnd, msg, 0, 0);
+		::PostMessage(m_hWnd, msg, wParam, 0);
 }
 
-void CMainFrame::SignalSearching()
+void CMainFrame::SignalSearching(UINT_PTR generation)
 {
-	PostFromWorker(WM_SEARCHING);
+	PostFromWorker(WM_SEARCHING, generation);
 };
 
-void CMainFrame::SignalSearchingComplete()
+void CMainFrame::SignalSearchingComplete(UINT_PTR generation)
 {
-	PostFromWorker(WM_SEARCHING_COMPLETE);
+	PostFromWorker(WM_SEARCHING_COMPLETE, generation);
 };
 
 void CMainFrame::SignalThumbnailing()
@@ -1687,12 +1738,12 @@ void CMainFrame::SignalThumbnailingComplete()
 	PostFromWorker(WM_THUMBNAILING_COMPLETE);
 };
 
-void CMainFrame::SignalSearchingFolder(const CString& strPath)
+void CMainFrame::SignalSearchingFolder(const CString& strPath, UINT_PTR generation)
 {
 	LPTSTR szPath = IW::StrDup(strPath);
 
 	if (m_hWnd == nullptr || !::IsWindow(m_hWnd) ||
-		!::PostMessage(m_hWnd, WM_SEARCHING_FOLDER, (WPARAM)szPath, 0))
+		!::PostMessage(m_hWnd, WM_SEARCHING_FOLDER, (WPARAM)szPath, static_cast<LPARAM>(generation)))
 	{
 		IW::Free(szPath);
 	}
@@ -1729,7 +1780,15 @@ void CMainFrame::UpdateStatusText() { _state.Image.UpdateStatusText(); };
 void CMainFrame::StartSearchThread(Search::Type type, const Search::Spec& ss) { _decodeThumbs1.StartSearch(type, ss); };
 void CMainFrame::StartSearching() { _viewNormal.OnStartSearching(); };
 void CMainFrame::ResetThumbThread() { _decodeThumbs1.ResetThread(); };
-void CMainFrame::StopLoadingThumbs() { _decodeThumbs1.Abort(); };
+void CMainFrame::StopLoadingThumbs()
+{
+	if (_decodeThumbs1.Abort())
+	{
+		_logo.SetWorking(false);
+		UpdateSelectStatus();
+		SetStatusText(App.LoadString(IDS_READY));
+	}
+}
 void CMainFrame::ResetWaitForFolderToChangeThread() { _waitForFolderToChange.ResetThread(); };
 void CMainFrame::ShowImage(CImageLoad* pInfo)
 {

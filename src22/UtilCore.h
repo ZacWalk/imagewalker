@@ -12,6 +12,7 @@
 #include "iw/legacy/Imaging.h"
 #include "iw/legacy/UtilFileTime.h"
 #include "iw/legacy/CoreSupport.h"
+#include "iw/legacy/ShellFileOperations.h"
 
 // Pre defs
 class _com_error;
@@ -411,72 +412,6 @@ namespace IW
 		CAutoLockRawCS& operator=( const CAutoLockRawCS& ) throw();
 	};
 
-
-	class FileOperation
-	{
-	private:
-		SHFILEOPSTRUCT _struct;
-		IW::AutoFreePtr<TCHAR> szFiles;
-		IW::AutoFreePtr<TCHAR> szTo;
-
-		// SHFILEOPSTRUCT requires a double-null-terminated list
-		static LPTSTR AllocList(LPCTSTR szIn)
-		{
-			const size_t nLen = _tcslen(szIn);
-			LPTSTR sz = static_cast<LPTSTR>(IW::Alloc((nLen + 2) * sizeof(TCHAR)));
-			_tcscpy_s(sz, nLen + 1, szIn);
-			sz[nLen] = 0;
-			sz[nLen + 1] = 0;
-			return sz;
-		}
-
-	public:
-		FileOperation(const CString &strFiles)
-		{
-			IW::MemZero(&_struct, sizeof(_struct));
-			_struct.hwnd = IW::GetMainWindow();
-
-			TCHAR szDelim = _T('\n');
-			LPTSTR sz = AllocList(strFiles);
-
-			for(int n = 0; sz[n] != 0; n++)
-			{
-				if (sz[n] == szDelim)
-				{
-					sz[n] = 0;
-				}
-			}
-
-			szFiles.reset(sz);
-			_struct.pFrom = sz;
-		}
-
-		bool Delete(bool bAllowUndo)
-		{
-			_struct.wFunc = FO_DELETE;
-			_struct.fFlags = bAllowUndo ? FOF_ALLOWUNDO : 0;
-
-			return 0 == SHFileOperation(&_struct);
-		}
-
-		bool Copy(const CString &strDestFolder, bool bMove)
-		{
-			szTo.reset(AllocList(strDestFolder));
-
-			_struct.wFunc = bMove ? FO_MOVE : FO_COPY;
-			_struct.pTo = szTo.get();
-			_struct.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMMKDIR;
-
-			return 0 == SHFileOperation(&_struct);
-		}
-
-		// The shell asks its own confirmation. Answering No is not a failure,
-		// and telling the user it was is worse than saying nothing.
-		bool WasAborted() const
-		{
-			return _struct.fAnyOperationsAborted != FALSE;
-		}
-	};
 
 	// Not a lock: it marks a scope, so the flag must have exactly one writer
 	class ScopeLockedBool

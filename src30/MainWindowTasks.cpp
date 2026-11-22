@@ -6,6 +6,7 @@
 #include "Paths.h"
 #include "TaskConvert.h"
 #include "TaskEdit.h"
+#include "TaskMedia.h"
 #include "TaskRename.h"
 #include "TaskSync.h"
 
@@ -113,7 +114,7 @@ namespace iw
 		modeBar_->set_checked(task_ ? task_->mode_id() : modeBrowse);
 		modeBar_->set_enabled(modeConvert, has_photo_selection());
 		modeBar_->set_enabled(modeRename, canvas_.selection_count() > 0);
-		modeBar_->set_enabled(modeEdit, !editable_photo().empty());
+		modeBar_->set_enabled(modeEdit, !editable_item().empty());
 		modeBar_->set_enabled(modeSync, true);
 	}
 
@@ -198,15 +199,20 @@ namespace iw
 		return selected;
 	}
 
-	std::filesystem::path MainWindow::editable_photo() const
+	std::filesystem::path MainWindow::editable_item() const
 	{
-		// Edit is a single-photo task: the focused photo, not a hidden batch target.
+		const auto editable = [](const std::filesystem::path& path)
+		{
+			const auto kind = files::classify(path);
+			if (kind != files::ItemKind::audio && kind != files::ItemKind::video) return files::is_editable_image(path);
+			std::error_code error;
+			return std::filesystem::is_regular_file(files::native_path(path), error);
+		};
 		const int focused = canvas_.focused_index();
-		if (focused >= 0 && static_cast<size_t>(focused) < files_.size() &&
-		    files::is_editable_image(files_[static_cast<size_t>(focused)]))
+		if (focused >= 0 && static_cast<size_t>(focused) < files_.size() && editable(files_[static_cast<size_t>(focused)]))
 			return files_[static_cast<size_t>(focused)];
 		const auto selected = canvas_.selected_paths();
-		if (selected.size() == 1 && files::is_editable_image(selected.front())) return selected.front();
+		if (selected.size() == 1 && editable(selected.front())) return selected.front();
 		return {};
 	}
 
@@ -274,14 +280,14 @@ namespace iw
 			const auto self = weak.lock();
 			return self && self->frame_->placement().maximized;
 		};
-		if (!task->create(centerFrame_, std::move(host))) return false;
+		canvas_.stop_media();
+		if (!task->create(canvas_.frame(), std::move(host), true)) return false;
 		task_ = std::move(task);
 		informationProgressActive_ = false;
 		scanning_ = false;
 		progressPercent_ = 100;
 		task_->set_dpi(dpi_);
-		canvas_.frame()->show(false);
-		task_->set_bounds(centerFrame_->client_rect());
+		task_->set_bounds(centerBounds_);
 		task_->show(true);
 		if (chrome_) chrome_->set_task_toolbar(task_->toolbar_items());
 		update_visibility();
@@ -299,12 +305,11 @@ namespace iw
 		if (!task_->request_close()) return false;
 		auto closing = std::move(task_);
 		task_.reset();
-		closing->show(false);
 		if (chrome_) chrome_->clear_task_toolbar();
 		closing->dispose();
 		if (canvas_.frame())
 		{
-			canvas_.frame()->show(true);
+			canvas_.restore_surface();
 			canvas_.frame()->set_focus();
 		}
 		progressPercent_ = 100;
@@ -374,10 +379,18 @@ namespace iw
 
 	void MainWindow::open_edit_task()
 	{
-		const auto photo = editable_photo();
+		const auto photo = editable_item();
 		if (photo.empty())
 		{
-			platform::show_error(L"Select a photo to edit.", L"Edit", frame_);
+			platform::show_error(L"Select a photo, video or audio file to edit.", L"Edit", frame_);
+			return;
+		}
+		if (const auto kind = files::classify(photo); kind == files::ItemKind::video || kind == files::ItemKind::audio)
+		{
+			auto task = std::make_shared<TaskMedia>();
+			task->set_mode_id(modeEdit);
+			task->set_media(photo, true);
+			set_task(std::move(task));
 			return;
 		}
 		// The selector strip offers the editable photos of this folder, and nothing else.

@@ -40,6 +40,7 @@ namespace iw::ui
 		void focus(app::recti rect) const;
 		void outline(app::recti rect, color value, int width = 1) const;
 		void scrollbar(const ScrollBar& scroll) const;
+		void scrollbar_mark(const ScrollBar& scroll, int contentPosition) const;
 		void clip(app::recti rect) const;
 		void reset_clip() const;
 

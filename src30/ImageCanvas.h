@@ -24,6 +24,11 @@
 
 namespace iw
 {
+	namespace media
+	{
+		class Player;
+	}
+
 	namespace tests
 	{
 		class ImageCanvasAccess;
@@ -42,12 +47,15 @@ namespace iw
 		};
 
 		ImageCanvas();
-		~ImageCanvas() override = default;
+		~ImageCanvas() override;
 		ImageCanvas(const ImageCanvas&) = delete;
 		ImageCanvas& operator=(const ImageCanvas&) = delete;
 
 		bool create(const platform::WindowFramePtr& parent);
 		bool load(const std::filesystem::path& path);
+		void play_media(const std::filesystem::path& path);
+		bool stop_media();
+		void clear_preview();
 		void invalidate_file(const std::filesystem::path& path);
 		void invalidate_all_files();
 		// Records dimensions read by a background probe without disturbing selection or thumbnails.
@@ -78,6 +86,8 @@ namespace iw
 			std::function<void()> leaveFullscreen;
 			std::function<void()> toggleProperties;
 			std::function<void()> toggleThumbnails;
+			std::function<void(int)> resizeThumbnails;
+			std::function<void()> openWith;
 		};
 		void set_command_handlers(CommandHandlers handlers) { commandHandlers_ = std::move(handlers); }
 
@@ -122,15 +132,18 @@ namespace iw
 		bool fit() const { return primaryView_.zoom.is_fit(); }
 		void zoom(double factor);
 		bool has_displayed_image() const { return displayed_image() != nullptr; }
+		bool can_zoom() const { return !media_preview() && has_displayed_image(); }
 		std::vector<std::filesystem::path> selected_paths() const;
 		size_t selection_count() const { return active_selection().size(); }
 		int focused_index() const { return active_selection().focus(); }
 		void select_all();
 		void clear_selection();
 		bool cancel_transient_state();
+		bool back_out();
 		void select_index(int index, bool extend, bool toggle);
 		void step_focus(int direction);
 		platform::WindowFramePtr frame() const { return frame_; }
+		void restore_surface();
 		const std::filesystem::path& path() const { return path_; }
 		int splitter_position() const { return splitterPosition_; }
 		void set_splitter_position(int position);
@@ -150,6 +163,7 @@ namespace iw
 			std::vector<std::uint32_t> pixels;
 			int originalWidth{};
 			int originalHeight{};
+			int requestedEdge{};
 		};
 
 		struct Thumbnail
@@ -159,6 +173,7 @@ namespace iw
 			std::vector<std::uint32_t> pixels;
 			int originalWidth{};
 			int originalHeight{};
+			int requestedEdge{};
 		};
 
 		struct ImageRequest
@@ -320,6 +335,7 @@ namespace iw
 		int spatial_neighbor(int index, int horizontal, int vertical) const;
 		void notify_selection();
 		void queue_thumbnails();
+		void resize_strip_at(int x);
 		void reset_thumbnail_cache();
 		void request_image(ImageRequest request);
 		void pump_image();
@@ -334,6 +350,13 @@ namespace iw
 		bool comparison_hit(app::pointi point) const;
 		bool inspect_hit(app::pointi point) const;
 		bool immersive_zoom() const;
+		bool media_preview() const;
+		void layout_media_preview();
+		void paint_media_preview(const ui::CanvasRenderer& renderer) const;
+		bool media_key(const platform::KeyInput& input);
+		bool media_mouse(InputEvent event, const platform::MouseInput& input);
+		void toggle_media_mute();
+		void show_media_volume();
 		double fit_scale(bool comparison = false) const;
 		double effective_scale(bool comparison) const;
 		app::recti image_destination(double scale, bool comparison = false) const;
@@ -365,6 +388,13 @@ namespace iw
 		platform::WindowFramePtr frame_;
 		std::shared_ptr<FrameReactor> reactorBinding_;
 		std::filesystem::path path_;
+		std::unique_ptr<media::Player> player_;
+		app::recti mediaPicture_, mediaBar_, mediaPlay_, mediaMute_, mediaSeek_, mediaTime_;
+		bool mediaMuted_{};
+		bool mediaSeeking_{};
+		bool mediaHasPoster_{};
+		int mediaSeekFraction_{};
+		int mediaVolume_{100};
 		std::array<files::DecodedImage, 6> typeIcons_;
 		std::array<files::DecodedImage, 6> detailTypeIcons_;
 		std::array<bool, 6> typeIconAlpha_{};
@@ -394,6 +424,7 @@ namespace iw
 		app::recti propertyHeaderBounds_;
 		app::recti comparisonPropertyHeaderBounds_;
 		app::recti stripHeaderBounds_;
+		app::recti stripSizeBounds_;
 		app::recti stripToggleBounds_;
 		app::recti splitterBounds_;
 		app::recti itemsViewport_;
@@ -435,6 +466,7 @@ namespace iw
 		bool hasFocus_{};
 		bool draggingSplitter_{};
 		bool hoveringSplitter_{};
+		bool draggingStripSize_{};
 		bool draggingMarquee_{};
 		bool deferSingleSelection_{};
 		bool draggingFiles_{};

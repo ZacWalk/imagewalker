@@ -95,14 +95,17 @@ public:
 		pT->OnBeforeFileOperation();
 
 		IW::FileOperation operation(pT->GetSelectedFileList());
+		IW::CMessageBoxIndirect mb;
+		if (mb.Show(_T("Move the selected items to the Recycle Bin?"),
+			MB_OKCANCEL | MB_ICONQUESTION | MB_DEFBUTTON2) != IDOK)
+			return;
 
-		if (operation.Delete(true))
+		if (operation.Recycle())
 		{
 			pT->OnAfterDelete();
 		}
-		else if (!operation.WasAborted())
+		else
 		{
-			IW::CMessageBoxIndirect mb;
 			mb.Show(IDS_COULD_NOT_DELETE);
 		}
 	}

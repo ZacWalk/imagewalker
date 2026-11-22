@@ -15,6 +15,7 @@
 
 #include "iw/legacy/ImagingEdits.h"
 #include "ViewBackBuffer.h"
+#include "ViewPaneTheme.h"
 #include "ViewSplitter.h"
 #include "ViewYesNoDlg.h"
 
@@ -213,6 +214,7 @@ public:
 	enum { IDD = IDD_EDIT_PANEL };
 
 	EditView *_pView;
+	IW::Skin::PaneTheme _paneTheme;
 
 	// Set while the panel is writing to its own controls, so the change
 	// notifications that causes do not read half-updated state back out.
@@ -241,6 +243,8 @@ public:
 		COMMAND_ID_HANDLER(ID_EDIT_SAVE, OnButton)
 		COMMAND_ID_HANDLER(ID_EDIT_SAVEAS, OnButton)
 		COMMAND_ID_HANDLER(ID_EDIT_CANCEL_EDITS, OnButton)
+
+		CHAIN_MSG_MAP_MEMBER(_paneTheme)
 
 	ALT_MSG_MAP(1)
 
@@ -326,6 +330,7 @@ public:
 	ImageEdits _edits;
 	IW::Image _source;
 	CString _strSourcePath;
+	std::optional<IW::EditFileStamp> _sourceStamp;
 
 	// Set while Save is publishing its own result, so the image-changed callback
 	// that causes does not replay the stack over an already-edited image.
@@ -418,7 +423,7 @@ public:
 		return _panel.GetDialog().PreTranslateMessage(pMsg) ? TRUE : FALSE;
 	}
 
-	void OnNewImage(bool /*bScrollToCenter*/) override { if (!_bSaving) Reload(); }
+	void OnNewImage(bool /*bScrollToCenter*/) override { if (!_bSaving && IsWindowVisible()) Reload(); }
 
 	bool InvokeCommand(DWORD id) override;
 	bool GetCommandState(DWORD id, bool &bEnabled, bool &bChecked) override;
@@ -452,6 +457,7 @@ public:
 
 	bool HasImage() const { return !_source.IsEmpty(); }
 	bool HasChanges() const;
+	bool CanSaveOriginal() const;
 
 	bool Save(bool bSaveAs);
 	void CancelEdits();
@@ -1553,10 +1559,15 @@ inline void EditView::Reload()
 			strPath = pFolder->GetItemPath(nFocus);
 	}
 
-	// A different file starts a fresh stack; the same one keeps what is set.
-	if (strPath.CompareNoCase(_strSourcePath) != 0)
+	const bool bHaveLoadedSource = _state.Image.IsImageReady() &&
+		_state.Image.GetImageFileName().CompareNoCase(strPath) == 0;
+	// A refresh can replace the source at the same path. Keep a draft based on
+	// the old pixels, but don't give it the freshly loaded file's stamp.
+	if (strPath.CompareNoCase(_strSourcePath) != 0 ||
+		(bHaveLoadedSource && _sourceStamp != _state.Image.GetLoadedStamp() && !HasChanges()))
 	{
 		_strSourcePath = strPath;
+		_sourceStamp.reset();
 		_edits.Reset();
 		_source.Free();
 		_canvas.OnSourceChanged();
@@ -1569,10 +1580,10 @@ inline void EditView::Reload()
 		// IsImageReady, not IsImageShown: while the decode is in flight what is
 		// on screen is the items pane's thumbnail, and editing that would put
 		// 160 pixels back over the file.
-		if (_state.Image.IsImageReady() && !shown.IsEmpty() &&
-			_state.Image.GetImageFileName().CompareNoCase(strPath) == 0)
+		if (bHaveLoadedSource)
 		{
 			_source = shown;
+			_sourceStamp = _state.Image.GetLoadedStamp();
 		}
 		else
 		{
@@ -1581,7 +1592,10 @@ inline void EditView::Reload()
 			CImageLoad info(strPath, true, 0, 0, 0);
 
 			if (info.Load(loader, IW::CNullStatus::Instance))
+			{
 				_source = info._image;
+				_sourceStamp = info._stamp;
+			}
 		}
 	}
 
@@ -1758,14 +1772,27 @@ inline void EditView::AutoColor()
 inline void EditView::CancelEdits()
 {
 	_edits.Reset();
-	_panel.GetDialog().ReadFrom(_edits);
-	OnEditsChanged();
+	Reload();
+}
+
+inline bool EditView::CanSaveOriginal() const
+{
+	return _sourceStamp && _state.Image.IsImageReady() &&
+		_strSourcePath.CompareNoCase(_state.Image.GetImageFileName()) == 0 &&
+		_sourceStamp == _state.Image.GetLoadedStamp();
 }
 
 inline bool EditView::Save(bool bSaveAs)
 {
 	if (_source.IsEmpty())
 		return false;
+
+	if (!bSaveAs && !CanSaveOriginal())
+	{
+		IW::CMessageBoxIndirect mb;
+		mb.Show(_T("The edit source no longer matches the loaded file. Use Save As to keep the original unchanged."));
+		return false;
+	}
 
 	IW::Image result;
 
@@ -1799,6 +1826,7 @@ inline bool EditView::Save(bool bSaveAs)
 	{
 		IW::ScopeLockedBool lockSaving(_bSaving);
 
+		_state.Image.StopLoading();
 		_state.Image.SetImageWithHistory(result, _T("Edit"));
 		bSaved = bSaveAs ? _state.Image.SaveAs() : _state.Image.Save();
 

@@ -107,7 +107,9 @@ namespace iw::tasks
 								if (!protectionFailure.empty()) row.detail = protectionFailure;
 							}
 						}
+						const bool ran = protectedRow && !stop.stop_requested();
 						if (!protectedRow) row.state = RowState::failed;
+						else if (!ran) row.state = RowState::notRun;
 						else options.act(row);
 						if (row.state == RowState::running) row.state = RowState::success;
 						else if (row.state != RowState::success && row.state != RowState::failed &&
@@ -116,12 +118,13 @@ namespace iw::tasks
 							row.state = RowState::failed;
 							if (row.detail.empty()) row.detail = L"The operation did not report a completed outcome.";
 						}
-						if (row.state == RowState::success && undoBatch)
+						if (undoBatch && ran && (row.state == RowState::success || options.undoPartial))
 						{
 							std::wstring error;
 							const auto bundle = options.undoPaths(row);
 							const auto mutated = options.undoMutatedPaths ? options.undoMutatedPaths(row) : bundle;
-							if (!undoBatch->completed(bundle, mutated, error))
+							const auto& completed = row.state == RowState::success ? bundle : mutated;
+							if (!mutated.empty() && !undoBatch->completed(completed, mutated, error))
 							{
 								row.detail = error;
 								plan.completionError = error;

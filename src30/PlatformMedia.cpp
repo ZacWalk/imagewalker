@@ -1,11 +1,9 @@
 // ImageWalker by Zac Walker
-// Plays media with Media Foundation's source reader on a worker thread: its pictures become a texture the owner's
-// frame draws, and its PCM plays through libdesktop's audio output, whose clock paces the pictures.
+// Plays decoded pictures and PCM on libdesktop's renderer and audio device.
 
-#include "PlatformWin32.h"
 #include "PlatformMedia.h"
-#include "MediaRuntime.h"
 
+#include <libdesktop/platform/media.h>
 #include <libdesktop/ui/shell.h>
 
 #include <algorithm>
@@ -70,8 +68,8 @@ namespace iw::media
 		class Session
 		{
 		public:
-			Session(std::filesystem::path path, std::weak_ptr<Link> link, const float volume) :
-				path_(std::move(path)), link_(std::move(link))
+			Session(std::filesystem::path path, std::weak_ptr<Link> link, const float volume, const bool autoplay) :
+				path_(std::move(path)), link_(std::move(link)), autoplay_(autoplay)
 			{
 				commands_.volume = volume;
 				thread_ = std::thread([this] { run(); });
@@ -79,6 +77,7 @@ namespace iw::media
 
 			~Session()
 			{
+				stop_.request_stop();
 				command([](Commands& commands) { commands.quit = true; });
 				if (thread_.joinable()) thread_.join();
 			}
@@ -198,12 +197,12 @@ namespace iw::media
 
 			void run()
 			{
-				const platform::Runtime apartment(platform::RuntimeMode::multithreaded);
+				const platform::Runtime audioThread(platform::RuntimeMode::multithreaded);
 				try
 				{
 					play_file();
 				}
-				catch (...)
+				catch (const std::exception&)
 				{
 					report_failure(L"Media playback stopped on an unexpected error.");
 				}
@@ -212,28 +211,35 @@ namespace iw::media
 			void play_file()
 			{
 				Decoder decoder;
-				if (!decoder.open(path_))
+				const auto stop = stop_.get_token();
+				const std::stop_callback exit(platform::exit_token(), [this] { stop_.request_stop(); });
+				if (!decoder.open(path_, stop))
 				{
-					report_failure(decoder.error());
+					if (!stop.stop_requested()) report_failure(decoder.error());
 					return;
 				}
 				Playback p(decoder);
+				p.status.notice = decoder.notice();
 				if (decoder.has_audio())
 				{
 					p.output = ::platform::create_audio_output({}, ringSeconds);
 					const auto format = p.output ? pcm_format(p.output->format()) : std::nullopt;
-					if (!format || !decoder.decode_audio(*format)) p.output.reset();
+					const bool convertible = format && decoder.decode_audio(*format);
+					if (!convertible) p.output.reset();
 					else p.format = *format;
-					if (!p.output && !decoder.has_video())
-					{
-						report_failure(L"Windows has no audio output this sound can play on. Check that speakers "
-						               L"or headphones are connected and enabled.");
-						return;
-					}
 					if (!p.output)
-						platform::write_diagnostic(
-							L"The sound of " + path_.filename().wstring() +
-							L" cannot be played on this computer's audio output; the video plays silently.\n");
+					{
+						p.status
+							.notice = !format
+						                  ? L"No usable audio output. Check that speakers or headphones are enabled."
+						                  : L"The sound cannot be converted to the audio output's format.";
+						if (!decoder.has_video())
+						{
+							report_failure(p.status.notice);
+							return;
+						}
+						platform::write_diagnostic(p.status.notice);
+					}
 				}
 				p.status.hasVideo = decoder.has_video();
 				p.status.canSeek = decoder.can_seek();
@@ -247,18 +253,19 @@ namespace iw::media
 				p.needPicture = p.status.hasVideo;
 				p.status.state = PlaybackState::ready;
 				report(p.status);
-				// A file plays as it opens.
-				set_playing(p, true);
-				p.status.state = PlaybackState::playing;
-				p.reportNow = true;
-				const auto exiting = platform::exit_token();
+				if (autoplay_)
+				{
+					set_playing(p, true);
+					p.status.state = PlaybackState::playing;
+					p.reportNow = true;
+				}
 				for (;;)
 				{
 					const auto commands = take_commands(wait_time(p));
-					if (commands.quit || exiting.stop_requested()) break;
-					apply(p, commands);
+					if (commands.quit || stop.stop_requested()) break;
+					if (!apply(p, commands)) break;
 					if (!decode(p)) break;
-					feed_output(p);
+					if (!feed_output(p)) break;
 					present(p);
 					if (finished(p)) finish(p);
 					report_progress(p);
@@ -278,7 +285,7 @@ namespace iw::media
 			// Where playback is, in media time: the audio output's clock while there is sound, otherwise a steady one.
 			std::int64_t clock_now(const Playback& p) const
 			{
-				if (p.output)
+				if (p.output && (!p.soundEnded || p.soundQueued))
 					return p.base + static_cast<std::int64_t>(std::llround(p.output->time() * ticksPerSecond));
 				if (!p.playing) return p.base;
 				return p.base + std::chrono::duration_cast<Ticks>(SteadyClock::now() - p.started).count();
@@ -290,35 +297,51 @@ namespace iw::media
 				if (playing) p.started = SteadyClock::now();
 				else
 				{
-					p.base = p.output ? p.base : clock_now(p);
+					if (!p.output || (p.soundEnded && !p.soundQueued)) p.base = clock_now(p);
 					if (p.output) p.output->stop();
 					p.outputRunning = false;
 				}
 				p.playing = playing;
 			}
 
-			void apply(Playback& p, const Commands& commands)
+			bool apply(Playback& p, const Commands& commands)
 			{
 				if (commands.volume && p.output) p.output->volume(std::clamp(*commands.volume, 0.0f, 1.0f));
 				if (commands.stop)
 				{
-					seek_to(p, 0);
 					set_playing(p, false);
+					if (!p.status.canSeek || !seek_to(p, 0))
+					{
+						report_failure(L"Cannot rewind this file. Reopen it to start again.");
+						return false;
+					}
 					p.status.state = PlaybackState::stopped;
 				}
 				if (commands.seek && p.status.canSeek)
 				{
-					seek_to(p, *commands.seek);
-					if (p.status.state == PlaybackState::ended) p.status.state = PlaybackState::paused;
+					if (!seek_to(p, *commands.seek))
+					{
+						p.status.notice = L"Could not seek to that position.";
+						p.reportNow = true;
+					}
+					else if (p.status.hasDuration && p.status.position == p.status.duration)
+					{
+						set_playing(p, false);
+						p.status.state = PlaybackState::ended;
+					}
+					else if (p.status.state == PlaybackState::ended) p.status.state = PlaybackState::paused;
 				}
-				if (!commands.play) return;
+				if (!commands.play) return true;
 				if (*commands.play)
 				{
-					if (p.status.state == PlaybackState::playing) return;
+					if (p.status.state == PlaybackState::playing) return true;
 					if (p.status.state == PlaybackState::ended)
 					{
-						if (!p.status.canSeek) return;
-						seek_to(p, 0);
+						if (!p.status.canSeek || !seek_to(p, 0))
+						{
+							report_failure(L"Could not restart this file.");
+							return false;
+						}
 					}
 					set_playing(p, true);
 					p.status.state = PlaybackState::playing;
@@ -329,12 +352,13 @@ namespace iw::media
 					p.status.state = PlaybackState::paused;
 				}
 				p.reportNow = true;
+				return true;
 			}
 
-			void seek_to(Playback& p, std::int64_t time) const
+			bool seek_to(Playback& p, std::int64_t time) const
 			{
 				time = (std::max)(std::int64_t{0}, p.status.hasDuration ? (std::min)(time, p.status.duration) : time);
-				if (p.status.canSeek && !p.decoder.seek(time)) return;
+				if (!p.decoder.seek(time)) return false;
 				p.frames.clear();
 				p.skipped.reset();
 				p.pending.clear();
@@ -352,6 +376,7 @@ namespace iw::media
 				p.shownUntil = time;
 				p.status.position = time;
 				p.reportNow = true;
+				return true;
 			}
 
 			::core::surface_ptr free_picture(Playback& p) const
@@ -372,15 +397,23 @@ namespace iw::media
 			bool decode(Playback& p)
 			{
 				if (!p.playing && !p.needPicture) return true;
-				while (!p.videoEnded && p.frames.size() < (p.playing ? framesAhead : 1))
+				for (int reads = 0; reads < 8 && !p.videoEnded && p.frames.size() < (p.playing ? framesAhead : 1);
+				     ++reads)
 				{
 					VideoFrame frame;
 					frame.picture = free_picture(p);
 					const auto read = p.decoder.read_video(frame);
 					if (read == ReadResult::failed)
 					{
-						report_failure(p.decoder.error());
-						return false;
+						if (!p.output)
+						{
+							report_failure(p.decoder.error());
+							return false;
+						}
+						p.status.notice = p.decoder.error() + L". Continuing with sound.";
+						p.reportNow = p.videoEnded = true;
+						p.needPicture = false;
+						break;
 					}
 					if (read == ReadResult::end)
 					{
@@ -400,14 +433,13 @@ namespace iw::media
 					p.frames.push_back(std::move(frame));
 				}
 				if (!p.output || !p.playing) return true;
-				while (!p.soundEnded && pending_ticks(p) < soundAhead)
+				for (int reads = 0; reads < 16 && !p.soundEnded && pending_ticks(p) < soundAhead; ++reads)
 				{
 					AudioBlock block;
 					const auto read = p.decoder.read_audio(block);
 					if (read == ReadResult::failed)
 					{
-						report_failure(p.decoder.error());
-						return false;
+						return lose_sound(p, p.decoder.error());
 					}
 					if (read == ReadResult::end) p.soundEnded = true;
 					else queue_sound(p, block);
@@ -432,6 +464,12 @@ namespace iw::media
 				if (time < p.skipBefore) skip = (std::min)(frames, (p.skipBefore - time) * rate / ticksPerSecond);
 				if (skip >= frames) return;
 				time += skip * ticksPerSecond / rate;
+				if (p.pendingOffset)
+				{
+					p.pending.erase(p.pending.begin(),
+					                p.pending.begin() + static_cast<std::ptrdiff_t>(p.pendingOffset));
+					p.pendingOffset = 0;
+				}
 				if (!p.soundQueued)
 				{
 					p.soundQueued = true;
@@ -447,22 +485,35 @@ namespace iw::media
 				                 first + static_cast<std::ptrdiff_t>((frames - skip) * frameBytes));
 			}
 
-			void feed_output(Playback& p)
+			bool lose_sound(Playback& p, std::wstring reason)
 			{
-				if (!p.output) return;
-				if (p.output->is_device_lost())
+				if (!p.status.hasVideo)
 				{
-					platform::write_diagnostic(L"The audio output was lost; playback carries on without sound.\n");
-					p.base = clock_now(p);
-					p.started = SteadyClock::now();
-					p.output.reset();
-					p.outputRunning = false;
-					p.pending.clear();
-					p.pendingOffset = 0;
-					p.soundEnded = true;
-					return;
+					report_failure(std::move(reason));
+					return false;
 				}
-				if (!p.playing) return;
+				p.status.notice = std::move(reason) + L" Continuing without sound.";
+				platform::write_diagnostic(p.status.notice);
+				p.base = clock_now(p);
+				p.started = SteadyClock::now();
+				p.output.reset();
+				p.outputRunning = false;
+				p.pending.clear();
+				p.pendingOffset = 0;
+				p.soundEnded = p.reportNow = true;
+				return true;
+			}
+
+			bool feed_output(Playback& p)
+			{
+				if (!p.output) return true;
+				if (p.output->is_device_lost()) return lose_sound(p, L"The audio output was disconnected.");
+				if (!p.playing) return true;
+				if (p.soundEnded && !p.soundQueued)
+				{
+					if (p.status.hasVideo || p.skipBefore > 0) return true;
+					return lose_sound(p, L"No audio samples could be decoded.");
+				}
 				const auto frameBytes = p.format.frame_bytes();
 				if (p.pendingOffset < p.pending.size())
 				{
@@ -481,13 +532,15 @@ namespace iw::media
 					// An output that runs dry plays its ring again; silence carries the clock on to the picture's end.
 					p.output->write_silence();
 				}
-				if (p.outputRunning) return;
+				if (p.outputRunning) return true;
 				const auto written = static_cast<std::int64_t>(p.framesWritten) * ticksPerSecond / p.format.sampleRate;
 				if (written >= soundPrimed || (p.soundEnded && p.pendingOffset == p.pending.size()))
 				{
 					p.output->start();
+					if (p.output->is_stopped()) return lose_sound(p, L"The audio output could not start.");
 					p.outputRunning = true;
 				}
+				return true;
 			}
 
 			void present(Playback& p)
@@ -518,9 +571,10 @@ namespace iw::media
 				if (!p.playing || !p.videoEnded || !p.frames.empty()) return false;
 				const auto now = clock_now(p);
 				if (now < p.shownUntil) return false;
-				return !p.output || (p.soundEnded && p.pendingOffset == p.pending.size() && p.outputRunning &&
-				                     now >= p.base + static_cast<std::int64_t>(p.framesWritten) * ticksPerSecond /
-				                                         p.format.sampleRate);
+				return !p.output || (p.soundEnded && !p.soundQueued) ||
+				       (p.soundEnded && p.pendingOffset == p.pending.size() && p.outputRunning &&
+				        now >=
+				            p.base + static_cast<std::int64_t>(p.framesWritten) * ticksPerSecond / p.format.sampleRate);
 			}
 
 			void finish(Playback& p) const
@@ -549,10 +603,12 @@ namespace iw::media
 
 			const std::filesystem::path path_;
 			const std::weak_ptr<Link> link_;
+			const bool autoplay_;
 			std::mutex mutex_;
 			std::condition_variable wake_;
 			Commands commands_;
 			bool pending_{};
+			std::stop_source stop_;
 			std::mutex pictureMutex_;
 			::core::const_surface_ptr picture_;
 			std::atomic_bool picturePosted_{};
@@ -580,7 +636,7 @@ namespace iw::media
 			ReaderPlayer(const ReaderPlayer&) = delete;
 			ReaderPlayer& operator=(const ReaderPlayer&) = delete;
 
-			void open(const std::filesystem::path& path) override
+			void open(const std::filesystem::path& path, const bool autoplay = true) override
 			{
 				close();
 				path_ = path;
@@ -591,16 +647,11 @@ namespace iw::media
 				std::error_code error;
 				if (!std::filesystem::is_regular_file(files::native_path(path), error))
 				{
-					fail(native::playback_failure(HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND)));
-					return;
-				}
-				if (!native::acquire())
-				{
-					fail(std::wstring(native::unavailable_message()));
+					fail(L"The media file is not available.");
 					return;
 				}
 				link_ = std::make_shared<Link>(Link{this});
-				session_ = std::make_unique<Session>(path, link_, volume_);
+				session_ = std::make_unique<Session>(path, link_, volume_, autoplay);
 			}
 
 			void play() override
@@ -656,6 +707,12 @@ namespace iw::media
 				status_.hasVideo = false;
 			}
 
+			void turn(const int clockwiseQuarterTurns) override
+			{
+				turn_ = clockwiseQuarterTurns;
+				present_picture();
+			}
+
 			void bounds(const app::recti bounds) override
 			{
 				if (element_) element_->set_bounds(bounds);
@@ -680,13 +737,23 @@ namespace iw::media
 				auto picture = session_ ? session_->take_picture() : nullptr;
 				if (!picture) return;
 				picture_ = std::move(picture);
-				if (!element_) return;
-				element_->show(true);
-				// A picture the size of the last updates its texture in place and presents the video's region alone.
-				surface_->present(picture_, element_->frame());
+				present_picture();
 			}
 
 		private:
+			void present_picture()
+			{
+				if (!element_ || !picture_) return;
+				constexpr ::core::simple_transform turns[]{::core::simple_transform::none,
+				                                           ::core::simple_transform::rot_270,
+				                                           ::core::simple_transform::rot_180,
+				                                           ::core::simple_transform::rot_90};
+				const auto shown = turn_ == 0 ? picture_ : picture_->transform(turns[std::clamp(turn_, 0, 3)]);
+				if (!shown) return;
+				element_->show(true);
+				surface_->present(shown, element_->frame());
+			}
+
 			void shutdown()
 			{
 				link_.reset();
@@ -715,6 +782,7 @@ namespace iw::media
 			PlaybackStatus status_;
 			std::filesystem::path path_;
 			float volume_{1.0f};
+			int turn_{};
 			std::shared_ptr<::ui::surface_element> surface_;
 			platform::FrameElementPtr element_;
 			std::shared_ptr<Link> link_;

@@ -7,14 +7,14 @@ interaction.
 
 - Encoders write beside the destination through `IW::CFileTemp`. A caller
   commits successful output explicitly with `Close`; destruction aborts
-  incomplete output, and failed work is discarded.
-- Batch tools refuse to treat an input file as their own output, and do not
-  replace originals implicitly.
-- Multi-file rename uses temporary names and a rollback that never overwrites a
-  file that already exists.
-- Deleting from the browser or item view goes to the Recycle Bin through the
-  shell, with the shell's own confirmation. ImageWalker 3.0's Sync is the one
-  deliberate exception: it deletes permanently, behind a counted confirmation.
+  incomplete output. A new destination is published without replacing any
+  existing item, even if it appeared after preview or confirmation.
+- Batch operations, including Sync and Batch Rename, create new files only.
+  Save As also requires a new name. An explicit single-photo Save checks that
+  the loaded original is still current and retains it under an unused
+  `-original` name before publishing the edit.
+- A deliberate move or single-item rename must not overwrite an existing
+  destination. Delete requests the Recycle Bin rather than permanent deletion.
 
 ## Image and metadata integrity
 
@@ -73,6 +73,6 @@ and misnamed images, temporary-file commit behaviour and rename rollback.
 Compressed Undo streams report consumed input bytes and zero-length transfers
 consistently. Cover search negation and self-assignment in each 2.x suite. For
 ImageWalker 3.0, also test reviewed writes, identity changes, cancellation,
-rename cycles and sidecars, edit previews, saves and backups, all eight
+rename copies and sidecars, edit previews, saves and backups, all eight
 orientations, carried and corrected metadata including malformed EXIF, and
 Sync collection settings.

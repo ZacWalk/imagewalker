@@ -7,7 +7,9 @@ void CThumb::Refresh(CShellFolder& folder)
 {
 	m_ulAttribs = SFGAO_LINK | SFGAO_FOLDER | SFGAO_FILESYSTEM | SFGAO_GHOSTED | SFGAO_DROPTARGET;
 
-	folder->GetAttributesOf(1, *this, &m_ulAttribs);
+	auto item = GetItem();
+	if (FAILED(folder->GetAttributesOf(1, &item, &m_ulAttribs)))
+		m_ulAttribs = 0;
 
 	if (!(m_ulAttribs & SFGAO_FILESYSTEM))
 		return;
@@ -28,7 +30,7 @@ void CThumb::Refresh(CShellFolder& folder)
 	{
 		char sz[4] = {0};
 		strncpy(sz, szType + 1, sizeof(sz) - 1);
-		strlwr(sz);
+		_strlwr_s(sz);
 
 		for (int i = 0; i < 3; i++)
 			m_uExtension = (m_uExtension << 8) + sz[i];
@@ -79,7 +81,8 @@ CFolder::CFolder(HWND hwndOwner, const CShellItem& item)
 	if (FAILED(hr))
 		IW::Throw("cannot open folder");
 
-	Refresh();
+	if (!Refresh())
+		IW::Throw("cannot read folder");
 }
 
 UINT CFolder::FindItemKey(const std::map<UINT, std::unique_ptr<CThumb>>& thumbs, const CShellItem& item)
@@ -98,7 +101,7 @@ UINT CFolder::FindItemKey(const std::map<UINT, std::unique_ptr<CThumb>>& thumbs,
 	}
 }
 
-void CFolder::Refresh()
+bool CFolder::Refresh()
 {
 	for (auto& entry : m_mapThumbs)
 		entry.second->m_bDelete = TRUE;
@@ -107,13 +110,14 @@ void CFolder::Refresh()
 
 	if (FAILED(enumitem.Create(m_hwndOwner, *this,
 	                           SHCONTF_FOLDERS | SHCONTF_NONFOLDERS | SHCONTF_INCLUDEHIDDEN)))
-		return;
+		return false;
 
 	LPITEMIDLIST pItemRaw = nullptr;
 	ULONG ulFetched = 0;
 	CShellItem itemEnum;
 
-	while (enumitem->Next(1, &pItemRaw, &ulFetched) == S_OK)
+	HRESULT next = S_FALSE;
+	while (enumitem && (next = enumitem->Next(1, &pItemRaw, &ulFetched)) == S_OK)
 	{
 		itemEnum.Attach(pItemRaw);
 
@@ -132,21 +136,21 @@ void CFolder::Refresh()
 		it->second->m_bDelete = FALSE;
 	}
 
+	if (FAILED(next))
+		return false;
+
 	for (auto it = m_mapThumbs.begin(); it != m_mapThumbs.end();)
 		it = it->second->m_bDelete ? m_mapThumbs.erase(it) : std::next(it);
+	return true;
 }
 
 BOOL CFolder::GetPath(CString& strPath) const
 {
-	LPTSTR psz = strPath.GetBuffer(MAX_PATH);
-	const BOOL b = SHGetPathFromIDList(m_Item, psz);
-	strPath.ReleaseBuffer();
-
-	if (!b)
+	if (!m_Item.GetPath(strPath))
 		return FALSE;
 
-	if (strPath.Right(1) != _T('\\'))
-		strPath += _T('\\');
+	if (strPath.Right(1) != "\\")
+		strPath += "\\";
 
 	return TRUE;
 }

@@ -1,5 +1,5 @@
 // ImageWalker by Zac Walker
-// Implements Synchronize: explicit analysis, immutable reviewed evidence, and permanent deletion.
+// Implements Synchronize: review and copy missing files without replacing either folder's contents.
 
 #include "TaskSync.h"
 
@@ -206,14 +206,13 @@ namespace iw::sync
 			}
 		}
 
-		const wchar_t* action_text(const int action, const bool replace)
+		const wchar_t* action_text(const int action)
 		{
 			switch (action)
 			{
-			case copyToRemote: return replace ? L"Copy to remote (Replace)" : L"Copy to remote";
-			case copyToLocal: return replace ? L"Copy to local (Replace)" : L"Copy to local";
-			case deleteLocal: return L"Delete local";
-			case deleteRemote: return L"Delete remote";
+			case copyToRemote: return L"Copy to remote";
+			case copyToLocal: return L"Copy to local";
+			case keepExisting: return L"Keep both existing files";
 			default: return L"Ignore";
 			}
 		}
@@ -228,14 +227,12 @@ namespace iw::sync
 		options.remote = platform::read_text_setting(section, L"Remote");
 		options.toRemote = platform::read_integer_setting(section, L"CopyToRemote", 1) != 0;
 		options.toLocal = platform::read_integer_setting(section, L"CopyToLocal", 0) != 0;
-		options.deleteLocal = platform::read_integer_setting(section, L"DeleteLocal", 0) != 0;
-		options.deleteRemote = platform::read_integer_setting(section, L"DeleteRemote", 0) != 0;
 		const int count = (std::max)(0, platform::read_integer_setting(section, L"CollectionCount", 0));
 		for (int index = 0; index < count; ++index)
 		{
 			options.collection.emplace_back(platform::read_text_setting(section, std::format(L"Collection{}", index)));
 			// Empty entries are retained as invalid roots. In particular, one damaged entry must
-			// not silently discard later configured roots and reduce deletion authority.
+			// not silently discard later configured roots and change the copy scope.
 		}
 		return options;
 	}
@@ -246,8 +243,6 @@ namespace iw::sync
 		const std::array integers{platform::IntegerSetting{L"WholeCollection", options.wholeCollection ? 1 : 0},
 		                          platform::IntegerSetting{L"CopyToRemote", options.toRemote ? 1 : 0},
 		                          platform::IntegerSetting{L"CopyToLocal", options.toLocal ? 1 : 0},
-		                          platform::IntegerSetting{L"DeleteLocal", options.deleteLocal ? 1 : 0},
-		                          platform::IntegerSetting{L"DeleteRemote", options.deleteRemote ? 1 : 0},
 		                          platform::IntegerSetting{L"CollectionCount",
 		                                                   static_cast<int>(options.collection.size())}};
 		std::vector texts{platform::TextSetting{L"Local", options.local.wstring()},
@@ -305,8 +300,7 @@ namespace iw::sync
 		std::error_code error;
 		if (!std::filesystem::is_directory(files::native_path(remote), error) || error)
 			return L"The remote folder could not be read.";
-		if (!options.toRemote && !options.toLocal && !options.deleteLocal && !options.deleteRemote)
-			return L"Choose at least one copy direction or deletion.";
+		if (!options.toRemote && !options.toLocal) return L"Choose at least one copy direction or deletion.";
 		return {};
 	}
 
@@ -411,21 +405,18 @@ namespace iw::sync
 				row.source = localRoot / name;
 				row.destination = remoteRoot / remoteName;
 				row.tag = ignore;
-				if (local.exists && !remote.exists)
-					row.tag = options.toRemote ? copyToRemote : options.deleteLocal ? deleteLocal : ignore;
-				else if (!local.exists && remote.exists)
-					row.tag = options.toLocal ? copyToLocal : options.deleteRemote ? deleteRemote : ignore;
-				else if (local.modified == remote.modified)
+				if (local.exists && !remote.exists) row.tag = options.toRemote ? copyToRemote : ignore;
+				else if (!local.exists && remote.exists) row.tag = options.toLocal ? copyToLocal : ignore;
+				else row.tag = keepExisting;
+				row.state = row.tag == copyToRemote || row.tag == copyToLocal ? tasks::RowState::ready
+				                                                              : tasks::RowState::skipped;
+				row.change = action_text(row.tag);
+				if (row.tag == keepExisting && (local.modified != remote.modified || local.size != remote.size))
 				{
-					if (local.size != remote.size && options.toRemote != options.toLocal)
-						row.tag = options.toRemote ? copyToRemote : copyToLocal;
+					row.change = L"Different versions - kept on both sides";
+					row.detail = row.change;
 				}
-				else if (local.modified > remote.modified && options.toRemote) row.tag = copyToRemote;
-				else if (remote.modified > local.modified && options.toLocal) row.tag = copyToLocal;
-				row.replace = (row.tag == copyToRemote || row.tag == copyToLocal) && local.exists && remote.exists;
-				row.state = row.tag == ignore ? tasks::RowState::skipped : tasks::RowState::ready;
-				row.change = action_text(row.tag, row.replace);
-				// A directory is not an absent file: even a delete requires a truly absent counterpart.
+				// A directory is not an absent file.
 				if (localTree.directories.contains(name) || remoteTree.directories.contains(remoteName))
 				{
 					row.state = tasks::RowState::blocked;
@@ -433,16 +424,6 @@ namespace iw::sync
 					row.detail = L"A file maps to a folder on the other side. Choose separate destinations.";
 					plan.blockReason = row.detail;
 				}
-				const bool readOnlyTarget = (row.tag == copyToRemote && row.replace && remote.readOnly) ||
-				                            (row.tag == copyToLocal && row.replace && local.readOnly);
-				if (readOnlyTarget)
-				{
-					row.state = tasks::RowState::blocked;
-					row.change = L"Read-only target";
-					row.detail = L"A reviewed replacement target is read-only.";
-					plan.blockReason = row.detail;
-				}
-				if (row.replace) ++plan.replacements;
 				const auto [localParent, localParentState] = existing_parent(row.source, localRoot);
 				const auto [remoteParent, remoteParentState] = existing_parent(row.destination, remoteRoot);
 				if (localParent.empty() || remoteParent.empty())
@@ -488,8 +469,7 @@ namespace iw::sync
 		options.undoLabel = L"Synchronize";
 		options.undoPaths = [](const tasks::TaskRow& row)
 		{
-			return std::vector<std::filesystem::path>{
-				row.tag == copyToLocal || row.tag == deleteLocal ? row.source : row.destination};
+			return std::vector<std::filesystem::path>{row.tag == copyToLocal ? row.source : row.destination};
 		};
 		options.revalidate = [review](tasks::TaskRow& row)
 		{
@@ -498,7 +478,9 @@ namespace iw::sync
 				row.detail = L"Files changed after analysis. Analyze again before synchronizing this row.";
 				return false;
 			};
-			if (!review || !review->plan.can_run()) return refuse();
+			if (!review || !review->plan.can_run() || row.replace ||
+			    (row.tag != copyToRemote && row.tag != copyToLocal))
+				return refuse();
 			const auto found = review->snapshots.find(row.source.wstring());
 			if (found == review->snapshots.end()) return refuse();
 			const auto& snapshot = found->second;
@@ -531,24 +513,13 @@ namespace iw::sync
 			{
 				const auto& source = row.tag == copyToRemote ? row.source : row.destination;
 				const auto& target = row.tag == copyToRemote ? row.destination : row.source;
-				if (const auto failure = files::copy_file_to(source, target, row.replace,
-				                                             [&] { return revalidate(row); }))
+				if (const auto failure = files::copy_file_to(source, target, false, [&] { return revalidate(row); }))
 				{
 					if (row.detail.empty()) throw std::runtime_error(failure.message());
 					row.state = tasks::RowState::failed;
 					return;
 				}
 				row.change = row.tag == copyToRemote ? L"Copied to remote" : L"Copied to local";
-				return;
-			}
-			case deleteLocal:
-			case deleteRemote:
-			{
-				const std::array targets{row.tag == deleteLocal ? row.source : row.destination};
-				std::error_code error;
-				if (!platform::delete_permanently(targets, error))
-					throw std::runtime_error(error ? error.message() : "The file could not be deleted.");
-				row.change = row.tag == deleteLocal ? L"Deleted local" : L"Deleted remote";
 				return;
 			}
 			default: row.state = tasks::RowState::skipped;
@@ -559,46 +530,11 @@ namespace iw::sync
 
 	std::wstring summarize(const tasks::TaskPlan& plan)
 	{
-		std::array<size_t, 5> counts{};
+		std::array<size_t, 4> counts{};
 		for (const auto& row : plan.rows)
-			if (row.tag >= ignore && row.tag <= deleteRemote) ++counts[static_cast<size_t>(row.tag)];
-		return std::format(
-			L"{} copy to local, {} copy to remote, {} delete local, {} delete remote, {} ignore, {} replacements",
-			counts[copyToLocal], counts[copyToRemote], counts[deleteLocal], counts[deleteRemote], counts[ignore],
-			plan.replacements);
-	}
-
-	platform::ChoiceDefinition deletion_confirmation(const tasks::TaskPlan& plan)
-	{
-		size_t local = 0, remote = 0;
-		for (const auto& row : plan.rows)
-		{
-			if (row.state != tasks::RowState::ready) continue;
-			if (row.tag == deleteLocal) ++local;
-			else if (row.tag == deleteRemote) ++remote;
-		}
-		platform::ChoiceDefinition definition;
-		if (!local && !remote) return definition;
-		definition.title = L"Synchronize";
-		const auto total = local + remote;
-		definition.heading = std::format(L"Synchronization will permanently delete {} file{}.", total,
-		                                 total == 1 ? L"" : L"s");
-		definition.message = std::format(
-			L"These files cannot be recovered from the Recycle Bin.\n\n{} local file{} and {} remote file{} will be deleted."
-			L"\n\nImageWalker secures recovery copies first. After closing this task, Undo can restore completed changes during this session.",
-			local, local == 1 ? L"" : L"s", remote, remote == 1 ? L"" : L"s");
-		definition.buttons = {{1, L"Synchronize"}, {2, L"Cancel"}};
-		definition.defaultButton = 2;
-		definition.warning = true;
-		return definition;
-	}
-
-	bool confirm_deletions(const tasks::TaskPlan& plan,
-	                       const std::function<int(const platform::ChoiceDefinition&)>& confirm)
-	{
-		if (!plan.can_run() || plan.count(tasks::RowState::ready) == 0) return false;
-		const auto definition = deletion_confirmation(plan);
-		return definition.buttons.empty() || (confirm && confirm(definition) == 1);
+			if (row.tag >= ignore && row.tag <= keepExisting) ++counts[static_cast<size_t>(row.tag)];
+		return std::format(L"{} copy to local, {} copy to remote, {} kept on both sides, {} ignored",
+		                   counts[copyToLocal], counts[copyToRemote], counts[keepExisting], counts[ignore]);
 	}
 
 	std::vector<std::filesystem::path> affected_folders(const tasks::TaskPlan& plan)
@@ -608,7 +544,7 @@ namespace iw::sync
 		for (const auto& row : plan.rows)
 		{
 			if (row.state != tasks::RowState::success) continue;
-			if (row.tag != copyToLocal && row.tag != deleteLocal) continue;
+			if (row.tag != copyToLocal) continue;
 			const auto folder = row.source.parent_path();
 			if (seen.insert(folder.wstring()).second) folders.push_back(folder);
 		}
@@ -631,8 +567,6 @@ namespace iw
 			idOptionsHeading,
 			idCopyToRemote,
 			idCopyToLocal,
-			idDeleteLocal,
-			idDeleteRemote,
 			idCollectionFolders,
 			idAddCollectionFolder,
 			idRemoveCollectionFolder
@@ -700,8 +634,6 @@ namespace iw
 		options_.wholeCollection = checked(idScopeTree);
 		options_.toRemote = checked(idCopyToRemote);
 		options_.toLocal = checked(idCopyToLocal);
-		options_.deleteLocal = checked(idDeleteLocal);
-		options_.deleteRemote = checked(idDeleteRemote);
 		if (const auto* control = panel_.find(idLocal); control && control->kind == ui::ControlKind::folder)
 			options_.local = control->text;
 		if (const auto* control = panel_.find(idRemote)) options_.remote = control->text;
@@ -720,8 +652,8 @@ namespace iw
 		ui::Control description;
 		description.id = idDescription;
 		description.kind = ui::ControlKind::label;
-		description.label =
-			L"Analyze first. Review every copy and deletion before running. Deletions bypass the Recycle Bin; recovery copies are secured for session Undo.";
+		description
+			.label = L"Review and copy missing files. Existing files are kept on both sides, even when they differ.";
 		panel_.add(std::move(description));
 		ui::Control heading;
 		heading.id = idScopeHeading;
@@ -810,10 +742,8 @@ namespace iw
 			control.changed = changed;
 			panel_.add(std::move(control));
 		};
-		option(idCopyToRemote, L"Copy newer local files to remote folders", options_.toRemote);
-		option(idCopyToLocal, L"Copy newer remote files to local folders", options_.toLocal);
-		option(idDeleteLocal, L"Delete local files that do not exist remotely", options_.deleteLocal);
-		option(idDeleteRemote, L"Delete remote files that do not exist locally", options_.deleteRemote);
+		option(idCopyToRemote, L"Copy missing files to remote folders", options_.toRemote);
+		option(idCopyToLocal, L"Copy missing files to local folders", options_.toLocal);
 	}
 
 	void TaskSync::control_activated(ui::Control& control)
@@ -847,9 +777,7 @@ namespace iw
 			{
 			case sync::copyToRemote: return L"\u2192";
 			case sync::copyToLocal: return L"\u2190";
-			case sync::deleteLocal:
-			case sync::deleteRemote: return L"\u2717";
-			default: return L"=";
+			default: return {};
 			}
 		default: return row.destination.wstring();
 		}
@@ -864,19 +792,6 @@ namespace iw
 			*review = sync::analyze(options, stop, progress);
 			return review->plan;
 		};
-	}
-
-	void TaskSync::start_run()
-	{
-		if (busy() || finished_ || confirming_ || !plan_.can_run() || !review_) return;
-		const auto keepAlive = shared_from_this();
-		const auto reviewed = review_;
-		confirming_ = true;
-		const auto confirmed = sync::confirm_deletions(plan_, [this](const platform::ChoiceDefinition& definition)
-		{ return platform::show_choice(frame_, definition); });
-		confirming_ = false;
-		if (!confirmed || reviewed != review_) return;
-		TaskView::start_run();
 	}
 
 	tasks::RunOptions TaskSync::build_run_options()

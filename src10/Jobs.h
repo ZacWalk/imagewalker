@@ -12,10 +12,13 @@
 
 #include "iw/workqueue.h"
 
+#include <atomic>
+
 class CItemsView;
 class CImageView;
 class CDibScale;
 class CLoadAny;
+class CJobDirChanged;
 
 // One decoder per worker thread. The format loaders hold decode state, so they
 // cannot be shared, and building one per job would throw that state away
@@ -38,8 +41,8 @@ public:
 class CJobThumb : public CJob
 {
 public:
-	CJobThumb(CItemsView* pWnd, const CString& strName, UINT uKey, LONG* pJobNo)
-		: CJob(pJobNo, nullptr), m_pWnd(pWnd), m_uKey(uKey), m_strName(strName)
+	CJobThumb(CItemsView* pWnd, const CString& strName, UINT uKey, LONG* pJobNo, int edge = IMAGE_X)
+		: CJob(pJobNo, nullptr), m_pWnd(pWnd), m_uKey(uKey), m_strName(strName), m_nEdge(edge)
 	{
 	}
 
@@ -49,6 +52,7 @@ public:
 	CItemsView* m_pWnd;
 	UINT m_uKey;
 	CString m_strName;
+	int m_nEdge;
 	CDib m_dib;
 };
 
@@ -125,32 +129,26 @@ public:
 };
 
 // Watch a folder for changes until the worker is stopped or another job is
-// queued behind it. Unlike the other jobs this one never finishes on its own,
-// so it waits on the worker's wake handle as well as on the change
-// notification, and posts a separate item to the UI queue for each change.
+// queued behind it. It waits on both the worker's wake handle and the change
+// notification, and queues at most one pending refresh of this folder.
 class CJobWatch : public CJob
 {
 public:
-	CJobWatch(CItemsView* pWnd, const CString& strPath, HANDLE hWake,
-	          const std::shared_ptr<void>& owner)
-		: CJob(nullptr, nullptr), m_pWnd(pWnd), m_strPath(strPath), m_hWake(hWake), m_owner(owner)
+	CJobWatch(const CString& strPath, HANDLE hWake, const std::shared_ptr<CJobDirChanged>& change)
+		: CJob(nullptr, nullptr), m_strPath(strPath), m_hWake(hWake), m_change(change)
 	{
 	}
 
 	void Work() override;
 
-	CItemsView* m_pWnd;
+private:
 	CString m_strPath;
 	HANDLE m_hWake;
-
-	// Weak: a strong copy would keep the very token that OwnerIsAlive() tests
-	// alive, so every change this job posted would be completed into a window
-	// that has already gone.
-	std::weak_ptr<void> m_owner;
+	std::shared_ptr<CJobDirChanged> m_change;
 };
 
-// Posted to the UI queue by CJobWatch. Work() is empty because the work has
-// already happened on the watcher.
+// Each watch has its own request so the items pane can reject a refresh
+// queued for a folder it has already left.
 class CJobDirChanged : public IW::CWorkItem
 {
 public:
@@ -162,7 +160,10 @@ public:
 	{
 	}
 
+	static void Post(const std::shared_ptr<CJobDirChanged>& change);
 	void Complete() override;
 
+private:
 	CItemsView* m_pWnd;
+	std::atomic_bool m_pending{false};
 };

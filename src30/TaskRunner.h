@@ -45,6 +45,8 @@ namespace iw::tasks
 		// was changed; staged operations supply this to avoid accepting edits to older outputs.
 		std::function<std::vector<std::filesystem::path>(const TaskRow&)> undoMutatedPaths;
 		bool undoAllBeforeRun{};
+		// Record only explicitly reported mutations when a row fails partway through.
+		bool undoPartial{};
 		// Null uses explicitly initialized application history (or the test's ScopedHistory).
 		// It never implicitly opens the user's live journal.
 		undo::History* undoHistory{};

@@ -29,12 +29,16 @@ public:
 		str.Format(_T("%s - released 2006\nCopyright © Zac Walker"), _T(APP_VERSION_NAME));
 		SetDlgItemText(IDC_TITLE, str);
 
-		// Describes the 2006 release, not this binary -- see docs/versions.md.
 		SetDlgItemText(IDC_ABOUT_DETAILS,
-		               _T("Adds image tagging, EXIF auto-rotation and the Resize Images ")
-		               _T("wizard.\r\n\r\n")
+		               _T("Tag images, view their metadata, turn photos upright using EXIF ")
+		               _T("and resize images in batches.\r\n\r\n")
 		               _T("Free software. No registration, no reminders, no limits. ")
-		               _T("64-bit build of ") _T(__DATE__) _T("."));
+#if defined(_WIN64)
+		               _T("64-bit build of ")
+#else
+		               _T("32-bit build of ")
+#endif
+		               _T(__DATE__) _T("."));
 
 		_link.SetHyperLink(_T("www.ImageWalker.com"));
 		_link.SetLabel(_T("www.ImageWalker.com"));

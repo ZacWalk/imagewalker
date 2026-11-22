@@ -42,5 +42,6 @@ namespace iw::platform
 	namespace win32
 	{
 		HWND owner_window(const WindowFramePtr& frame);
+		void refresh_appearance(HWND window = nullptr);
 	}
 }

@@ -29,10 +29,11 @@ inline void InvokeHelp(HWND hwnd, UINT nId)
 		return;
 	}
 
-	if (nId == 0)
-		::HtmlHelpW(hwnd, path.c_str(), HH_DISPLAY_TOPIC, 0);
-	else
-		::HtmlHelpW(hwnd, path.c_str(), HH_HELP_CONTEXT, nId);
+	if (nId != 0 && ::HtmlHelpW(hwnd, path.c_str(), HH_HELP_CONTEXT, nId))
+		return;
+	if (!::HtmlHelpW(hwnd, path.c_str(), HH_DISPLAY_TOPIC, 0))
+		::MessageBoxW(hwnd, L"Windows HTML Help could not open the ImageWalker guide.", L"Help",
+		              MB_OK | MB_ICONWARNING);
 }
 
 } // namespace IW

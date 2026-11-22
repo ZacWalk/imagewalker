@@ -1,0 +1,12 @@
+file(GLOB sources "${IW10_SOURCE_DIR}/*.h" "${IW10_SOURCE_DIR}/*.cpp" "${IW10_SOURCE_DIR}/*.rc")
+foreach(path IN LISTS sources)
+    file(READ "${path}" text)
+    if(text MATCHES "#include[ \t]*[<\"](atl|afx|wtl|libdesktop/|iw/(legacy/|imaging|addressbar|chromelayout|logowindow|shell)|jpeg|png\\.h)" OR
+       text MATCHES "CFrameWindowImpl|CWindowImpl|CAppModule|BEGIN_MSG_MAP")
+        message(FATAL_ERROR "ImageWalker 1.0 must use the Windows SDK, not a GUI framework or a private codec API: ${path}")
+    endif()
+endforeach()
+file(READ "${IW10_SOURCE_DIR}/CMakeLists.txt" build)
+if(build MATCHES "iw::flags|iw_imaging|libdesktop|include/wtl|iw::(jpeg|png|tiff|gif|webp|zlib)")
+    message(FATAL_ERROR "ImageWalker 1.0 must only link SDK libraries and the public libfiles target")
+endif()

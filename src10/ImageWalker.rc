@@ -4,7 +4,6 @@
 
 #define APSTUDIO_READONLY_SYMBOLS
 #include "winres.h"
-#include "atlres.h"
 #undef APSTUDIO_READONLY_SYMBOLS
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
@@ -41,10 +40,21 @@ IDR_MAINFRAME ACCELERATORS PRELOAD MOVEABLE PURE
 BEGIN
     "A",            ID_EDIT_SELECT_ALL,     VIRTKEY, CONTROL, NOINVERT
     "C",            ID_EDIT_COPY,           VIRTKEY, CONTROL, NOINVERT
+    "D",            ID_EDIT_INVERTSELECTION, VIRTKEY, CONTROL, NOINVERT
     "P",            ID_BROWSE_PARENT,       VIRTKEY, CONTROL, NOINVERT
+    "Z",            ID_MODE_TOGGLE_ZOOM,   VIRTKEY, NOINVERT
+    VK_BACK,        ID_BROWSE_BACK,         VIRTKEY, NOINVERT
     VK_BACK,        ID_BROWSE_BACK,         VIRTKEY, ALT, NOINVERT
+    VK_LEFT,        ID_BROWSE_BACK,         VIRTKEY, ALT, NOINVERT
+    VK_RIGHT,       ID_BROWSE_FORWARD,      VIRTKEY, ALT, NOINVERT
+    VK_UP,          ID_BROWSE_PARENT,       VIRTKEY, ALT, NOINVERT
     VK_F1,          ID_HELP_FINDER,         VIRTKEY, NOINVERT
     VK_F5,          ID_VIEW_REFRESH,        VIRTKEY, NOINVERT
+    VK_F11,         ID_MODE_FULLSCREEN,    VIRTKEY, NOINVERT
+    VK_RETURN,      ID_VIEW_ACTIVATE,       VIRTKEY, NOINVERT
+    VK_SPACE,       ID_VIEW_NEXTIMAGE,      VIRTKEY, NOINVERT
+    VK_SPACE,       ID_EDIT_TOGGLE_FOCUS,   VIRTKEY, CONTROL, NOINVERT
+    VK_SPACE,       ID_MODE_FULLSCREEN,    VIRTKEY, SHIFT, CONTROL, NOINVERT
     VK_INSERT,      ID_EDIT_COPY,           VIRTKEY, CONTROL, NOINVERT
 END
 
@@ -57,9 +67,9 @@ IDR_MAINFRAME MENU PRELOAD DISCARDABLE
 BEGIN
     POPUP "&File"
     BEGIN
-        MENUITEM "Browse &Parent\tCtrl+P",      ID_BROWSE_PARENT
+        MENUITEM "Browse &Parent\tAlt+Up",      ID_BROWSE_PARENT
         MENUITEM "&Back\tAlt+Left",             ID_BROWSE_BACK
-        MENUITEM "&Forward",                    ID_BROWSE_FORWARD
+        MENUITEM "&Forward\tAlt+Right",          ID_BROWSE_FORWARD
         MENUITEM SEPARATOR
         MENUITEM "E&xit",                       ID_APP_EXIT
     END
@@ -68,7 +78,7 @@ BEGIN
         MENUITEM "&Copy\tCtrl+C",               ID_EDIT_COPY
         MENUITEM SEPARATOR
         MENUITEM "Select &All\tCtrl+A",         ID_EDIT_SELECT_ALL
-        MENUITEM "&Invert Selection",           ID_EDIT_INVERTSELECTION
+        MENUITEM "&Invert Selection\tCtrl+D",   ID_EDIT_INVERTSELECTION
     END
     POPUP "&Image"
     BEGIN
@@ -86,8 +96,9 @@ BEGIN
         MENUITEM SEPARATOR
         MENUITEM "Na&vigate",                   ID_NAVIGATE
         MENUITEM SEPARATOR
+        MENUITEM "&Full screen\tF11",           ID_MODE_FULLSCREEN
         MENUITEM "&Previous Image",             ID_VIEW_PREVIOUSIMAGE
-        MENUITEM "&Next Image",                 ID_VIEW_NEXTIMAGE
+        MENUITEM "&Next Image\tSpace",          ID_VIEW_NEXTIMAGE
     END
     POPUP "&View"
     BEGIN
@@ -122,7 +133,7 @@ END
 //
 
 IDD_ABOUTBOX DIALOG DISCARDABLE  0, 0, 235, 136
-STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+STYLE DS_MODALFRAME | DS_CENTER | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "About ImageWalker 1.0"
 FONT 8, "MS Sans Serif"
 BEGIN
@@ -137,8 +148,8 @@ BEGIN
     LTEXT           "",IDC_ABOUT_DETAILS,11,92,213,8
     CONTROL         "",IDC_STATIC,"Static",SS_ETCHEDHORZ,11,107,213,1
     LTEXT           "Theme song",IDC_STATIC,11,114,44,8
-    CONTROL         "",IDC_THEME_SONG,"Static",SS_LEFT | SS_NOTIFY |
-                    WS_GROUP,58,114,166,8
+    CONTROL         "<a href=""https://www.youtube.com/watch?v=TLGWQfK-6DY"">It's Like That (Run-DMC vs. Jason Nevins)</a>",
+                    IDC_THEME_SONG,"SysLink",WS_TABSTOP,58,112,166,12
 END
 
 /////////////////////////////////////////////////////////////////////////////
@@ -146,8 +157,14 @@ END
 // PNG - read by the image loaders rather than by the resource loader.
 //
 
-IDR_ICONMATE8           IMAGE   DISCARDABLE     "res\\iconmate8.png"
+IDR_SPLASH              IMAGE   DISCARDABLE     "res\\splash.png"
 IDR_BACKGROUND          IMAGE   DISCARDABLE     "res\\background.png"
+
+ID_TEST_JPEG_RGB         RCDATA  "testdata\\jpeg-rgb.jpg"
+ID_TEST_JPEG_GRAY        RCDATA  "testdata\\jpeg-gray.jpg"
+ID_TEST_JPEG_ORIENTATION RCDATA "testdata\\jpeg-orientation.jpg"
+ID_TEST_JPEG_CMYK        RCDATA  "testdata\\jpeg-cmyk.jpg"
+ID_TEST_JPEG_CMYK_LARGE  RCDATA  "testdata\\jpeg-cmyk-large.jpg"
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -160,7 +177,6 @@ BEGIN
     IDS_APP_TITLE           "ImageWalker 1.0"
     IDS_ADDRESS             "Address"
     IDS_STATUS_IMAGE        "                                             "
-    ATL_IDS_IDLEMESSAGE     "For Help, press F1"
 END
 
 STRINGTABLE DISCARDABLE

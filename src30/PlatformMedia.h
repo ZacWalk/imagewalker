@@ -30,6 +30,7 @@ namespace iw::media
 		bool canSeek{};
 		bool hasVideo{};
 		std::wstring error;
+		std::wstring notice;
 	};
 
 	inline bool can_play(const PlaybackState state)
@@ -50,12 +51,13 @@ namespace iw::media
 	{
 	public:
 		virtual ~Player() = default;
-		virtual void open(const std::filesystem::path& path) = 0;
+		virtual void open(const std::filesystem::path& path, bool autoplay = true) = 0;
 		virtual void play() = 0;
 		virtual void pause() = 0;
 		virtual void stop() = 0;
 		virtual void seek(std::int64_t ticks) = 0;
 		virtual void volume(float value) = 0;
+		virtual void turn(int clockwiseQuarterTurns) = 0;
 		virtual void close() = 0;
 		// Where the video is drawn in the owner's frame, fitted inside and letterboxed.
 		virtual void bounds(app::recti bounds) = 0;

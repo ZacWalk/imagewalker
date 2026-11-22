@@ -48,6 +48,11 @@ namespace iw
 		std::wstring run_block_reason() const override;
 		void control_activated(ui::Control& control) override;
 		void layout_hosted_controls() override;
+		void release_hosted_controls() override
+		{
+			if (limitInput_) limitInput_->show(false);
+			limitInput_.reset();
+		}
 		void work_state_changed(bool busy) override;
 
 	private:

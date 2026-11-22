@@ -139,6 +139,7 @@ namespace iw
 			return;
 		}
 		if (!plan.count(tasks::RowState::ready)) return;
+		canvas_.stop_media();
 		const auto keepAlive = weak_from_this().lock();
 		auto options = rename::run_options(plan);
 		options.undoLabel = L"Rename";
@@ -156,7 +157,7 @@ namespace iw
 		if (!plan.completionError.empty()) platform::show_error(plan.completionError, L"Rename recovery", frame_);
 		const bool displayed = canvas_.path() == paths.front();
 		open_folder(folder_, false);
-		if (displayed) open_image(renamed);
+		if (displayed) canvas_.load(renamed);
 	}
 	catch (const std::exception& error)
 	{
@@ -167,8 +168,22 @@ namespace iw
 	void MainWindow::delete_selected()
 	{
 		const auto paths = selected_paths();
-		if (platform::perform_file_operation(frame_, platform::FileOperation::recycle, paths))
-			open_folder(folder_, false);
+		if (paths.empty()) return;
+		platform::ChoiceDefinition choice;
+		choice.title = L"Recycle Bin";
+		choice.heading = paths.size() == 1
+		                     ? std::format(L"Move {} to the Recycle Bin?", paths.front().filename().wstring())
+		                     : std::format(L"Move {} selected items to the Recycle Bin?", paths.size());
+		choice.message = L"ImageWalker will not permanently delete items that cannot be recycled.";
+		choice.buttons = {{1, L"Move to Recycle Bin"}, {2, L"Cancel"}};
+		choice.defaultButton = 2;
+		if (platform::show_choice(frame_, choice) != 1) return;
+		canvas_.stop_media();
+		if (!platform::perform_file_operation(frame_, platform::FileOperation::recycle, paths))
+			platform::show_error(
+				L"Not every item could be moved to the Recycle Bin. Check the folder and the Recycle Bin.",
+				choice.title, frame_);
+		open_folder(folder_, false);
 	}
 
 	void MainWindow::copy_selected(const bool cut)
@@ -621,43 +636,32 @@ namespace iw
 		const std::wstring seeded = destination.wstring();
 		platform::DialogField destinationField;
 		destinationField.id = transferDestination;
-		destinationField.label = L"&Destination folder:";
+		destinationField.label = L"Destination folder";
 		destinationField.value = seeded;
 		destinationField.folderCompletion = true;
 		platform::DialogField browse;
 		browse.id = transferBrowse;
 		browse.kind = platform::DialogFieldKind::action;
-		browse.label = L"&Choose a folder...";
+		browse.label = L"Browse...";
 		browse.editValues = [this](platform::DialogValues& values)
 		{
-			if (const auto chosen = platform::choose_folder(frame_, L"Choose the destination folder"))
+			const auto* text = std::get_if<std::wstring>(&values[transferDestination]);
+			const auto start = text && !text->empty() ? std::filesystem::path(*text) : folder_;
+			if (const auto chosen = platform::choose_folder(frame_, L"Choose the destination folder", start))
 				values[transferDestination] = chosen->wstring();
 		};
 		platform::DialogField openAfter;
 		openAfter.id = transferOpenAfter;
 		openAfter.kind = platform::DialogFieldKind::checkBox;
-		openAfter.label = L"&Open destination folder afterwards";
+		openAfter.label = L"Open destination folder afterwards";
 		openAfter.value = openDestinationAfterTransfer_;
 
 		platform::DialogDefinition definition;
 		definition.title = title;
-		definition.message = std::format(L"{} and {} of data.",
+		definition.message = std::format(L"{}  ({})\nType a path to see matching folders, or choose Browse.",
 		                                 selected.size() == 1 ? selected.front().filename().wstring()
 		                                                      : std::format(L"{} items", selected.size()),
 		                                 format::size(totalSize));
-		for (size_t index = 0; index < (std::min)(selected.size(), size_t{5}); ++index)
-		{
-			const auto& path = selected[index];
-			const auto thumbnail = files::load_thumbnail(path, 64, 64);
-			if (!thumbnail.pixels.empty())
-				definition.previews.push_back({{thumbnail.width, thumbnail.height}, thumbnail.pixels, true});
-			else
-			{
-				const auto attributes = platform::read_file_attributes(path);
-				definition.previews.push_back(platform::load_bitmap_resource(
-					attributes.directory ? platform::BitmapAsset::fileFolder : platform::BitmapAsset::fileOther));
-			}
-		}
 		definition.fields.push_back(std::move(destinationField));
 		definition.fields.push_back(std::move(browse));
 		definition.fields.push_back(std::move(openAfter));
@@ -751,7 +755,6 @@ namespace iw
 			if (!collision.empty()) collisions.push_back(collision);
 		}
 
-		bool replace = false;
 		if (!collisions.empty())
 		{
 			platform::ChoiceDefinition choice;
@@ -760,14 +763,11 @@ namespace iw
 			                     ? std::format(L"{} is occupied or claimed by another selected item.",
 			                                   collisions.front().filename().wstring())
 			                     : std::format(L"{} selected items have destination collisions.", collisions.size());
-			choice.message = L"Auto-rename keeps both. Replace requires recovery copies before overwriting. "
-							 L"Completed changes can be undone during this session if their files have not changed.";
-			choice.buttons = {{1, L"Auto-rename"}, {2, L"Replace"}};
+			choice.message = L"Use new names for the incoming files and keep everything already in the destination.";
+			choice.buttons = {{1, L"Auto-rename"}, {2, L"Cancel"}};
 			choice.defaultButton = 1;
 			choice.warning = true;
-			const int chosen = platform::show_choice(frame_, choice);
-			if (!chosen) return;
-			replace = chosen == 2;
+			if (platform::show_choice(frame_, choice) != 1) return;
 		}
 
 		claimed.clear();
@@ -776,7 +776,6 @@ namespace iw
 			for (const auto& part : row.parts) sources.insert(part.source);
 		for (auto& row : rows)
 		{
-			if (!replace)
 			{
 				const auto target = files::unique_destination(row.destination,
 				                                              [&](const std::filesystem::path& candidate)
@@ -858,10 +857,10 @@ namespace iw
 		std::vector<std::wstring> results;
 		std::vector<std::filesystem::path> transferred;
 		std::wstring preparationFailure;
+		if (move) canvas_.stop_media();
 		const bool processed = platform::run_with_status(frame_, title, L"Processing files...", [&]
 		{
-			// Recheck every reviewed object before the first write. Replace never grants permission
-			// to overwrite a file which appeared or changed after the collision decision.
+			// Recheck the reviewed paths before creating anything.
 			if (!transfer_parents_unchanged(sourceParents, true) ||
 			    !transfer_parents_unchanged(destinationParents, true))
 			{
@@ -1029,7 +1028,7 @@ namespace iw
 								return true;
 							};
 							const auto outcome = undo::transfer_file(*journal, part.source, part.destination, move,
-							                                         now.exists, beforeCommit);
+							                                         false, beforeCommit);
 							error = outcome.error;
 							if (!outcome.detail.empty()) failure = outcome.detail;
 							if (outcome.destinationCompleted)

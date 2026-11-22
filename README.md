@@ -4,7 +4,7 @@
 
 ImageWalker is a Windows image browser and viewer by
 [Zac Walker](https://rethinkify.com/). This repository builds five of its
-releases as standalone x64 applications: four preserved releases, first
+releases as standalone 32-bit and 64-bit Windows applications: four preserved releases, first
 published between 1998 and 2006, and ImageWalker 3.0.
 
 | Directory | Application | Year | New in this release |
@@ -16,7 +16,7 @@ published between 1998 and 2006, and ImageWalker 3.0.
 | `src30` | [ImageWalker 3.0](docs/features.md#imagewalker-30) | 2026 | Video and audio playback, reviewed file workflows and folder synchronization |
 
 The table describes each release as first published;
-[known-issues.md](docs/known-issues.md) lists what the x64 builds lack.
+[known-issues.md](docs/known-issues.md) lists what the rebuilt editions lack.
 
 Each release keeps its own interface, settings and workflows. All five share
 header-only imaging code under `include/iw`. File readers, documents, metadata
@@ -26,11 +26,15 @@ services and runtime-dispatched pixel operations come from
 
 Every application is portable and free: settings sit beside the executable,
 each executable carries its own help, and there is no registration, reminder
-screen or feature limit.
+screen or feature limit. The Collection setup installs the five editions
+side by side and the portable ZIP carries both architectures. See
+[build.md](docs/build.md#collection-release) for packaging and Windows requirements.
+For help or to report a bug, use [GitHub Issues](https://github.com/ZacWalk/imagewalker/issues).
 
 ## Screenshots
 
-Click an image to view it at full size.
+The [ImageWalker website](https://imagewalker.com/#screenshots-heading) uses the
+same Flickr gallery captures. Click an image to view it at full size.
 
 ### ImageWalker 3.0
 
@@ -62,6 +66,8 @@ CMake, and ImageWalker's CMake recipes fetch and build the libraries it links.
 The targets are `iw10`, `iw20`, `iw22`, `iw23` and `iw30`. Executables, and the
 help file each of them embeds, are written to `exe\`.
 [build.md](docs/build.md) covers toolchain setup, tests, help and dependencies.
+You can [build 1.0 on its own](docs/build.md#sdk-only-imagewalker-10)
+with the Windows SDK and libfiles, without ATL or WTL.
 The headless gate prints each harness's actual case/check counts, including
 successful runs; the unfiltered gate also opens the applications for smoke
 checks.

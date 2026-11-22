@@ -229,18 +229,18 @@ namespace iw::tests
 		write(two, "two");
 		write(oneSidecar, "one metadata");
 		write(twoSidecar, "two metadata");
-		auto cycle = rename::analyze({two, one}, L"#", 1, tasks::CollisionPolicy::replace);
-		auto renameOptions = rename::run_options(cycle);
+		auto renamedCopies = rename::analyze({two, one}, L"copy-#", 1, tasks::CollisionPolicy::block);
+		auto renameOptions = rename::run_options(renamedCopies);
 		renameOptions.undoHistory = &renameHistory;
-		tasks::run_plan(cycle, {}, renameOptions);
-		reporter.check(cycle.count(tasks::RowState::success) == 2 && read(one) == "two" &&
-		                   read(oneSidecar) == "two metadata",
-		               L"the rename fixture completes a real cycle with companions");
+		tasks::run_plan(renamedCopies, {}, renameOptions);
+		reporter.check(renamedCopies.count(tasks::RowState::success) == 2 && read(one) == "one" &&
+		                   read(root / L"copy-1.bin") == "two" && read(root / L"copy-1.bin.xmp") == "two metadata",
+		               L"Batch Rename writes a new bundle without moving the original");
 		report = renameHistory.undo();
 		reporter.check(report.restored == 4 && !report.conflicts && !report.failed && read(one) == "one" &&
 		                   read(two) == "two" && read(oneSidecar) == "one metadata" &&
-		                   read(twoSidecar) == "two metadata",
-		               L"Undo restores an entire rename cycle and its sidecars");
+		                   read(twoSidecar) == "two metadata" && !std::filesystem::exists(root / L"copy-1.bin"),
+		               L"Undo removes the renamed copies without changing the original files");
 
 		const auto editedCycleRoot = root / L"externally-edited-cycle";
 		std::filesystem::create_directory(editedCycleRoot);
@@ -253,7 +253,9 @@ namespace iw::tests
 		write(editedOneSidecar, "one metadata");
 		write(editedTwoSidecar, "two metadata");
 		undo::History editedCycleHistory(root / L"externally-edited-cycle-history");
-		auto editedCycle = rename::analyze({editedTwo, editedOne}, L"#", 1, tasks::CollisionPolicy::replace);
+		auto editedCycle = rename::analyze({editedTwo, editedOne}, L"copy-#", 1, tasks::CollisionPolicy::block);
+		const auto editedCopy = editedCycleRoot / L"copy-1.bin";
+		const auto editedCopySidecar = editedCycleRoot / L"copy-1.bin.xmp";
 		auto editedCycleOptions = rename::run_options(editedCycle);
 		editedCycleOptions.undoHistory = &editedCycleHistory;
 		int injectedEdits = 0;
@@ -261,27 +263,25 @@ namespace iw::tests
 		{
 			if (complete != 1) return;
 			++injectedEdits;
-			const auto outputTime = std::filesystem::last_write_time(editedOne);
-			const auto sidecarTime = std::filesystem::last_write_time(editedOneSidecar);
-			write(editedOne, "own");
-			write(editedOneSidecar, "own metadata");
-			std::filesystem::last_write_time(editedOne, outputTime);
-			std::filesystem::last_write_time(editedOneSidecar, sidecarTime);
+			const auto outputTime = std::filesystem::last_write_time(editedCopy);
+			const auto sidecarTime = std::filesystem::last_write_time(editedCopySidecar);
+			write(editedCopy, "own");
+			write(editedCopySidecar, "own metadata");
+			std::filesystem::last_write_time(editedCopy, outputTime);
+			std::filesystem::last_write_time(editedCopySidecar, sidecarTime);
 		};
 		tasks::run_plan(editedCycle, {}, editedCycleOptions);
-		reporter
-			.check(injectedEdits == 1 && editedCycle.count(tasks::RowState::success) == 2 && read(editedTwo) == "one" &&
-		               read(editedTwoSidecar) == "one metadata",
-		           L"the second cycle row consumes staged originals without touching the first row's edited outputs");
+		reporter.check(injectedEdits == 1 && editedCycle.count(tasks::RowState::success) == 2 &&
+		                   read(editedTwo) == "two" && read(editedCopySidecar) == "own metadata",
+		               L"a subsequent copy leaves originals and the first row's edited output alone");
 		report = editedCycleHistory.undo();
-		reporter.check(
-			report.conflicts == 1 && !report.restored && !report.failed && read(editedOne) == "own" &&
-				read(editedOneSidecar) == "own metadata" && read(editedTwo) == "one" &&
-				read(editedTwoSidecar) == "one metadata",
-			L"cycle connectivity never refreshes untouched fingerprints or authorizes undo over an intervening edit");
+		reporter.check(report.conflicts == 1 && report.restored == 2 && !report.failed && read(editedCopy) == "own" &&
+		                   read(editedCopySidecar) == "own metadata" && read(editedTwo) == "two" &&
+		                   read(editedTwoSidecar) == "two metadata",
+		               L"Undo never removes an externally changed copy bundle and still removes an independent bundle");
 
 		undo::History cancelledRenameHistory(root / L"cancelled-rename-history");
-		auto cancelledCycle = rename::analyze({two, one}, L"#", 1, tasks::CollisionPolicy::replace);
+		auto cancelledCycle = rename::analyze({two, one}, L"cancel-#", 1, tasks::CollisionPolicy::block);
 		auto cancelledOptions = rename::run_options(cancelledCycle);
 		cancelledOptions.undoHistory = &cancelledRenameHistory;
 		std::stop_source cancelRename;
@@ -292,17 +292,17 @@ namespace iw::tests
 		tasks::run_plan(cancelledCycle, cancelRename.get_token(), cancelledOptions);
 		reporter.check(cancelledCycle.count(tasks::RowState::success) == 1 &&
 		                   cancelledCycle.count(tasks::RowState::notRun) == 1,
-		               L"cancellation leaves an unfinished cycle row unreached while staging recovery completes");
+		               L"cancellation leaves the second copy unreached");
 		report = cancelledRenameHistory.undo();
-		reporter.check(report.restored == 4 && !report.failed && !report.conflicts && read(one) == "one" &&
+		reporter.check(report.restored == 2 && !report.failed && !report.conflicts && read(one) == "one" &&
 		                   read(two) == "two" && read(oneSidecar) == "one metadata" &&
 		                   read(twoSidecar) == "two metadata",
-		               L"Undo reverses the completed cycle row without consuming unfinished-row recovery copies");
+		               L"Undo removes only the completed bundle after cancellation");
 
 		undo::History caseHistory(root / L"case-history");
 		const auto casePath = root / L"case.bin";
 		write(casePath, "case content");
-		auto casePlan = rename::analyze({casePath}, L"CASE", 1, tasks::CollisionPolicy::replace);
+		auto casePlan = rename::direct_plan(casePath, L"CASE.bin");
 		auto caseOptions = rename::run_options(casePlan);
 		caseOptions.undoHistory = &caseHistory;
 		tasks::run_plan(casePlan, {}, caseOptions);
@@ -370,7 +370,7 @@ namespace iw::tests
 			write(oldChild, "one");
 			write(oldNested, "nested");
 			undo::History chainHistory(chainRoot / L"history");
-			auto childPlan = rename::analyze({oldChild, oldNested}, L"b", 1, tasks::CollisionPolicy::replace);
+			auto childPlan = rename::analyze({oldChild, oldNested}, L"b", 1, tasks::CollisionPolicy::block);
 			auto childOptions = rename::run_options(childPlan);
 			childOptions.undoHistory = &chainHistory;
 			tasks::run_plan(childPlan, {}, childOptions);
@@ -393,7 +393,7 @@ namespace iw::tests
 					L"the descendant fixture replaces a completed file with an unrelated identical-content file");
 				std::filesystem::last_write_time(newChild, time);
 			}
-			auto parentPlan = rename::analyze({parent}, L"Q", 1, tasks::CollisionPolicy::replace);
+			auto parentPlan = rename::direct_plan(parent, L"Q");
 			auto parentOptions = rename::run_options(parentPlan);
 			parentOptions.undoHistory = &chainHistory;
 			tasks::run_plan(parentPlan, {}, parentOptions);
@@ -409,15 +409,15 @@ namespace iw::tests
 			report = chainHistory.undo();
 			if (!editWhen)
 				reporter.check(
-					report.restored == 4 && !report.failed && !report.conflicts && read(oldChild) == "one" &&
+					report.restored == 2 && !report.failed && !report.conflicts && read(oldChild) == "one" &&
 						read(oldNested) == "nested" && !std::filesystem::exists(newChild) &&
 						!std::filesystem::exists(newNested),
 					L"verified descendants and their immediate parents inherit restored identities for chained Undo");
 			else
 				reporter.check(
-					report.restored == 2 && report.conflicts == 1 && !report.failed &&
-						!std::filesystem::exists(oldChild) && read(newChild) == (editWhen == 3 ? "one" : "own") &&
-						read(oldNested) == "nested" && !std::filesystem::exists(newNested),
+					report.restored == 1 && report.conflicts == 1 && !report.failed && read(oldChild) == "one" &&
+						read(newChild) == (editWhen == 3 ? "one" : "own") && read(oldNested) == "nested" &&
+						!std::filesystem::exists(newNested),
 					L"descendant rebasing never blesses edits or unrelated replacements; independent rows still restore");
 		}
 

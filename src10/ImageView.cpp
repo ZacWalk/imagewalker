@@ -21,7 +21,7 @@ namespace
 	enum { kGlyphFit = 1, kGlyphActual = 4, kGlyphNavigate = 3, kGlyphZoom = 6 };
 
 	// The zoom slider never takes more than this, however wide the pane is.
-	constexpr int kTrackWidthMax = 200;
+	constexpr int kTrackWidthMax = 144;
 
 	// Longest edge of the navigator thumbnail, as 2.2 sized it.
 	constexpr int kNavigateSize = 160;
@@ -145,19 +145,9 @@ namespace
 	// whole picture with the visible rectangle drawn on it. It is dragged with
 	// the button still down, so it holds the capture and pumps its own loop -
 	// the toolbar owns the mouse until we take it.
-	class CImageNavigate : public CWindowImpl<CImageNavigate>
+	class CImageNavigate : public SdkWindow
 	{
 	public:
-		DECLARE_WND_CLASS_EX(_T("IWImageNavigate"), CS_SAVEBITS, COLOR_WINDOW)
-
-		BEGIN_MSG_MAP(CImageNavigate)
-			MSG_WM_PAINT(OnPaint)
-			MSG_WM_MOUSEMOVE(OnMouseMove)
-			MSG_WM_LBUTTONUP(OnLButtonUp)
-			MSG_WM_KEYDOWN(OnKeyDown)
-			MSG_WM_DESTROY(OnDestroy)
-		END_MSG_MAP()
-
 		CImageNavigate(CImageView* pView, CDib& dibThumb)
 			: m_pView(pView), m_dibThumb(dibThumb)
 		{
@@ -186,8 +176,8 @@ namespace
 			rect.OffsetRect(rectButton.CenterPoint() - rect.CenterPoint());
 			ClampToWorkArea(rect);
 
-			if (Create(m_pView->m_hWnd, rect, nullptr,
-			           WS_POPUP | WS_VISIBLE | WS_BORDER, WS_EX_TOOLWINDOW) == nullptr)
+			if (CreateNative("IWImageNavigate", *m_pView, rect, nullptr,
+			                 WS_POPUP | WS_VISIBLE | WS_BORDER, WS_EX_TOOLWINDOW, CS_SAVEBITS) == nullptr)
 				return;
 
 			CPoint point;
@@ -199,9 +189,23 @@ namespace
 
 			SetCapture();
 			PumpUntilClosed();
+			if (IsWindow()) DestroyWindow();
 		}
 
 	private:
+		LRESULT WindowMessage(UINT message, WPARAM wParam, LPARAM lParam) override
+		{
+			switch (message)
+			{
+			case WM_PAINT: OnPaint(); return 0;
+			case WM_MOUSEMOVE: OnMouseMove(0, MessagePoint(lParam)); return 0;
+			case WM_LBUTTONUP: DestroyWindow(); return 0;
+			case WM_KEYDOWN: OnKeyDown(static_cast<UINT>(wParam), 0, 0); return 0;
+			case WM_DESTROY: OnDestroy(); break;
+			}
+			return SdkWindow::WindowMessage(message, wParam, lParam);
+		}
+
 		void PumpUntilClosed()
 		{
 			MSG msg;
@@ -244,7 +248,7 @@ namespace
 			                  MulDiv(m_rectVisible.top, sizeAll.cy, sizeThumb.cy));
 		}
 
-		void OnPaint(CDCHandle)
+		void OnPaint()
 		{
 			CPaintDC dc(m_hWnd);
 
@@ -290,11 +294,6 @@ namespace
 			ScrollToRect();
 		}
 
-		void OnLButtonUp(UINT, CPoint)
-		{
-			DestroyWindow();
-		}
-
 		void OnKeyDown(UINT nChar, UINT, UINT)
 		{
 			if (nChar != VK_ESCAPE)
@@ -309,7 +308,6 @@ namespace
 			if (::GetCapture() == m_hWnd)
 				::ReleaseCapture();
 
-			SetMsgHandled(FALSE);
 		}
 
 		CImageView* m_pView;
@@ -320,7 +318,7 @@ namespace
 	};
 }
 
-CImageView::CImageView() : m_toolBar(this, 1)
+CImageView::CImageView()
 {
 	m_alive = std::make_shared<int>(0);
 
@@ -337,25 +335,91 @@ CImageView::~CImageView()
 	delete m_pScale;
 }
 
+LRESULT CImageView::WindowMessage(UINT message, WPARAM wParam, LPARAM lParam)
+{
+	switch (message)
+	{
+	case WM_CREATE: return OnCreate(reinterpret_cast<LPCREATESTRUCT>(lParam));
+	case WM_DESTROY: OnDestroy(); break;
+	case WM_SIZE: OnSize(static_cast<UINT>(wParam), CSize(LOWORD(lParam), HIWORD(lParam))); return 0;
+	case WM_HSCROLL:
+		if (reinterpret_cast<HWND>(lParam) != m_trackZoom.m_hWnd) break;
+		OnHScroll(LOWORD(wParam), HIWORD(wParam), reinterpret_cast<HWND>(lParam));
+		return 0;
+	case WM_LBUTTONDOWN: OnLButtonDown(0, MessagePoint(lParam)); return 0;
+	case WM_LBUTTONUP: OnLButtonUp(0, MessagePoint(lParam)); return 0;
+	case WM_MOUSEMOVE: OnMouseMove(0, MessagePoint(lParam)); return 0;
+	case WM_CAPTURECHANGED: OnCaptureChanged(reinterpret_cast<HWND>(lParam)); return 0;
+	case WM_SETCURSOR:
+		if (OnSetCursor(reinterpret_cast<HWND>(wParam), LOWORD(lParam), HIWORD(lParam))) return TRUE;
+		break;
+	case WM_COMMAND:
+		if (LOWORD(wParam) == kScaleEditId && HIWORD(wParam) == EN_KILLFOCUS)
+		{
+			ApplyScaleText();
+			return 0;
+		}
+		if (Command(LOWORD(wParam))) return 0;
+		break;
+	case WM_NOTIFY:
+		if (auto* header = reinterpret_cast<NMHDR*>(lParam); header && header->code == TTN_GETDISPINFOA)
+			return OnToolTipText(header);
+		break;
+	}
+	return CViewBase<CImageView>::WindowMessage(message, wParam, lParam);
+}
+
+bool CImageView::Command(int id)
+{
+	switch (id)
+	{
+	case ID_MODE_FITTOWINDOW: OnModeFit(0, id, {}); return true;
+	case ID_MODE_ACTUALSIZE: OnModeActualSize(0, id, {}); return true;
+	case ID_MODE_SCALEDOWNTOFIT: OnModeScaleDown(0, id, {}); return true;
+	case ID_MODE_SCALEUPTOFIT: OnModeScaleUp(0, id, {}); return true;
+	case ID_MODE_ZOOM: OnModeMenu(0, id, {}); return true;
+	case ID_MODE_TOGGLE_ZOOM:
+		if (IsFit()) SetScale(100);
+		else SetScaleType(eFit);
+		return true;
+	case ID_NAVIGATE: OnNavigate(0, id, {}); return true;
+	default:
+		if (id < ID_MODE_25 || id > ID_MODE_200) return false;
+		OnModeZoom(0, id, {});
+		return true;
+	}
+}
+
 LRESULT CImageView::OnCreate(LPCREATESTRUCT)
 {
-	InitViewBase();
+	if (!InitViewBase()) return -1;
 
-	// The strip lives in the bottom scroll bar gutter, which is therefore
-	// always present whether or not the bar itself is needed.
-	m_sizeGutterMin.cy = m_cyBar;
+	{
+		CClientDC dc(m_hWnd);
+		HFONT hOld = dc.SelectFont(DefaultGuiFont());
+		TEXTMETRIC tm = {0};
+		dc.GetTextMetrics(&tm);
+		dc.SelectFont(hOld);
+		m_nCaptionHeight = max(tm.tmHeight + 8, 22);
+	}
 
-	m_toolBar.Create(m_hWnd, CRect(0, 0, 0, 0), nullptr,
+	return m_threadLoader.Start() ? 0 : -1;
+}
+
+bool CImageView::CreateFooterControls(HWND footer)
+{
+	if (!::SetWindowSubclass(footer, FooterProc, 1, reinterpret_cast<DWORD_PTR>(this))) return false;
+
+	if (!m_toolBar.Create(footer, CRect(0, 0, 0, 0), nullptr,
 	                 WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | CCS_NORESIZE | CCS_NOPARENTALIGN |
 	                 CCS_NODIVIDER | TBSTYLE_TOOLTIPS,
-	                 0, kToolBarId);
+	                 0, kToolBarId))
+		return false;
+	if (!::SetWindowSubclass(m_toolBar, ToolbarProc, 1, reinterpret_cast<DWORD_PTR>(this))) return false;
 
 	m_toolBar.SetButtonStructSize(sizeof(TBBUTTON));
 
-	CImageList images;
-	images.CreateFromImage(IDB_PREVIEW_MODE, 8, 1, RGB(0xff, 0x00, 0xff),
-	                       IMAGE_BITMAP, LR_CREATEDIBSECTION);
-	m_toolBar.SetImageList(images.Detach());
+	m_toolBar.SetImageList(LoadToolbarImages(IDB_PREVIEW_MODE, 8));
 
 	// Plain buttons, so the strip is glyphs only: a drop-down arrow doubles the
 	// width of a button in a gutter one scroll bar wide. The two that open a
@@ -372,41 +436,55 @@ LRESULT CImageView::OnCreate(LPCREATESTRUCT)
 	m_toolBar.SetBitmapSize(CSize(8, 8));
 	m_toolBar.SetButtonSize(CSize(m_cyBar, m_cyBar));
 
-	m_editScale.Create(m_hWnd, CRect(0, 0, 0, 0), nullptr,
+	if (!m_editScale.Create(footer, CRect(0, 0, 0, 0), nullptr,
 	                   WS_CHILD | WS_VISIBLE | ES_CENTER | ES_AUTOHSCROLL,
-	                   WS_EX_STATICEDGE, kScaleEditId);
+	                   WS_EX_STATICEDGE, kScaleEditId))
+		return false;
+	m_editScale.SetWindowText(GetScaleText());
 
-	m_editScale.SetFont(AtlGetStockFont(DEFAULT_GUI_FONT));
+	m_editScale.SetFont(DefaultGuiFont());
 	m_editScale.LimitText(8);
 
-	m_trackZoom.Create(m_hWnd, CRect(0, 0, 0, 0), nullptr,
+	if (!m_trackZoom.Create(footer, CRect(0, 0, 0, 0), nullptr,
 	                   WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | TBS_HORZ | TBS_NOTICKS,
-	                   0, kZoomTrackId);
+	                   0, kZoomTrackId))
+		return false;
 
 	m_trackZoom.SetRange(kTrackMin, kTrackMax, FALSE);
 	m_trackZoom.SetPageSize(10);
 	m_trackZoom.SetPos(m_nScale);
 
-	{
-		CClientDC dc(m_hWnd);
-		HFONT hOld = dc.SelectFont(AtlGetStockFont(DEFAULT_GUI_FONT));
-		TEXTMETRIC tm = {0};
-		dc.GetTextMetrics(&tm);
-		dc.SelectFont(hOld);
-
-		m_nCaptionHeight = max(tm.tmHeight + 8, 22);
-	}
-
-	if (!m_threadLoader.Start())
-		return -1;
-
 	UpdateBars();
-	return 0;
+	return true;
+}
+
+LRESULT CALLBACK CImageView::FooterProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
+                                        UINT_PTR id, DWORD_PTR context)
+{
+	const auto* self = reinterpret_cast<CImageView*>(context);
+	if (message == WM_NCDESTROY) ::RemoveWindowSubclass(window, FooterProc, id);
+	if (message == WM_HSCROLL && reinterpret_cast<HWND>(lParam) != self->m_trackZoom.m_hWnd)
+		return ::SendMessage(::GetParent(window), message, wParam, lParam);
+	if (message == WM_HSCROLL || message == WM_COMMAND || message == WM_NOTIFY)
+		return self->SendMessage(message, wParam, lParam);
+	return ::DefSubclassProc(window, message, wParam, lParam);
+}
+
+LRESULT CALLBACK CImageView::ToolbarProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
+                                         UINT_PTR id, DWORD_PTR context)
+{
+	if (message == WM_NCDESTROY) ::RemoveWindowSubclass(window, ToolbarProc, id);
+	if (message == WM_LBUTTONDOWN &&
+		reinterpret_cast<CImageView*>(context)->OnToolBarDown(MessagePoint(lParam)))
+		return 0;
+	return ::DefSubclassProc(window, message, wParam, lParam);
 }
 
 void CImageView::OnDestroy()
 {
-	SetMsgHandled(FALSE);
+	m_alive.reset();
+	::InterlockedIncrement(&m_nLoadOrder);
+	::InterlockedIncrement(&m_nScaleOrder);
 }
 
 void CImageView::OnSize(UINT, CSize)
@@ -419,19 +497,27 @@ void CImageView::OnSize(UINT, CSize)
 	else
 		SetScrollSize(m_sizeScroll.cx, m_sizeScroll.cy);
 
-	Invalidate();
-	SetMsgHandled(FALSE);
+	Invalidate(FALSE);
 }
 
 // The zoom slider shares WM_HSCROLL with the pane's own horizontal bar.
 void CImageView::OnHScroll(int nSBCode, short nPos, CScrollBar bar)
 {
-	if (bar.m_hWnd != m_trackZoom.m_hWnd)
+	if (!bar.m_hWnd || bar.m_hWnd != m_trackZoom.m_hWnd)
+		return;
+
+	// A track-ending notification on its own is not a request to leave Fit mode.
+	if (nSBCode == TB_ENDTRACK)
 	{
-		SetMsgHandled(FALSE);
+		if (m_bTracking)
+		{
+			m_bTracking = false;
+			UpdateScale();
+		}
 		return;
 	}
 
+	const bool wasTracking = m_bTracking;
 	// nPos is only meaningful while the thumb is being moved.
 	const int nScale = (nSBCode == TB_THUMBPOSITION || nSBCode == TB_THUMBTRACK)
 		                   ? nPos
@@ -442,9 +528,8 @@ void CImageView::OnHScroll(int nSBCode, short nPos, CScrollBar bar)
 	if (nScale != m_nScale || m_eScaleType != eNormal)
 		SetScale(nScale);
 
-	// The drag is over, so the scaled copy the tracking passes skipped is worth
-	// building now.
-	if (nSBCode == TB_ENDTRACK)
+	// The last track message may already have set this percentage.
+	else if (wasTracking && !m_bTracking)
 		UpdateScale();
 }
 
@@ -462,13 +547,50 @@ bool CImageView::CanPan() const
 	return m_sizeScroll.cx > r.Width() || m_sizeScroll.cy > r.Height();
 }
 
+void CImageView::SetFullscreen(bool fullscreen)
+{
+	if (fullscreen == m_fullscreen) return;
+	m_fullscreen = fullscreen;
+	if (fullscreen)
+	{
+		m_windowScaleType = m_eScaleType;
+		m_windowScale = m_nScaleSet;
+		m_eScaleType = eFit;
+		m_backgroundBrush = static_cast<HBRUSH>(::GetStockObject(BLACK_BRUSH));
+	}
+	else
+	{
+		m_eScaleType = m_windowScaleType;
+		m_nScaleSet = m_windowScale;
+		m_backgroundBrush = nullptr;
+	}
+	UpdateScale();
+}
+
+bool CImageView::PanWithKey(WPARAM key)
+{
+	if (!CanPan()) return false;
+	const int step = 48;
+	switch (key)
+	{
+	case VK_LEFT: ScrollTo(m_pointScroll.x - step, m_pointScroll.y); return true;
+	case VK_RIGHT: ScrollTo(m_pointScroll.x + step, m_pointScroll.y); return true;
+	case VK_UP: ScrollTo(m_pointScroll.x, m_pointScroll.y - step); return true;
+	case VK_DOWN: ScrollTo(m_pointScroll.x, m_pointScroll.y + step); return true;
+	default: return false;
+	}
+}
+
+bool CImageView::EndPan()
+{
+	return m_bPanning && ::GetCapture() == m_hWnd && ::ReleaseCapture();
+}
+
 void CImageView::OnLButtonDown(UINT, CPoint point)
 {
+	SetFocus();
 	if (!CanPan() || !ViewRect().PtInRect(point))
-	{
-		SetMsgHandled(FALSE);
 		return;
-	}
 
 	m_bPanning = true;
 	m_pointPanStart = point;
@@ -480,10 +602,7 @@ void CImageView::OnLButtonDown(UINT, CPoint point)
 void CImageView::OnMouseMove(UINT, CPoint point)
 {
 	if (!m_bPanning)
-	{
-		SetMsgHandled(FALSE);
 		return;
-	}
 
 	// The picture follows the cursor, so the scroll offset moves against it.
 	ScrollTo(m_pointPanOrigin.x - (point.x - m_pointPanStart.x),
@@ -494,8 +613,6 @@ void CImageView::OnLButtonUp(UINT, CPoint)
 {
 	if (m_bPanning)
 		ReleaseCapture(); // WM_CAPTURECHANGED clears the flag
-	else
-		SetMsgHandled(FALSE);
 }
 
 // The only place the flag is cleared, so a capture lost to anything at all -
@@ -513,7 +630,6 @@ BOOL CImageView::OnSetCursor(CWindow wnd, UINT nHitTest, UINT)
 		return TRUE;
 	}
 
-	SetMsgHandled(FALSE);
 	return FALSE;
 }
 
@@ -547,6 +663,7 @@ void CImageView::Reset()
 	m_strFileName.Empty();
 	m_strCaption.Empty();
 	m_nBytes = 0;
+	m_nPixelBits = 0;
 
 	m_bCollage = false;
 	m_bPlaceholder = false;
@@ -629,6 +746,7 @@ void CImageView::OnLoaded(CJobLoad& job)
 	// The size is settled here even though the pixels are not on show yet, so
 	// the stand-in is already filling the rectangle the picture will.
 	m_sizeImage = job.m_dib.Size();
+	m_nPixelBits = job.m_dib.Bpp();
 	UpdateScale();
 
 	if (m_sizeScaled == m_sizeImage)
@@ -898,7 +1016,7 @@ void CImageView::OnCellLoaded(CJobCell& job)
 
 void CImageView::DrawCollage(CDibDC& ddc)
 {
-	CFontHandle* pOldFont = ddc.SelectObject(AtlGetStockFont(DEFAULT_GUI_FONT));
+	const HFONT hOld = ddc.SelectFont(DefaultGuiFont());
 
 	DrawLabel(ddc, m_strCaption, CaptionRect());
 
@@ -923,14 +1041,12 @@ void CImageView::DrawCollage(CDibDC& ddc)
 
 		if (cell.bFocus)
 		{
-			CBrush brush;
-			brush.CreateSolidBrush(RGB(0, 255, 0));
-			ddc.FrameRect(rect, brush);
+			::SetDCBrushColor(ddc, RGB(0, 255, 0));
+			ddc.FrameRect(rect, static_cast<HBRUSH>(::GetStockObject(DC_BRUSH)));
 		}
 	}
 
-	if (pOldFont != nullptr)
-		ddc.SelectObject(*pOldFont);
+	if (hOld) ddc.SelectFont(hOld);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -940,7 +1056,7 @@ void CImageView::DrawCollage(CDibDC& ddc)
 // one still decoding. The pane names it rather than going blank.
 void CImageView::DrawMessage(CDibDC& ddc)
 {
-	CFontHandle* pOldFont = ddc.SelectObject(AtlGetStockFont(DEFAULT_GUI_FONT));
+	const HFONT hOld = ddc.SelectFont(DefaultGuiFont());
 
 	const CRect rectView = ViewRect();
 
@@ -953,8 +1069,7 @@ void CImageView::DrawMessage(CDibDC& ddc)
 
 	DrawLabel(ddc, m_strCaption, rect);
 
-	if (pOldFont != nullptr)
-		ddc.SelectObject(*pOldFont);
+	if (hOld) ddc.SelectFont(hOld);
 }
 
 void CImageView::OnDraw(CDibDC& ddc)
@@ -995,7 +1110,9 @@ CSize CImageView::CalcScaledSize(CSize sizeImage) const
 		return CSize(max(MulDiv(sizeImage.cx, m_nScaleSet, 100), 1),
 		             max(MulDiv(sizeImage.cy, m_nScaleSet, 100), 1));
 
-	const CRect r = ViewRect();
+	// Fit to the whole pane, not to the gutters of the previous zoom.
+	CRect r;
+	GetClientRect(&r);
 
 	if (r.Width() <= 0 || r.Height() <= 0)
 		return sizeImage;
@@ -1074,7 +1191,8 @@ CString CImageView::GetScaleText() const
 
 void CImageView::SaveScale() const
 {
-	Settings::SetString(szSection, szScaleKey, GetScaleText());
+	if (!m_fullscreen)
+		Settings::SetString(szSection, szScaleKey, GetScaleText());
 }
 
 void CImageView::UpdateScale()
@@ -1170,30 +1288,26 @@ void CImageView::ApplyScaleText()
 
 CString CImageView::StatusText() const
 {
-	// The caption is what the pane is showing whenever there is no picture.
-	if (m_bCollage || !m_dibPreview.IsOpen())
+	if (m_bCollage || (!m_dibPreview.IsOpen() && m_nPixelBits == 0))
 		return m_strCaption;
 
 	CString str = ::PathFindFileName(m_strFileName);
 
 	if (m_sizeImage.cx > 0 && m_sizeImage.cy > 0)
-	{
-		CString strSize;
-		strSize.Format(_T("  %d x %d  %d%%"), m_sizeImage.cx, m_sizeImage.cy, m_nScale);
-		str += strSize;
-	}
+		str.AppendFormat(_T("  %ld x %ld"), m_sizeImage.cx, m_sizeImage.cy);
+	if (m_nPixelBits)
+		str.AppendFormat(_T("  %u-bit %s"), m_nPixelBits,
+		                 m_nPixelBits <= 8 ? _T("indexed") : m_nPixelBits == 32 ? _T("BGRA") : _T("RGB"));
+	if (m_nBytes > 0)
+		str += _T("  ") + FormatFileSize(m_nBytes);
 
 	return str;
 }
 
-// Bottom gutter, left to right: the horizontal scroll bar, the zoom slider, the
-// scale box, then the mode strip hard against the right-hand gutter.
-void CImageView::LayoutControls(const CRect& rectClient)
+int CImageView::LayoutFooterControls(const CRect& rectClient)
 {
-	const int cy = m_cyBar;
-	const int y = rectClient.bottom - cy;
-
-	// Measured from the buttons: the drop-down arrows widen two of them.
+	const int cy = min(m_cyBar, rectClient.Height());
+	const int y = (rectClient.Height() - cy) / 2;
 	CRect rectLast(0, 0, cy, cy);
 
 	if (m_toolBar.GetButtonCount() > 0)
@@ -1201,22 +1315,30 @@ void CImageView::LayoutControls(const CRect& rectClient)
 
 	const int cxToolBar = rectLast.right;
 	const int cxEdit = 48;
-
-	// Stop short of the vertical gutter so the strip never lands in the corner
-	// square the two bars share.
-	const int xEnd = max(rectClient.right - m_sizeGutter.cx, 0L);
-	const int xToolBar = max(xEnd - cxToolBar, 0);
-	const int xEdit = max(xToolBar - cxEdit, 0);
-
-	// Half of what is left over, capped, so the scroll bar keeps the rest.
-	const int cxTrack = max(min(xEdit / 2, kTrackWidthMax), 0);
-	const int xTrack = max(xEdit - cxTrack, 0);
-
-	PlaceControl(m_trackZoom, CRect(xTrack, y, xTrack + cxTrack, y + cy));
-	PlaceControl(m_editScale, CRect(xEdit, y, xEdit + cxEdit, y + cy));
-	PlaceControl(m_toolBar, CRect(xToolBar, y, xToolBar + cxToolBar, y + cy));
-
-	m_nReservedRight = cxToolBar + cxEdit + cxTrack;
+	const int gap = 4;
+	const int cxFixed = cxToolBar + cxEdit + 3 * gap;
+	const int cxStatus = min(220, rectClient.Width() / 2);
+	const int cxAvailable = rectClient.Width() - cxStatus;
+	if (cy <= 0 || cxAvailable < cxFixed)
+	{
+		HideControl(m_trackZoom);
+		HideControl(m_editScale);
+		HideControl(m_toolBar);
+		return 0;
+	}
+	const int cxTrack = min(cxAvailable - cxFixed, kTrackWidthMax);
+	int x = gap;
+	if (cxTrack >= 48)
+	{
+		PlaceControl(m_trackZoom, CRect(x, y, x + cxTrack, y + cy));
+		x += cxTrack;
+	}
+	else
+		HideControl(m_trackZoom);
+	PlaceControl(m_editScale, CRect(x, y, x + cxEdit, y + cy));
+	x += cxEdit + gap;
+	PlaceControl(m_toolBar, CRect(x, y, x + cxToolBar, y + cy));
+	return x + cxToolBar + gap;
 }
 
 void CImageView::OnModeFit(UINT, int, CWindow)
@@ -1274,20 +1396,15 @@ void CImageView::OnNavigate(UINT, int, CWindow)
 // The navigator is dragged with the button still down, so it has to open on the
 // press: a toolbar does not report a click until the release. Swallowing the
 // press also means no WM_COMMAND follows and the button never latches down.
-LRESULT CImageView::OnToolBarDown(UINT, WPARAM, LPARAM lParam, BOOL& bHandled)
+bool CImageView::OnToolBarDown(CPoint point)
 {
-	CPoint point(static_cast<short>(LOWORD(lParam)), static_cast<short>(HIWORD(lParam)));
-
 	const int nHit = m_toolBar.HitTest(&point);
 
 	if (nHit < 0 || nHit != m_toolBar.CommandToIndex(ID_NAVIGATE) || !CanPan())
-	{
-		bHandled = FALSE;
-		return 0;
-	}
+		return false;
 
 	TrackNavigate(ButtonRect(ID_NAVIGATE));
-	return 0;
+	return true;
 }
 
 void CImageView::OnScaleKillFocus(UINT, int, CWindow)
@@ -1299,19 +1416,12 @@ void CImageView::OnScaleKillFocus(UINT, int, CWindow)
 // the frame's WM_INITMENUPOPUP is what puts the marks on it.
 void CImageView::TrackModeMenu(const CRect& rectButton)
 {
-	CMenu menu;
-
-	if (!menu.LoadMenu(IDR_MAINFRAME))
-		return;
-
-	CMenuHandle popup = menu.GetSubMenu(kMenuImage);
-
 	// The strip sits on the bottom edge, so the menu has to grow upwards.
 	//
 	// Owned by the frame, not by the splitter that happens to be our parent:
 	// the ids are on its Image menu and it routes them back here.
-	popup.TrackPopupMenu(TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_LEFTBUTTON,
-	                     rectButton.left, rectButton.top, GetTopLevelParent());
+	TrackResourceMenu(IDR_MAINFRAME, kMenuImage, TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_LEFTBUTTON,
+	                  rectButton.TopLeft(), GetTopLevelParent());
 }
 
 void CImageView::TrackNavigate(const CRect& rectButton)

@@ -17,6 +17,7 @@
 #include <vector>
 
 class CDib;
+class CJobDirChanged;
 
 // Sent to the parent when the selection changes. wParam and lParam are
 // unused: the frame asks the pane what it now holds.
@@ -28,44 +29,17 @@ public:
 	CItemsView();
 	~CItemsView();
 
-	DECLARE_WND_CLASS_EX(_T("IWItemsView"), CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS, -1)
+	HWND Create(HWND parent, RECT bounds, LPCTSTR title, DWORD style)
+	{
+		return CreateNative("IWItemsView", parent, bounds, title, style, 0, CS_DBLCLKS);
+	}
 
 	enum
 	{
 		kToolBarId = 0x7f20
 	};
 
-	BEGIN_MSG_MAP(CItemsView)
-		MSG_WM_CREATE(OnCreate)
-		MSG_WM_DESTROY(OnDestroy)
-		MSG_WM_SIZE(OnSize)
-		MSG_WM_LBUTTONDOWN(OnLButtonDown)
-		MSG_WM_LBUTTONDBLCLK(OnLButtonDblClk)
-		MSG_WM_MOUSEMOVE(OnMouseMove)
-		MSG_WM_KEYDOWN(OnKeyDown)
-		MSG_WM_SETFOCUS(OnSetFocus)
-
-		NOTIFY_CODE_HANDLER_EX(TTN_GETDISPINFO, OnToolTipText)
-
-		COMMAND_ID_HANDLER_EX(ID_ITEMS_OPTIONS, OnItemsOptions)
-		COMMAND_ID_HANDLER_EX(ID_BROWSE_PARENT, OnBrowseParent)
-		COMMAND_ID_HANDLER_EX(ID_BROWSE_BACK, OnBrowseBack)
-		COMMAND_ID_HANDLER_EX(ID_BROWSE_FORWARD, OnBrowseForward)
-		COMMAND_ID_HANDLER_EX(ID_EDIT_COPY, OnEditCopy)
-		COMMAND_ID_HANDLER_EX(ID_EDIT_SELECT_ALL, OnEditSelectAll)
-		COMMAND_ID_HANDLER_EX(ID_EDIT_INVERTSELECTION, OnEditInvertSelection)
-		COMMAND_ID_HANDLER_EX(ID_VIEW_REFRESH, OnViewRefresh)
-		COMMAND_ID_HANDLER_EX(ID_VIEW_SORT_NAME, OnViewSort)
-		COMMAND_ID_HANDLER_EX(ID_VIEW_SORT_TYPE, OnViewSort)
-		COMMAND_ID_HANDLER_EX(ID_VIEW_SORT_SIZE, OnViewSort)
-		COMMAND_ID_HANDLER_EX(ID_VIEW_SORT_DATE, OnViewSort)
-		COMMAND_ID_HANDLER_EX(ID_ITEMS_THUMBNAILS, OnViewMode)
-		COMMAND_ID_HANDLER_EX(ID_ITEMS_DETAILS, OnViewMode)
-		COMMAND_ID_HANDLER_EX(ID_VIEW_NEXTIMAGE, OnNextImage)
-		COMMAND_ID_HANDLER_EX(ID_VIEW_PREVIOUSIMAGE, OnPreviousImage)
-
-		CHAIN_MSG_MAP(CViewBase<CItemsView>)
-	END_MSG_MAP()
+	bool Command(int id);
 
 	// What the image pane should be showing: every selected file, each with the
 	// thumbnail this pane has already decoded for it, plus what the whole
@@ -74,6 +48,9 @@ public:
 
 	CShellItem FolderItem() const;
 	void Navigate(const CShellItem& item);
+	void ActivateFocus();
+	bool FocusPhoto();
+	void StepPhoto(int direction);
 
 	CString StatusText() const;
 
@@ -81,21 +58,24 @@ public:
 	bool CanGoForward() const { return m_nHistory + 1 < m_history.size(); }
 	bool CanGoParent() const;
 	bool IsDetailView() const { return m_bDetail; }
+	int ThumbnailSize() const { return m_nThumbnailSize; }
+	void SetThumbnailSize(int size, bool tracking);
 	int SortCommand() const { return m_nSortCommand; }
 
 	void OnDraw(CDibDC& ddc);
 	void LayoutControls(const CRect& rectClient);
 
 	// Called from the jobs.
-	void OnThumbJobComplete(CDib* pDib, UINT uKey);
-	void OnDirChanged();
+	void OnThumbJobComplete(CDib* pDib, UINT uKey, int edge);
+	void OnDirChanged(const CJobDirChanged& change);
 
 private:
+	LRESULT WindowMessage(UINT message, WPARAM wParam, LPARAM lParam) override;
 	struct CItem
 	{
 		CThumb* pThumb;
 		UINT uKey;
-		bool bScanned;
+		int nAttemptedEdge;
 	};
 
 	LRESULT OnCreate(LPCREATESTRUCT lpcs);
@@ -104,8 +84,7 @@ private:
 	void OnLButtonDown(UINT nFlags, CPoint point);
 	void OnLButtonDblClk(UINT nFlags, CPoint point);
 	void OnMouseMove(UINT nFlags, CPoint point);
-	void OnKeyDown(UINT nChar, UINT nRepCnt, UINT nFlags);
-	void OnSetFocus(CWindow wndOld);
+	bool OnKeyDown(UINT nChar);
 
 	LRESULT OnToolTipText(LPNMHDR pnmh);
 
@@ -123,7 +102,7 @@ private:
 	void OnPreviousImage(UINT, int, CWindow);
 
 	void OpenFolder(std::unique_ptr<CFolder> pFolder);
-	void Populate();
+	void Populate(const CString& strFocus, bool bTop);
 	void RebuildItems();
 	void Reselect(const CString& strFocus, bool bTop);
 	void Sort();
@@ -139,15 +118,17 @@ private:
 	void InvalidateItem(int n);
 	void EnsureVisible(int n);
 	void LayoutItems(bool bTop);
+	void UpdateThumbnailDecodeSize();
 
 	CString DisplayName(int n, DWORD dwFlags = SHGDN_NORMAL) const;
+	bool CanPreview(int index) const;
 
-	// The focused file, which is what a reorder puts the selection back on.
-	CString FocusFileName() const;
+	// The focused item, which is what a refresh or reorder puts the selection back on.
+	CString FocusItemName() const;
 
 	void PrimeThumbChain();
-	void OnThumbLoaded(CDib* pDib, UINT uKey);
-	void OpenItem(int n);
+	void OnThumbLoaded(CDib* pDib, UINT uKey, int edge);
+	bool OpenFolderItem(int n);
 
 	void DrawThumbnail(CDibDC& ddc, int n);
 	void DrawDetailRow(CDibDC& ddc, int n);
@@ -164,18 +145,21 @@ private:
 	int m_nSortCommand = ID_VIEW_SORT_NAME;
 
 	bool m_bDetail = false;
-	int m_nThumbsX = 1;
+	CThumbnailGrid m_grid;
+	int m_nThumbnailSize = IMAGE_X;
+	int m_nDecodeSize = IMAGE_X;
 	int m_nRowHeight = 18;
 	int m_nLoaded = 0;
 
 	CToolBarCtrl m_toolBar;
 	CToolTipCtrl m_toolTip;
-	CFont m_font;
+	HFONT m_font{};
 	int m_nToolTipItem = -1;
 	CString m_strToolText;
 
 	IW::CWorkerThread m_threadLoader;
 	IW::CWorkerThread m_threadDirectory;
+	std::shared_ptr<CJobDirChanged> m_dirChange;
 
 	// Handed to every job. It dies with this window, and the message loop drops
 	// any job whose owner has gone rather than completing it into a dead object.

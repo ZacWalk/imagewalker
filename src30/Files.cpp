@@ -7,7 +7,11 @@
 
 #include "Media.h"
 #include "Paths.h"
+#include <core/file_publication.h>
 #include <iw/imaging/Codec.h>
+#include <iw/imaging/detail/PlatformFileStream.h>
+#include <libfiles/reader.h>
+#include <libfiles/scan.h>
 
 #include <algorithm>
 #include <array>
@@ -29,6 +33,78 @@ namespace iw::files
 			if (value) value->Release();
 		}
 
+		std::error_code win_error(const DWORD error)
+		{
+			if (error == ERROR_SUCCESS) return {};
+			if (error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS)
+				return std::make_error_code(std::errc::file_exists);
+			return {static_cast<int>(error), std::system_category()};
+		}
+
+		bool same_identity(const BY_HANDLE_FILE_INFORMATION& a, const BY_HANDLE_FILE_INFORMATION& b)
+		{
+			return (a.nFileIndexLow || a.nFileIndexHigh) && a.dwVolumeSerialNumber == b.dwVolumeSerialNumber &&
+			       a.nFileIndexHigh == b.nFileIndexHigh && a.nFileIndexLow == b.nFileIndexLow;
+		}
+
+		bool pin_folder(publication::File& file, const std::filesystem::path& folder)
+		{
+			file.reset(CreateFileW(native_path(folder).c_str(), FILE_READ_ATTRIBUTES,
+			                       FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+			                       FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+			if (!file) return false;
+			BY_HANDLE_FILE_INFORMATION info{};
+			if (!GetFileInformationByHandle(file.get(), &info) ||
+			    (info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) !=
+			        FILE_ATTRIBUTE_DIRECTORY)
+			{
+				SetLastError(ERROR_DIRECTORY);
+				return false;
+			}
+			return true;
+		}
+
+		std::error_code publish(const HANDLE staged, const std::filesystem::path& path,
+		                        const std::optional<FileSnapshot>& expected, const std::function<bool()>& validate,
+		                        std::filesystem::path* originalLocation)
+		{
+			const auto absolute = native_path(path);
+			publication::AvailableName target(absolute);
+			if (!expected || !expected->exists)
+			{
+				if (validate && !validate()) return std::make_error_code(std::errc::operation_canceled);
+				return win_error(target.move(staged));
+			}
+			const publication::File original(CreateFileW(absolute.c_str(), GENERIC_READ | DELETE, FILE_SHARE_READ,
+			                                             nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT,
+			                                             nullptr));
+			if (!original) return win_error(GetLastError());
+			if (expected->directory || expected->readOnly || expected->reparse || !matches_snapshot(path, *expected) ||
+			    (validate && !validate()) || !matches_snapshot(path, *expected))
+				return std::make_error_code(std::errc::operation_canceled);
+			const auto proposed = path.parent_path() /
+			                      (path.stem().wstring() + L"-original" + path.extension().wstring());
+			const auto backup = unique_destination(proposed);
+			if (backup.empty()) return std::make_error_code(std::errc::file_exists);
+			publication::AvailableName recovery(native_path(backup));
+			if (originalLocation) *originalLocation = backup;
+			if (const auto error = win_error(recovery.move(original.get())))
+			{
+				if (originalLocation) originalLocation->clear();
+				return error;
+			}
+			if (const auto error = win_error(target.move(staged)))
+			{
+				if (target.move(original.get()) == ERROR_SUCCESS)
+				{
+					if (originalLocation) originalLocation->clear();
+				}
+				else platform::write_diagnostic(L"The original was retained at " + backup.wstring() + L"\n");
+				return error;
+			}
+			return {};
+		}
+
 		class TemporaryOutput
 		{
 		public:
@@ -38,48 +114,130 @@ namespace iw::files
 
 			~TemporaryOutput()
 			{
-				if (path_.is_empty()) return;
-				auto result = ::platform::delete_file(path_);
-				if (result.failed())
+				if (!file_ || published_) return;
+				if (!publication::remove(file_.get()))
 				{
-					::platform::make_file_writable(path_);
-					result = ::platform::delete_file(path_);
+					FILE_BASIC_INFO basic{};
+					if (GetFileInformationByHandleEx(file_.get(), FileBasicInfo, &basic, sizeof(basic)) &&
+					    (basic.FileAttributes & FILE_ATTRIBUTE_READONLY))
+					{
+						basic = {};
+						basic.FileAttributes = FILE_ATTRIBUTE_NORMAL;
+						SetFileInformationByHandle(file_.get(), FileBasicInfo, &basic, sizeof(basic));
+					}
+					if (!publication::remove(file_.get()))
+						platform::write_diagnostic(L"Incomplete temporary output retained at " + path_.wstring() +
+						                           L"\n");
 				}
-				if (result.failed()) platform::write_diagnostic(L"Unable to remove an incomplete temporary output.\n");
 			}
 
 			std::error_code create(const std::filesystem::path& destination)
 			{
-				for (int attempt = 0; attempt < 16; ++attempt)
-				{
-					const auto candidate = ::platform::temp_file(".tmp",
-					                                             desktop::folder_path(destination.parent_path()));
-					const auto file = ::platform::open_file(candidate, ::platform::file_open_mode::create_new);
-					if (file)
-					{
-						path_ = candidate;
-						return {};
-					}
-					const auto attributes = ::platform::file_attributes(candidate);
-					if (!attributes.exists()) return desktop::attributes_error(attributes);
-				}
-				return std::make_error_code(std::errc::file_exists);
+				if (const auto error = prepare(destination)) return error;
+				file_.reset(CreateFileW(path_.c_str(), GENERIC_READ | GENERIC_WRITE | DELETE, FILE_SHARE_READ, nullptr, CREATE_NEW,
+				                        FILE_ATTRIBUTE_NORMAL, nullptr));
+				return file_ ? std::error_code{} : win_error(GetLastError());
 			}
 
-			std::filesystem::path path() const { return ::platform::to_stream_path(path_); }
-			const ::core::file_path& desktop_path() const { return path_; }
-
-			std::error_code commit(const std::filesystem::path& destination, const bool overwrite)
+			bool seek(const std::int64_t offset) const
 			{
-				// Publish only a complete output; an unreviewed destination wins a racing create.
-				const auto result = ::platform::move_file(path_, desktop::file_path(destination), !overwrite);
-				if (result.failed()) return desktop::operation_error(result);
-				path_.clear();
-				return {};
+				LARGE_INTEGER position{};
+				position.QuadPart = offset;
+				return offset >= 0 && SetFilePointerEx(file_.get(), position, nullptr, FILE_BEGIN);
+			}
+
+			StagedStream stream() const
+			{
+				return {
+					[this]
+				{
+					LARGE_INTEGER size{};
+					return GetFileSizeEx(file_.get(), &size) ? size.QuadPart : std::int64_t{-1};
+				},
+					[this](const std::int64_t offset, const std::span<std::uint8_t> bytes)
+				{
+					DWORD read{};
+					return bytes.size() <= MAXDWORD && seek(offset) &&
+					       ReadFile(file_.get(), bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr) &&
+					       read == bytes.size();
+				},
+					[this](const std::int64_t offset, const std::span<const std::uint8_t> bytes)
+				{
+					DWORD written{};
+					return bytes.size() <= MAXDWORD && seek(offset) &&
+					       WriteFile(file_.get(), bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) &&
+					       written == bytes.size();
+				}};
+			}
+
+			bool flush() const { return FlushFileBuffers(file_.get()) != FALSE; }
+
+			bool write(std::span<const std::uint8_t> bytes) const
+			{
+				while (!bytes.empty())
+				{
+					const auto chunk = static_cast<DWORD>((std::min)(bytes.size(), size_t{1024 * 1024}));
+					DWORD written = 0;
+					if (!WriteFile(file_.get(), bytes.data(), chunk, &written, nullptr) || written != chunk)
+						return false;
+					bytes = bytes.subspan(written);
+				}
+				return flush();
+			}
+
+			std::error_code copy_from(const std::filesystem::path& source, const std::filesystem::path& destination)
+			{
+				if (const auto error = prepare(destination)) return error;
+				// Let Windows copy alternate data streams and attributes. Claim only the exact
+				// file that the OS created, never a later occupant of this temporary name.
+				BY_HANDLE_FILE_INFORMATION created{};
+				const bool copied = CopyFileExW(native_path(source).c_str(), path_.c_str(), capture_copy_identity,
+				                                &created, nullptr, COPY_FILE_FAIL_IF_EXISTS) != FALSE;
+				const auto copyError = copied ? std::error_code{} : win_error(GetLastError());
+				if (created.nFileIndexHigh || created.nFileIndexLow)
+				{
+					file_.reset(CreateFileW(path_.c_str(), FILE_READ_ATTRIBUTES | FILE_WRITE_ATTRIBUTES | DELETE,
+					                        FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT,
+					                        nullptr));
+					BY_HANDLE_FILE_INFORMATION observed{};
+					if (!file_ || !GetFileInformationByHandle(file_.get(), &observed) ||
+					    !same_identity(created, observed) ||
+					    (observed.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)))
+						file_.reset();
+				}
+				if (copyError) return copyError;
+				return file_ ? std::error_code{} : std::make_error_code(std::errc::state_not_recoverable);
+			}
+
+			std::error_code commit(const std::filesystem::path& destination,
+			                       const std::optional<FileSnapshot>& expected, const std::function<bool()>& validate,
+			                       std::filesystem::path* originalLocation = nullptr)
+			{
+				const auto result = publish(file_.get(), destination, expected, validate, originalLocation);
+				published_ = !result;
+				return result;
 			}
 
 		private:
-			::core::file_path path_;
+			std::error_code prepare(const std::filesystem::path& destination)
+			{
+				const auto target = native_path(destination);
+				if (!pin_folder(parent_, target.parent_path())) return win_error(GetLastError());
+				path_ = publication::temporary_sibling(target, L".iw-output-");
+				return path_.empty() ? std::make_error_code(std::errc::io_error) : std::error_code{};
+			}
+
+			static DWORD CALLBACK capture_copy_identity(LARGE_INTEGER, LARGE_INTEGER, LARGE_INTEGER, LARGE_INTEGER,
+			                                            DWORD, DWORD, HANDLE, HANDLE destination, LPVOID context)
+			{
+				auto& info = *static_cast<BY_HANDLE_FILE_INFORMATION*>(context);
+				if (info.nFileIndexHigh || info.nFileIndexLow) return PROGRESS_QUIET;
+				return GetFileInformationByHandle(destination, &info) ? PROGRESS_QUIET : PROGRESS_CANCEL;
+			}
+
+			std::filesystem::path path_;
+			publication::File parent_, file_;
+			bool published_{};
 		};
 
 		ItemKind classify_extension(const std::wstring& extension)
@@ -88,7 +246,7 @@ namespace iw::files
 			constexpr std::array documents{L".doc", L".docx", L".pdf", L".ppt",  L".pptx",
 			                               L".rtf", L".txt",  L".xls", L".xlsx", L".csv"};
 			constexpr std::array videos{L".avi",  L".m4v", L".mkv",  L".mov", L".mp4", L".mpeg", L".mpg", L".wmv",
-			                            L".webm", L".mts", L".m2ts", L".asf", L".3gp", L".3g2",  L".ts"};
+			                            L".webm", L".mts", L".m2ts", L".asf", L".3gp",  L".3g2",  L".ts", L".flv"};
 			constexpr std::array audio{L".aac", L".flac", L".m4a",  L".mp3", L".ogg",
 			                           L".wav", L".wma",  L".opus", L".aif", L".aiff"};
 			if (std::ranges::find(documents, extension) != documents.end()) return ItemKind::document;
@@ -161,6 +319,14 @@ namespace iw::files
 	{
 		const auto current = snapshot_file(path);
 		return current && *current == snapshot;
+	}
+
+	std::optional<std::array<unsigned char, 32>> file_digest(const std::filesystem::path& path,
+	                                                         const std::stop_token& stop)
+	{
+		std::atomic_bool cancelled{false};
+		const std::stop_callback cancel(stop, [&] { cancelled = true; });
+		return ::platform::file_sha256(desktop::file_path(path), ::core::cancel_token(cancelled));
 	}
 
 	ItemKind classify(const std::filesystem::path& path, const bool directory)
@@ -386,15 +552,50 @@ namespace iw::files
 		const auto stem = primary.stem().wstring();
 		const auto name = primary.filename().wstring();
 		if (stem.empty()) return result;
+		const auto isSidecar = [](const std::filesystem::path& path)
+		{
+			const auto extension = paths::lowercase_extension(path);
+			return std::ranges::find(companions, extension) != companions.end();
+		};
+		if (isSidecar(primary)) return result;
+		const auto ownsStem = [&]
+		{
+			WIN32_FIND_DATAW entry{};
+			const auto search = FindFirstFileW(native_path(folder / (stem + L".*")).c_str(), &entry);
+			if (search == INVALID_HANDLE_VALUE) return false;
+			bool unambiguous = true;
+			do
+			{
+				const std::filesystem::path sibling(entry.cFileName);
+				if (!(entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+				    sibling.native() != primary.filename().native() && paths::iequals(sibling.stem().native(), stem) &&
+				    !isSidecar(sibling) && !paths::iequals(sibling.filename().native(), name))
+				{
+					unambiguous = false;
+					break;
+				}
+			} while (FindNextFileW(search, &entry));
+			if (unambiguous && GetLastError() != ERROR_NO_MORE_FILES) unambiguous = false;
+			FindClose(search);
+			return unambiguous;
+		};
+		std::optional<bool> stemIsUnique;
 		std::error_code error;
 		for (const auto* extension : companions)
 		{
 			// Both conventions are in use: photo.xmp beside photo.jpg, and photo.jpg.xmp.
-			for (const auto& candidate : {folder / (stem + extension), folder / (name + extension)})
+			const auto exact = folder / (name + extension);
+			const auto generic = folder / (stem + extension);
+			for (const auto& candidate : {generic, exact})
 			{
 				if (paths::equal(candidate, primary)) continue;
 				error.clear();
 				if (!std::filesystem::is_regular_file(native_path(candidate), error)) continue;
+				if (candidate != exact)
+				{
+					if (!stemIsUnique) stemIsUnique = ownsStem();
+					if (!*stemIsUnique) continue;
+				}
 				if (std::ranges::any_of(result, [&candidate](const std::filesystem::path& found)
 				{ return paths::equal(found, candidate); }))
 					continue;
@@ -462,13 +663,15 @@ namespace iw::files
 		std::filesystem::path nativeDestination;
 		if (const auto prepared = prepare_destination(destination, overwrite, nativeDestination)) return prepared;
 		if (paths::equal(source, destination)) return std::make_error_code(std::errc::invalid_argument);
+		const auto expected = overwrite ? snapshot_file(destination) : std::optional<FileSnapshot>{FileSnapshot{}};
+		if (!expected) return std::make_error_code(std::errc::io_error);
+		const publication::File input(CreateFileW(native_path(source).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+		                                          OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+		if (!input) return win_error(GetLastError());
+		if (!publication::stamp(input.get())) return std::make_error_code(std::errc::not_supported);
 		TemporaryOutput output;
-		if (const auto error = output.create(destination)) return error;
-		if (const auto copied = ::platform::copy_file(desktop::file_path(source), output.desktop_path(), false, false);
-		    copied.failed())
-			return desktop::operation_error(copied);
-		if (beforeCommit && !beforeCommit()) return std::make_error_code(std::errc::operation_canceled);
-		return output.commit(destination, overwrite);
+		if (const auto error = output.copy_from(source, destination)) return error;
+		return output.commit(destination, expected, beforeCommit);
 	}
 
 	std::error_code move_file_to(const std::filesystem::path& source, const std::filesystem::path& destination,
@@ -477,16 +680,21 @@ namespace iw::files
 		std::filesystem::path nativeDestination;
 		if (const auto prepared = prepare_destination(destination, overwrite, nativeDestination)) return prepared;
 		if (paths::equal(source, destination)) return std::make_error_code(std::errc::invalid_argument);
-		if (beforeCommit && !beforeCommit()) return std::make_error_code(std::errc::operation_canceled);
-		const auto moved = ::platform::move_file(desktop::file_path(source), desktop::file_path(destination),
-		                                         !overwrite, false);
-		if (moved.success()) return {};
-		const auto moveError = desktop::operation_error(moved);
-		if (moveError != std::errc::cross_device_link) return moveError;
-		auto error = copy_file_to(source, destination, overwrite, beforeCommit);
-		if (error) return error;
-		const auto removed = ::platform::delete_file(desktop::file_path(source));
-		return removed.success() ? std::error_code{} : desktop::operation_error(removed);
+		const auto expected = overwrite ? snapshot_file(destination) : std::optional<FileSnapshot>{FileSnapshot{}};
+		if (!expected) return std::make_error_code(std::errc::io_error);
+		const auto absolute = native_path(source);
+		publication::File sourceParent, destinationParent;
+		if (!pin_folder(sourceParent, absolute.parent_path()) ||
+		    !pin_folder(destinationParent, nativeDestination.parent_path()))
+			return win_error(GetLastError());
+		const publication::File input(CreateFileW(absolute.c_str(), FILE_READ_ATTRIBUTES | DELETE, FILE_SHARE_READ,
+		                                          nullptr, OPEN_EXISTING,
+		                                          FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+		if (!input) return win_error(GetLastError());
+		BY_HANDLE_FILE_INFORMATION info{};
+		if (!GetFileInformationByHandle(input.get(), &info)) return win_error(GetLastError());
+		if (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) return std::make_error_code(std::errc::not_supported);
+		return publish(input.get(), destination, expected, beforeCommit, nullptr);
 	}
 
 	std::filesystem::path create_original_backup(const std::filesystem::path& path)
@@ -724,18 +932,90 @@ namespace iw::files
 		return decode_photo(path, width, height, true);
 	}
 
-	bool save_image(const DecodedImage& image, const std::filesystem::path& path, ImageSaveFormat format,
-	                const SaveOptions& options, bool overwrite, const std::function<bool()>& beforeCommit)
+	std::wstring in_place_edit_block_reason(const std::filesystem::path& path, const ImageSaveFormat outputFormat)
 	{
+		constexpr auto unreadable = L"The original could not be checked for features the edited copy cannot preserve. "
+									L"Use Save as to keep the original.";
+		imaging::PlatformFileStream input(path);
+		if (!input.is_open() || input.size() < 16) return unreadable;
+
+		try
+		{
+			libfiles::reader reader(input);
+			const auto format = libfiles::detect_image_format(reader.view(0, 16));
+			using Format = libfiles::image_format;
+			const auto expected = [outputFormat]
+			{
+				switch (outputFormat)
+				{
+				case ImageSaveFormat::jpeg: return Format::jpeg;
+				case ImageSaveFormat::png: return Format::png;
+				case ImageSaveFormat::tiff: return Format::tiff;
+				case ImageSaveFormat::bmp: return Format::bmp;
+				case ImageSaveFormat::webp: return Format::webp;
+				}
+				return Format::unknown;
+			}();
+			if (format != expected)
+				return L"The original's format does not match its filename. Use Save as to keep the original.";
+
+			if (format == Format::tiff)
+			{
+				const auto probe = ::platform::probe_image_file(desktop::file_path(path));
+				if (!probe) return unreadable;
+				if (probe->frame_count > 1)
+					return L"Saving over this TIFF would discard additional pages. Use Save as to keep the original.";
+			}
+			const auto scan = libfiles::scan(reader);
+			if (!scan.success) return unreadable;
+			// WIC does not expose all animation frames, and Photo Edit encodes only eight-bit SDR pixels.
+			if (scan.animated)
+				return L"Saving over this image would discard its animation. Use Save as to keep the original.";
+			if (scan.hdr || scan.gain_map || scan.picture.bit_depth > 8)
+				return L"Saving over this photo would discard HDR or higher bit depth. Use Save as to keep the original.";
+		}
+		catch (const libfiles::read_error&)
+		{
+			return unreadable;
+		}
+		return {};
+	}
+
+	bool save_image(const DecodedImage& image, const std::filesystem::path& path, ImageSaveFormat format,
+	                const SaveOptions& options, const bool overwrite, const std::function<bool()>& beforeCommit,
+	                const std::optional<FileSnapshot>& expected, std::filesystem::path* originalLocation)
+	{
+		const auto reviewed = overwrite ? (expected ? expected : snapshot_file(path))
+		                                : std::optional<FileSnapshot>{FileSnapshot{}};
 		TemporaryOutput output;
-		if (path.empty() || output.create(path)) return false;
-		const auto result = imaging::encode_to_file(image, output.path(), format, options);
+		if (path.empty() || !reviewed) return false;
+		if (const auto error = output.create(path))
+		{
+			platform::write_diagnostic(std::format(L"Could not stage an image save (error {}).\n", error.value()));
+			return false;
+		}
+		const auto result = imaging::encode(image, format, options,
+		                                    [&output](const auto bytes) { return output.write(bytes); });
 		for (const auto& warning : result.warnings) platform::write_diagnostic(warning);
 		if (!result)
 		{
 			platform::write_diagnostic(result.message);
 			return false;
 		}
-		return (!beforeCommit || beforeCommit()) && !output.commit(path, overwrite);
+		const auto error = output.commit(path, reviewed, beforeCommit, originalLocation);
+		if (error && error != std::errc::file_exists && error != std::errc::operation_canceled)
+			platform::write_diagnostic(std::format(L"Could not publish an image save (error {}).\n", error.value()));
+		return !error;
+	}
+
+	std::error_code write_staged_file(const std::filesystem::path& path, const FileSnapshot& expected,
+	                                 const std::function<bool(const StagedStream&)>& writer,
+	                                 const std::function<bool()>& beforeCommit, std::filesystem::path* originalLocation)
+	{
+		if (!matches_snapshot(path, expected)) return std::make_error_code(std::errc::state_not_recoverable);
+		TemporaryOutput output;
+		if (const auto error = output.create(path)) return error;
+		if (!writer(output.stream()) || !output.flush()) return std::make_error_code(std::errc::io_error);
+		return output.commit(path, expected, beforeCommit, originalLocation);
 	}
 }

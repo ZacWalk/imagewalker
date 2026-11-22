@@ -5,6 +5,8 @@
 # Its own topic set is included in the portable ImageWalker.chm.
 
 set(IW30_SOURCES
+    AgentPlatform.cpp
+    AgentSession.cpp
     CanvasRenderer.cpp
     ControlPanel.cpp
     DiagnosticLog.cpp
@@ -13,6 +15,7 @@ set(IW30_SOURCES
     FolderTree.cpp
     Format.cpp
     ImageCanvas.cpp
+    ImageCanvasMedia.cpp
     ImageEditor.cpp
     ImageResampler.cpp
     Main.cpp
@@ -20,6 +23,8 @@ set(IW30_SOURCES
     MainWindowFiles.cpp
     MainWindowTasks.cpp
     Media.cpp
+    MediaDecode.cpp
+    MediaEdit.cpp
     MediaRuntime.cpp
     ModeBar.cpp
     Paths.cpp
@@ -42,18 +47,6 @@ set(IW30_SOURCES
 )
 list(TRANSFORM IW30_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 
-if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_LIBDESKTOP
-   AND EXISTS "${CMAKE_SOURCE_DIR}/../libdesktop/CMakeLists.txt")
-    set(FETCHCONTENT_SOURCE_DIR_LIBDESKTOP "${CMAKE_SOURCE_DIR}/../libdesktop" CACHE PATH
-        "A libdesktop checkout to build instead of the published revision")
-endif()
-include(FetchContent)
-FetchContent_Declare(libdesktop
-    GIT_REPOSITORY https://github.com/ZacWalk/libdesktop.git
-    GIT_TAG        d172a12c6e3df0831a641133b96d073559a99db5
-    EXCLUDE_FROM_ALL)
-FetchContent_MakeAvailable(libdesktop)
-
 libdesktop_add_app(imagewalker30
     SOURCES ${IW30_SOURCES} app.rc
     EMBED
@@ -66,6 +59,7 @@ libdesktop_add_app(imagewalker30
         "${CMAKE_CURRENT_SOURCE_DIR}/Res/FileTypes/status-symbols.bmp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Res/FileTypes/video.bmp"
     DESCRIPTION "ImageWalker 3.0"
+    COMPANY "Zac Walker"
     VERSION "3.0.0.0"
     OUTPUT_NAME imagewalker30)
 
@@ -86,12 +80,13 @@ target_compile_options(imagewalker30 PRIVATE
     /EHsc /W4 /permissive- /Zc:__cplusplus /Zc:preprocessor /utf-8 /MP
     $<$<NOT:$<CONFIG:Debug>>:/Zi /guard:cf>)
 
-target_link_libraries(imagewalker30 PRIVATE libdesktop::ui windowscodecs ole32 shlwapi htmlhelp
+target_link_libraries(imagewalker30 PRIVATE libdesktop::ui windowscodecs ole32 shlwapi htmlhelp comctl32 advapi32 dwmapi
     mfuuid bcrypt
     iw_imaging
     iw::jpeg iw::png iw::tiff iw::gif iw::zlib
-    libfiles::libfiles)
+    libfiles::libfiles iw::ffmpeg)
 
 # Optimised builds keep their PDBs.
 target_link_options(imagewalker30 PRIVATE
+    /SUBSYSTEM:WINDOWS,10.00
     $<$<NOT:$<CONFIG:Debug>>:/DEBUG /OPT:REF /OPT:ICF /INCREMENTAL:NO>)

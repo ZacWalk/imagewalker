@@ -3,6 +3,10 @@
 #include <winver.h>
 #include "ImagingDataObject.h"
 #include "UtilMd5.h"
+#include "ViewDropTarget.h"
+#include "ViewEdit.h"
+#include "ViewModelSearch.h"
+#include "AppThreadFolder.h"
 #include "iw/formatenum.h"
 #include "iw/zstream.h"
 
@@ -56,6 +60,21 @@ namespace
 		}
 	};
 
+	bool WriteWorkflowMarker(const CString &path, char marker)
+	{
+		IW::CFile file;
+		return file.OpenForWrite(path) && file.Write(&marker, sizeof(marker));
+	}
+
+	char ReadWorkflowMarker(const CString &path)
+	{
+		IW::CFile file;
+		char marker = 0;
+		DWORD read = 0;
+		return file.OpenForRead(path) && file.Read(&marker, sizeof(marker), &read) && read == sizeof(marker) ?
+			marker : 0;
+	}
+
 	struct WorkflowDialogLifetime
 	{
 		HWND window;
@@ -103,6 +122,294 @@ namespace
 		for (int y = 0; y < 32; ++y) lock->SetLine(line.data(), y, 0, 32);
 		return image;
 	}
+
+	struct WorkflowImageCoupling : Coupling
+	{
+		std::vector<CString> paths;
+		IW::RefPtr<CImageLoad> request;
+		CString selected;
+		bool allowChange = true;
+		int changeRequests = 0;
+
+		CString GetItemPath(int index) const override { return paths.at(index); }
+		HWND GetImageWindow() override { return nullptr; }
+		ITEMLIST GetItemList() const override { return {}; }
+		CSize GetThumbnailSize() const override { return CSize(160, 160); }
+		bool HasSearchSpec() override { return false; }
+		bool IsFullScreen() const override { return false; }
+		bool IsItemFolder(long) const override { return false; }
+		bool SelectFolderItem(const CString &path) override { selected = path; return true; }
+		bool ViewFullScreen(bool) override { return false; }
+		int GetFocusItem() const override { return 0; }
+		int GetItemCount() const override { return static_cast<int>(paths.size()); }
+		void AfterCopy(bool) override {}
+		void BeginImageFade(int) override {}
+		bool CanChangeImage() override { ++changeRequests; return allowChange; }
+#if MINOR_VERSION < 3
+		bool CanShowGutterItem(DWORD) const override { return false; }
+#endif
+		void Command(WORD) override {}
+		void NewImage(bool) override {}
+		void ResetThumbThread() override {}
+		void ResetWaitForFolderToChangeThread() override {}
+		void SetFocusItem(int, bool) override {}
+		void SetStatusText(const CString &) override {}
+		void SetStopLoading() override {}
+		void ShowImage(CImageLoad *info) override { request = info; }
+		void ShowSearchPane() override {}
+		void StartSearch(Search::Type) override {}
+		void SignalImageLoadComplete(CImageLoad *) override {}
+		void SignalSearching(UINT_PTR) override {}
+		void SignalSearchingComplete(UINT_PTR) override {}
+		void SignalSearchingFolder(const CString &, UINT_PTR) override {}
+		void SignalThumbnailing() override {}
+		void SignalThumbnailingComplete() override {}
+		void SortOrderChanged(int) override {}
+		void StartSearchThread(Search::Type, const Search::Spec &) override {}
+		void StartSearching() override {}
+		void StopLoadingThumbs() override {}
+		void TrackPopupMenu(HMENU, UINT, int, int) override {}
+		void UpdateStatusText() override {}
+		void UpdateToolbarsShown() override {}
+	};
+
+	struct WorkflowBitmapDrop : CDropTargetImpl<WorkflowBitmapDrop>
+	{
+		using CDropTargetImpl::Drop;
+		ImageState &state;
+		explicit WorkflowBitmapDrop(ImageState &image) : state(image) {}
+		bool LoadImageFromHGlobal(HGLOBAL bitmap) { return state.ImportBitmap(bitmap); }
+	};
+}
+
+IW_TEST(BitmapDropPreservesTheCurrentDraftWhenRejected)
+{
+	WorkflowImageCoupling coupling;
+	State state(&coupling, false);
+	const CString path = _T("draft.bmp");
+	auto original = WorkflowSolidImage(IW::RGBA(200, 20, 40));
+	state.Image.SetImage(original, path);
+	auto draft = WorkflowSolidImage(IW::RGBA(30, 200, 40));
+	state.Image.SetImageWithHistory(draft, _T("Edit"));
+
+	const HGLOBAL invalid = ::GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, 1);
+	IW_CHECK(invalid != nullptr);
+	if (invalid)
+	{
+		IW_CHECK(!state.Image.ImportBitmap(invalid));
+		::GlobalFree(invalid);
+	}
+	IW_CHECK_EQ(coupling.changeRequests, 0);
+
+	CComPtr<CImageDataObject> data = IW::CreateComObject<CImageDataObject>();
+	data->Cache(WorkflowSolidImage(IW::RGBA(20, 40, 200)));
+	WorkflowBitmapDrop target(state.Image);
+	coupling.allowChange = false;
+	DWORD effect = DROPEFFECT_COPY;
+	IW_CHECK_EQ(target.Drop(data, 0, POINTL{}, &effect), S_OK);
+	IW_CHECK_EQ(effect, DWORD{DROPEFFECT_NONE});
+	IW_CHECK_EQ(coupling.changeRequests, 1);
+	IW_CHECK(state.Image.IsDirty() && state.Image.CanUndo() && state.Image.GetImageFileName() == path);
+	COLORREF pixel{};
+	state.Image.GetImage().GetFirstPage().GetSurfaceLock()->GetLine(&pixel, 0, 0, 1);
+	IW_CHECK_EQ(IW::GetR(pixel), 30u);
+
+	state.Image.UndoWithoutPrompt();
+	coupling.allowChange = true;
+	effect = DROPEFFECT_COPY;
+	IW_CHECK_EQ(target.Drop(data, 0, POINTL{}, &effect), S_OK);
+	IW_CHECK_EQ(effect, DWORD{DROPEFFECT_COPY});
+	IW_CHECK(state.Image.IsImageReady() && state.Image.GetImageFileName().IsEmpty());
+	state.Image.GetImage().GetFirstPage().GetSurfaceLock()->GetLine(&pixel, 0, 0, 1);
+	IW_CHECK_EQ(IW::GetR(pixel), 20u);
+}
+
+IW_TEST(SupersededSearchCannotPublishRowsOrNotifications)
+{
+	WorkflowImageCoupling coupling;
+	State state(&coupling, false);
+	DecodeThumbsThread worker(&coupling, state);
+	const auto folder = state.Folder.GetFolder();
+	const auto stale = IW::FolderItem::CreateTestItem();
+	const auto oldSearch = worker.StartSearch(Search::Current, Search::Spec(_T("old")));
+	IW_CHECK(worker.PublishSearchResult(oldSearch, folder, stale));
+
+	IW_CHECK(worker.Abort());
+	folder->DeleteAllThumbs();
+	const auto newSearch = worker.StartSearch(Search::Current, Search::Spec(_T("new")));
+	IW_CHECK(!worker.IsCurrentSearch(oldSearch));
+	IW_CHECK(!worker.PublishSearchResult(oldSearch, folder, stale));
+	IW_CHECK_EQ(folder->GetItemCount(), 0);
+
+	const auto fresh = IW::FolderItem::CreateTestItem();
+	IW_CHECK(worker.IsCurrentSearch(newSearch));
+	IW_CHECK(worker.PublishSearchResult(newSearch, folder, fresh));
+	IW_CHECK(folder->GetItemCount() == 1 && folder->GetItem(0).p == fresh.p);
+
+	IW_CHECK(worker.Abort());
+	IW_CHECK(!worker.IsCurrentSearch(newSearch));
+	IW_CHECK(!worker.PublishSearchResult(newSearch, folder, fresh));
+	IW_CHECK_EQ(folder->GetItemCount(), 1);
+}
+
+IW_TEST(ViewerIgnoresPostedStaleLoadsAndContinuesPastAFailedCurrentLoad)
+{
+	WorkflowTestFiles fixture;
+	IW_CHECK(!fixture.folder.IsEmpty());
+	if (fixture.folder.IsEmpty()) return;
+
+	WorkflowImageCoupling coupling;
+	coupling.paths = {fixture.Path(_T("old.bmp")), fixture.Path(_T("not-an-image.txt")),
+		fixture.Path(_T("current.bmp"))};
+	State state(&coupling, false);
+
+	state.Image.LoadImage(0, true);
+	auto posted = coupling.request;
+	IW_CHECK(posted != nullptr);
+	if (!posted) return;
+	posted->_image = WorkflowSolidImage(IW::RGBA(200, 20, 40));
+	state.Image.StepImage(1);
+	auto failed = coupling.request;
+	IW_CHECK(failed != nullptr && failed->_path == coupling.paths[1]);
+	if (!failed) return;
+
+	state.Image.OnLoadComplete(posted);
+	IW_CHECK(!state.Image.IsImageShown() && coupling.selected.IsEmpty());
+	state.Image.OnLoadComplete(failed);
+	auto current = coupling.request;
+	IW_CHECK(current != nullptr && current->_path == coupling.paths[2]);
+	if (!current) return;
+	current->_image = WorkflowSolidImage(IW::RGBA(20, 200, 40));
+	state.Image.OnLoadComplete(current);
+	IW_CHECK(state.Image.IsImageReady() && state.Image.GetImageFileName() == coupling.paths[2]);
+	IW_CHECK(coupling.selected == _T("current.bmp"));
+
+	state.Image.LoadImage(0, true);
+	auto stopped = coupling.request;
+	if (!stopped) return;
+	stopped->_image = posted->_image;
+	state.Image.StopLoading();
+	state.Image.OnLoadComplete(stopped);
+	IW_CHECK(state.Image.GetImageFileName() == coupling.paths[2]);
+}
+
+IW_TEST(LoadedPhotoKeepsTheSaveGuardAndUndoRemainsUnsavedAfterCommit)
+{
+	WorkflowTestFiles fixture;
+	IW_CHECK(!fixture.folder.IsEmpty());
+	if (fixture.folder.IsEmpty()) return;
+
+	const auto path = fixture.Path(_T("photo.bmp"));
+	const auto backup = fixture.Path(_T("photo-original.bmp"));
+	const auto secondBackup = fixture.Path(_T("photo-original (2).bmp"));
+	WorkflowImageCoupling coupling;
+	coupling.paths = {path};
+	State state(&coupling, false);
+	CLoadAny loader(state.Loaders);
+	auto initial = WorkflowSolidImage(IW::RGBA(200, 20, 40));
+	const bool written = loader.SaveImage(path, initial, App.Settings.Codec, IW::CNullStatus::Instance);
+	IW_CHECK(written);
+	if (!written) return;
+
+	state.Image.LoadImage(0, false);
+	auto request = coupling.request;
+	const bool loaded = request && request->Load(loader, IW::CNullStatus::Instance);
+	IW_CHECK(loaded);
+	if (!loaded) return;
+	state.Image.OnLoadComplete(request);
+	auto edit = WorkflowSolidImage(IW::RGBA(30, 200, 40));
+	state.Image.SetImageWithHistory(edit, _T("Edit"));
+
+	IW::CFileWriteStatus status;
+	const CString key = CLoadBmp::_GetKey();
+	const bool saved = state.Image.SaveFile(path, key, &status, true);
+	IW_CHECK(saved && !state.Image.IsDirty());
+	if (!saved) return;
+	const auto readRed = [&loader](const CString &file)
+	{
+		IW::Image image;
+		if (!loader.LoadImage(file, image, IW::CNullStatus::Instance) || image.IsEmpty())
+			return 0u;
+		COLORREF pixel{};
+		image.GetFirstPage().GetSurfaceLock()->GetLine(&pixel, 0, 0, 1);
+		return static_cast<unsigned>(IW::GetR(pixel));
+	};
+	IW_CHECK_EQ(readRed(path), 30u);
+	IW_CHECK_EQ(readRed(backup), 200u);
+
+	state.Image.UndoWithoutPrompt();
+	IW_CHECK(state.Image.IsDirty());
+	const bool savedUndo = state.Image.SaveFile(path, key, &status, true);
+	if (!savedUndo)
+		IW::Test::Detail::Print("\r\n    Save failed: %ls", status.error.GetString());
+	IW_CHECK(savedUndo);
+	IW_CHECK_EQ(readRed(path), 200u);
+	IW_CHECK_EQ(readRed(secondBackup), 30u);
+
+	state.Image.SetImageWithHistory(edit, _T("Edit again"));
+	// Preserve file identity, size and mtime, but change the bytes as a
+	// metadata editor that preserves the modified timestamp might.
+	{
+		const iw::publication::File other(::CreateFile(path, GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+		DWORD written = 0;
+		FILETIME modified{};
+		const bool changed = other && GetFileTime(other.get(), nullptr, nullptr, &modified) &&
+			WriteFile(other.get(), "x", 1, &written, nullptr) && written == 1 &&
+			SetFileTime(other.get(), nullptr, nullptr, &modified);
+		IW_CHECK(changed);
+		if (!changed) return;
+	}
+	IW_CHECK(!state.Image.SaveFile(path, key, &status, true));
+	IW_CHECK(!status.error.IsEmpty() && state.Image.IsDirty());
+	IW_CHECK_EQ(ReadWorkflowMarker(path), 'x');
+}
+
+IW_TEST(EditDraftKeepsItsOwnSourceWhenTheSameFileIsRefreshed)
+{
+	WorkflowTestFiles fixture;
+	IW_CHECK(!fixture.folder.IsEmpty());
+	if (fixture.folder.IsEmpty()) return;
+
+	const auto path = fixture.Path(_T("photo.bmp"));
+	const auto replacement = fixture.Path(_T("replacement.bmp"));
+	WorkflowImageCoupling coupling;
+	coupling.paths = {path};
+	State state(&coupling, false);
+	CLoadAny loader(state.Loaders);
+	auto initial = WorkflowSolidImage(IW::RGBA(200, 20, 40));
+	auto revised = WorkflowSolidImage(IW::RGBA(20, 200, 40));
+	const bool written = loader.SaveImage(path, initial, App.Settings.Codec, IW::CNullStatus::Instance) &&
+		loader.SaveImage(replacement, revised, App.Settings.Codec, IW::CNullStatus::Instance);
+	IW_CHECK(written);
+	if (!written) return;
+
+	state.Image.LoadImage(0, false);
+	auto request = coupling.request;
+	const bool loaded = request && request->Load(loader, IW::CNullStatus::Instance);
+	IW_CHECK(loaded);
+	if (!loaded) return;
+	state.Image.OnLoadComplete(request);
+	EditView edit(&coupling, state);
+	edit.Reload();
+	IW_CHECK(edit.CanSaveOriginal());
+	edit._edits._rotate = 1;
+
+	// Copy only into disposable test data. The viewer rereads this path,
+	// while the editor's live draft must keep the bytes it started from.
+	const bool replaced = ::CopyFile(replacement, path, FALSE) != FALSE;
+	IW_CHECK(replaced);
+	if (!replaced) return;
+	state.Image.Reload();
+	edit.Reload();
+	IW_CHECK(edit.HasChanges() && !edit.CanSaveOriginal());
+	COLORREF pixel{};
+	edit._source.GetFirstPage().GetSurfaceLock()->GetLine(&pixel, 0, 0, 1);
+	IW_CHECK_EQ(IW::GetR(pixel), 200u);
+
+	edit.CancelEdits();
+	IW_CHECK(!edit.HasChanges() && edit.CanSaveOriginal());
+	edit._source.GetFirstPage().GetSurfaceLock()->GetLine(&pixel, 0, 0, 1);
+	IW_CHECK_EQ(IW::GetR(pixel), 20u);
 }
 
 IW_TEST(RawDigestRequiresFinalizationAndReturnsOwnedBytes)
@@ -322,7 +629,7 @@ IW_TEST(CommandRoutingGivesTheActiveViewFirstRefusal)
 	IW_CHECK_EQ(view.seen.size(), size_t{3});
 }
 
-IW_TEST(CompiledAcceleratorsKeepRenameAndPrintCommandsDistinct)
+IW_TEST(CompiledAcceleratorsMatchSharedNavigationAndFileCommands)
 {
 	const HACCEL table = LoadAccelerators(_Module.GetResourceInstance(), MAKEINTRESOURCE(IDR_MAINFRAME));
 	IW_CHECK(table != nullptr);
@@ -347,10 +654,18 @@ IW_TEST(CompiledAcceleratorsKeepRenameAndPrintCommandsDistinct)
 	};
 	IW_CHECK_EQ(command(VK_F2, FVIRTKEY), ID_BROWSE_RENAME);
 	IW_CHECK_EQ(command(VK_DELETE, FVIRTKEY), ID_EDIT_DELETE);
-	IW_CHECK_EQ(command(VK_F7, FVIRTKEY), ID_FILE_MOVETO_POPUP);
+	IW_CHECK_EQ(command(VK_F7, FVIRTKEY), 0);
+	IW_CHECK_EQ(command('X', FVIRTKEY | FCONTROL | FSHIFT), ID_FILE_MOVETO_POPUP);
+	IW_CHECK_EQ(command('C', FVIRTKEY | FCONTROL | FSHIFT), ID_FILE_COPYTO_POPUP);
+	IW_CHECK_EQ(command(VK_RETURN, FVIRTKEY | FCONTROL), ID_FILE_OPEN_WITH);
+	IW_CHECK_EQ(command(VK_RETURN, FVIRTKEY | FCONTROL | FSHIFT), ID_FILE_PROPERTIES);
+	IW_CHECK_EQ(command(VK_SPACE, FVIRTKEY), ID_IMAGE_NEXT);
+	IW_CHECK_EQ(command(VK_SPACE, FVIRTKEY | FCONTROL | FSHIFT), ID_VIEW_IMAGEFULLSCREEN);
+	IW_CHECK_EQ(command(VK_F11, FVIRTKEY), ID_VIEW_IMAGEFULLSCREEN);
+	IW_CHECK_EQ(command(VK_BACK, FVIRTKEY), ID_BROWSE_BACK);
 	IW_CHECK_EQ(command(_T('P'), FVIRTKEY | FCONTROL), ID_FILE_PRINT);
 	IW_CHECK_EQ(command(_T('P'), FVIRTKEY | FCONTROL | FSHIFT), ID_VIEW_PRINT);
-	IW_CHECK_EQ(command(VK_F10, FVIRTKEY), ID_VIEW_PRINT);
+	IW_CHECK_EQ(command(VK_F10, FVIRTKEY), 0);
 }
 
 IW_TEST(RenameDialogInitializesAndRebuildsTheVisibleReviewOnControlChanges)
@@ -398,6 +713,8 @@ IW_TEST(RenameDialogInitializesAndRebuildsTheVisibleReviewOnControlChanges)
 	}
 	dialog.SetDlgItemText(IDC_TEMPLATE, _T("?"));
 	IW_CHECK(!dialog.GetDlgItem(IDOK).IsWindowEnabled());
+	dialog.SetDlgItemText(IDC_TEMPLATE, _T("ALPHA"));
+	IW_CHECK(!dialog.GetDlgItem(IDOK).IsWindowEnabled());
 	dialog.SetDlgItemText(IDC_TEMPLATE, _T("New ##"));
 	dialog.SetDlgItemInt(IDC_START_AT, 8, FALSE);
 	IW_CHECK(dialog.GetDlgItem(IDOK).IsWindowEnabled());
@@ -407,6 +724,69 @@ IW_TEST(RenameDialogInitializesAndRebuildsTheVisibleReviewOnControlChanges)
 	IW_CHECK(!dialog.GetDlgItem(IDOK).IsWindowEnabled());
 	dialog.GetDlgItemText(IDC_RENAME_STATUS, text, countof(text));
 	IW_CHECK(!CString(text).IsEmpty());
+}
+
+IW_TEST(ExplicitShellCopyAndMoveDoNotReplaceAnOccupiedName)
+{
+	WorkflowTestFiles fixture;
+	IW_CHECK(!fixture.folder.IsEmpty());
+	if (fixture.folder.IsEmpty()) return;
+
+	const auto destination = IW::Path::Combine(fixture.folder, _T("destination"));
+	if (!::CreateDirectory(destination, nullptr))
+	{
+		IW_CHECK(false);
+		return;
+	}
+	struct OwnedDirectory
+	{
+		std::filesystem::path path;
+		~OwnedDirectory() { std::error_code error; std::filesystem::remove_all(path, error); }
+	} owner{destination.GetString()};
+
+	for (const bool move : {false, true})
+	{
+		const LPCTSTR name = move ? _T("move.png") : _T("copy.png");
+		const CString source = fixture.Path(name);
+		const CString occupied = IW::Path::Combine(destination, name);
+		IW_CHECK(WriteWorkflowMarker(source, move ? 'M' : 'C'));
+		IW_CHECK(WriteWorkflowMarker(occupied, 'O'));
+
+		IW::FileOperation operation(source + _T("\n\n"));
+		IW_CHECK(operation.Copy(destination, move));
+		IW_CHECK_EQ(ReadWorkflowMarker(occupied), 'O');
+		IW_CHECK_EQ(ReadWorkflowMarker(source), move ? 0 : 'C');
+
+		int copies = 0;
+		for (const auto &entry : std::filesystem::directory_iterator(owner.path))
+		{
+			if (ReadWorkflowMarker(entry.path().c_str()) == (move ? 'M' : 'C'))
+				copies += 1;
+		}
+		IW_CHECK_EQ(copies, 1);
+	}
+}
+
+IW_TEST(RecycleRefusesInvalidSelectionAndNeverDeletesLockedOriginal)
+{
+	WorkflowTestFiles fixture;
+	IW_CHECK(!fixture.folder.IsEmpty());
+	if (fixture.folder.IsEmpty()) return;
+
+	const CString original = fixture.Path(_T("original.txt"));
+	IW_CHECK(WriteWorkflowMarker(original, 'O'));
+	const IW::FileOperation invalid(original + _T("\nrelative.txt\n\n"));
+	IW_CHECK(!invalid.Recycle());
+	IW_CHECK_EQ(ReadWorkflowMarker(original), 'O');
+
+	const HANDLE lock = ::CreateFile(original, GENERIC_READ, FILE_SHARE_READ, nullptr,
+		OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+	IW_CHECK(lock != INVALID_HANDLE_VALUE);
+	if (lock == INVALID_HANDLE_VALUE) return;
+	const IW::FileOperation locked(original + _T("\n\n"));
+	IW_CHECK(!locked.Recycle());
+	::CloseHandle(lock);
+	IW_CHECK_EQ(ReadWorkflowMarker(original), 'O');
 }
 
 IW_TEST(PrintPaginationAndOnePerPageUseTheSameImageSelection)

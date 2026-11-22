@@ -3,6 +3,7 @@
 
 #include "Platform.h"
 #include "ImageCanvas.h"
+#include "PlatformMedia.h"
 #include "Files.h"
 #include "Format.h"
 #include "Paths.h"
@@ -48,6 +49,7 @@ namespace iw
 	}
 
 	ImageCanvas::ImageCanvas() = default;
+	ImageCanvas::~ImageCanvas() = default;
 
 	bool ImageCanvas::create(const platform::WindowFramePtr& parent)
 	{
@@ -73,6 +75,15 @@ namespace iw
 		frame_ = parent ? parent->create_child(reactorBinding_, options) : nullptr;
 		if (frame_) frame_->configure_gestures(true, true);
 		return frame_ != nullptr;
+	}
+
+	void ImageCanvas::restore_surface()
+	{
+		if (!frame_) return;
+		frame_->set_reactor(reactorBinding_);
+		rebuild_layout();
+		queue_thumbnails();
+		invalidate();
 	}
 
 	void ImageCanvas::set_dpi(const unsigned int dpi)
@@ -112,6 +123,7 @@ namespace iw
 
 	bool ImageCanvas::load(const std::filesystem::path& path)
 	{
+		if (!paths::equal(path_, path)) stop_media();
 		retain_displayed_image();
 		const auto item = std::ranges::find_if(items_, [&path](const files::FolderItem& value)
 		{ return paths::equal(value.path, path); });
@@ -128,6 +140,7 @@ namespace iw
 		fullSizePending_ = false;
 		decodePending_ = false;
 		decodeFailed_ = false;
+		mediaHasPoster_ = false;
 		imageScroll_.offset = 0;
 		path_ = path;
 		primaryView_.sourceWidth = item == items_.end() ? 0 : item->width;
@@ -146,13 +159,16 @@ namespace iw
 					const auto& thumbnail = thumbnails_[index];
 					initialImage_ = {thumbnail.width, thumbnail.height, thumbnail.pixels, thumbnail.originalWidth,
 					                 thumbnail.originalHeight};
+					mediaHasPoster_ = true;
 				}
 			}
 			primaryView_.sourceWidth = initialImage_.width;
 			primaryView_.sourceHeight = initialImage_.height;
 			primaryView_.zoom.set_source({primaryView_.sourceWidth, primaryView_.sourceHeight});
+			if (media_preview()) primaryView_.zoom.set_fit();
 			rebuild_properties();
 			rebuild_layout();
+			if (media_preview() && zoomModeHandler_) zoomModeHandler_(false);
 			invalidate();
 			return !initialImage_.pixels.empty();
 		}
@@ -218,6 +234,7 @@ namespace iw
 
 	void ImageCanvas::clear_displayed_image()
 	{
+		stop_media();
 		std::erase_if(retainedImages_, [this](const RetainedImage& image) { return paths::equal(image.path, path_); });
 		initialImage_ = {};
 		fullImage_ = {};
@@ -226,9 +243,17 @@ namespace iw
 		++imageGeneration_;
 		pendingImage_.reset();
 		decodePending_ = false;
+		decodeFailed_ = false;
 		path_.clear();
 		primaryView_.sourceWidth = primaryView_.sourceHeight = 0;
 		primaryView_.zoom.set_source({});
+	}
+
+	void ImageCanvas::clear_preview()
+	{
+		clear_displayed_image();
+		primaryView_.zoom.set_fit();
+		imageScroll_.offset = 0;
 	}
 
 	void ImageCanvas::invalidate_all_files()
@@ -361,6 +386,7 @@ namespace iw
 
 	void ImageCanvas::set_zoom(const double scale, const app::pointi focus)
 	{
+		if (media_preview()) return;
 		const bool comparison = fullscreen_ && activeComparison_;
 		if (comparison && comparisonImage_.pixels.empty()) return;
 		if (!comparison && (collage_active() || !displayed_image())) return;
@@ -543,6 +569,7 @@ namespace iw
 		// acting on a different item from the one on screen.
 		if (!path_.empty() && index_of(path_) < 0)
 		{
+			stop_media();
 			std::error_code error;
 			if (!std::filesystem::exists(files::native_path(path_), error) && !error) clear_displayed_image();
 		}
@@ -573,6 +600,7 @@ namespace iw
 	void ImageCanvas::set_fullscreen(const bool fullscreen)
 	{
 		if (fullscreen_ == fullscreen) return;
+		stop_media();
 		if (fullscreen)
 		{
 			normalDisplayedPath_ = path_;
@@ -720,31 +748,35 @@ namespace iw
 	void ImageCanvas::set_thumbnail_size(const int size)
 	{
 		const int value = std::clamp(size, 64, 256);
-		if (thumbnailSize_ != value)
-		{
-			thumbnailSize_ = value;
-			const int target = metric(value);
-			for (size_t index = 0; index < thumbnails_.size(); ++index)
-			{
-				if (thumbnailStates_[index] != ThumbnailState::resident) continue;
-				const auto& thumbnail = thumbnails_[index];
-				if (thumbnail.width < target && thumbnail.height < target &&
-				    (thumbnail.originalWidth > thumbnail.width || thumbnail.originalHeight > thumbnail.height))
-					thumbnailStates_[index] = ThumbnailState::evicted;
-			}
-		}
+		if (thumbnailSize_ == value) return;
+		if (fullscreen_)
+			stripOffset_ = static_cast<int>(
+				(std::min)(static_cast<std::int64_t>(INT_MAX),
+			               static_cast<std::int64_t>(stripOffset_) * (value + 24) / (thumbnailSize_ + 24)));
+		thumbnailSize_ = value;
 		rebuild_layout();
 		queue_thumbnails();
 		invalidate();
 	}
 
+	void ImageCanvas::resize_strip_at(const int x)
+	{
+		const int range = (std::max)(1, stripSizeBounds_.width - 1);
+		const int offset = std::clamp(x - stripSizeBounds_.x, 0, range);
+		const int value = 64 + offset * 192 / range;
+		if (commandHandlers_.resizeThumbnails) commandHandlers_.resizeThumbnails(value);
+		else set_thumbnail_size(value);
+	}
+
 	void ImageCanvas::queue_thumbnails()
 	{
+		if (fullscreen_ && (immersive_zoom() || !thumbnailsExpanded_)) return;
 		if (!fullscreen_ && (mode_ == ItemMode::details || mode_ == ItemMode::single)) return;
 		constexpr size_t maximumBatch = 8;
 		constexpr size_t prefetchRadius = 16;
 		constexpr size_t residencyBudget = 512;
-		const int decodeSize = metric(std::clamp(thumbnailSize_, 64, 256));
+		// During a slider drag reuse a size tier rather than decoding the same image for every pixel.
+		const int decodeSize = metric((thumbnailSize_ + 63) / 64 * 64);
 		const size_t count = files_.size();
 		size_t firstVisible = count;
 		size_t lastVisible = 0;
@@ -759,15 +791,29 @@ namespace iw
 		const size_t first = visibleKnown && firstVisible > prefetchRadius ? firstVisible - prefetchRadius : 0;
 		const size_t last = visibleKnown ? (std::min)(count - 1, lastVisible + prefetchRadius) : 0;
 		std::vector<ThumbnailRequest> batch;
-		if (visibleKnown && !thumbnailsInFlight_)
-			for (size_t index = first; index <= last && batch.size() < maximumBatch; ++index)
+		const auto append = [&](const size_t begin, const size_t end)
+		{
+			for (size_t index = begin; index < end && batch.size() < maximumBatch; ++index)
 			{
 				if (index >= items_.size() || !has_thumbnail(items_[index].kind)) continue;
+				if (fullscreen_ && items_[index].kind != files::ItemKind::image) continue;
 				const auto state = thumbnailStates_[index];
-				if (state != ThumbnailState::none && state != ThumbnailState::evicted) continue;
+				const auto& existing = thumbnails_[index];
+				const bool improve = state == ThumbnailState::resident && !existing.pixels.empty() &&
+				                     existing.requestedEdge < decodeSize &&
+				                     (existing.width < existing.originalWidth ||
+				                      existing.height < existing.originalHeight);
+				if (!improve && state != ThumbnailState::none && state != ThumbnailState::evicted) continue;
 				thumbnailStates_[index] = ThumbnailState::queued;
 				batch.push_back({files_[index], generation_, index, decodeSize, decodeSize});
 			}
+		};
+		if (visibleKnown && !thumbnailsInFlight_)
+		{
+			append(firstVisible, lastVisible + 1);
+			append(lastVisible + 1, last + 1);
+			append(first, firstVisible);
+		}
 		// An entry inside the prefetch window must go back on the deque: dropping it leaves the
 		// thumbnail resident, untracked and therefore unevictable for the rest of the session.
 		for (size_t attempts = thumbnailResidency_.size();
@@ -788,8 +834,8 @@ namespace iw
 		if (!batch.empty())
 		{
 			thumbnailsInFlight_ = true;
-			platform::queue_work(platform::WorkQueue::thumbnail,
-			                     [this, alive = std::weak_ptr(alive_), batch = std::move(batch)]
+			if (!platform::queue_work(platform::WorkQueue::thumbnail,
+			                          [this, alive = std::weak_ptr(alive_), batch = std::move(batch)]
 			{
 				const auto exiting = platform::exit_token();
 				for (const auto& request : batch)
@@ -804,6 +850,7 @@ namespace iw
 					{
 						result = {};
 						static_cast<ThumbnailRequest&>(result) = request;
+						result.requestedEdge = request.width;
 						result.width = result.height = 0;
 					}
 					platform::queue_ui([this, alive, result = std::move(result)]() mutable
@@ -817,13 +864,36 @@ namespace iw
 				{
 					if (alive.expired()) return;
 					thumbnailsInFlight_ = false;
-					rebuild_layout();
+					if (mode_ == ItemMode::thumbnails && !fullscreen_)
+					{
+						rebuild_layout();
+						invalidate();
+					}
 					queue_thumbnails();
-					invalidate();
 				});
-			});
+			}))
+			{
+				thumbnailsInFlight_ = false;
+				for (auto& state : thumbnailStates_)
+					if (state == ThumbnailState::queued) state = ThumbnailState::none;
+				platform::write_diagnostic(L"The thumbnail worker is unavailable.\n");
+			}
 		}
-		if (progressHandler_) progressHandler_(thumbnailsComplete_, thumbnailTarget_);
+		if (progressHandler_)
+		{
+			size_t visible = 0, settled = 0;
+			if (visibleKnown)
+				for (const auto& cell : itemFlow_.children)
+				{
+					if (cell.id < 0 || !cell.bounds.intersects(itemsViewport_)) continue;
+					const auto index = static_cast<size_t>(cell.id);
+					if (index >= items_.size() || !has_thumbnail(items_[index].kind)) continue;
+					++visible;
+					if (thumbnailStates_[index] == ThumbnailState::resident || !thumbnails_[index].pixels.empty())
+						++settled;
+				}
+			progressHandler_(settled, visible);
+		}
 	}
 
 	bool ImageCanvas::collage_active() const
@@ -1108,6 +1178,7 @@ namespace iw
 	{
 		ThumbnailResult result;
 		static_cast<ThumbnailRequest&>(result) = request;
+		result.requestedEdge = request.width;
 		auto image = files::load_thumbnail(result.path, result.width, result.height);
 		result.width = image.width;
 		result.height = image.height;
@@ -1125,15 +1196,21 @@ namespace iw
 			items_[result.index].width = result.originalWidth;
 			items_[result.index].height = result.originalHeight;
 		}
-		thumbnails_[result.index] = {result.width, result.height, std::move(result.pixels), result.originalWidth,
-		                             result.originalHeight};
-		if (thumbnailStates_[result.index] != ThumbnailState::resident)
+		auto& cached = thumbnails_[result.index];
+		if (!cached.requestedEdge)
+		{
 			thumbnailsComplete_ = (std::min)(thumbnailsComplete_ + 1, thumbnailTarget_);
+			thumbnailResidency_.push_back(result.index);
+		}
+		if (!result.pixels.empty() || cached.pixels.empty())
+			cached = {result.width,         result.height,         std::move(result.pixels),
+			          result.originalWidth, result.originalHeight, result.requestedEdge};
+		else cached.requestedEdge = result.requestedEdge;
 		thumbnailStates_[result.index] = ThumbnailState::resident;
-		thumbnailResidency_.push_back(result.index);
 		if (displayedKind_ == files::ItemKind::video && paths::equal(path_, result.path) &&
 		    !thumbnails_[result.index].pixels.empty())
 		{
+			mediaHasPoster_ = true;
 			const auto& thumbnail = thumbnails_[result.index];
 			initialImage_ = {thumbnail.width, thumbnail.height, thumbnail.pixels, thumbnail.originalWidth,
 			                 thumbnail.originalHeight};
@@ -1293,6 +1370,12 @@ namespace iw
 
 	bool ImageCanvas::cancel_transient_state()
 	{
+		if (std::exchange(mediaSeeking_, false))
+		{
+			if (frame_) frame_->release_capture();
+			invalidate_image_pane();
+			return true;
+		}
 		if (quickZoom_)
 		{
 			end_quick_zoom();
@@ -1309,10 +1392,25 @@ namespace iw
 		return false;
 	}
 
+	bool ImageCanvas::back_out()
+	{
+		if (cancel_transient_state()) return true;
+		if (stop_media()) return true;
+		if (!active_view().zoom.is_fit())
+		{
+			set_fit(true);
+			return true;
+		}
+		if (!fullscreen_ || !commandHandlers_.leaveFullscreen) return false;
+		commandHandlers_.leaveFullscreen();
+		return true;
+	}
+
 	platform::MessageResult ImageCanvas::message(const platform::WindowFramePtr& frame,
 	                                             const platform::WindowMessage message)
 	{
 		frame_ = frame;
+		if (message == platform::WindowMessage::destroy) stop_media();
 		if (message == platform::WindowMessage::close)
 		{
 			frame->close();
@@ -1361,6 +1459,7 @@ namespace iw
 	                                             const platform::GestureInput& input)
 	{
 		frame_ = frame;
+		if (media_preview()) return 0;
 		if (input.kind == platform::GestureKind::zoom)
 		{
 			if (input.begin)
@@ -1394,6 +1493,11 @@ namespace iw
 	platform::MessageResult ImageCanvas::handle_input(const InputEvent event, const platform::MouseInput& mouse,
 	                                                  const platform::KeyInput& key)
 	{
+		if (event == InputEvent::keyDown)
+		{
+			if (media_key(key)) return 1;
+		}
+		else if (media_mouse(event, mouse)) return 1;
 		switch (event)
 		{
 		case InputEvent::leftButtonDown:
@@ -1402,7 +1506,14 @@ namespace iw
 			const app::pointi point = mouse.point;
 			const bool control = mouse.control;
 			const bool shift = mouse.shift;
-			if (stripHeaderBounds_.contains(point))
+			if (stripSizeBounds_.contains(point))
+			{
+				draggingStripSize_ = true;
+				if (frame_) frame_->set_capture();
+				resize_strip_at(point.x);
+				return 1;
+			}
+			if (stripToggleBounds_.contains(point))
 			{
 				if (commandHandlers_.toggleThumbnails) commandHandlers_.toggleThumbnails();
 				else set_thumbnail_selector_visible(!thumbnailsExpanded_);
@@ -1621,6 +1732,11 @@ namespace iw
 					return 0;
 				}
 			}
+			if (draggingStripSize_)
+			{
+				resize_strip_at(x);
+				return 1;
+			}
 			if (scrollDrag_ != ScrollDrag::none)
 			{
 				if (scrollDrag_ == ScrollDrag::thumbnails)
@@ -1714,6 +1830,13 @@ namespace iw
 				invalidate();
 				return 0;
 			}
+			if (draggingStripSize_)
+			{
+				resize_strip_at(mouse.point.x);
+				draggingStripSize_ = false;
+				if (frame_) frame_->release_capture();
+				return 1;
+			}
 			if (scrollDrag_ != ScrollDrag::none)
 			{
 				scrollDrag_ = ScrollDrag::none;
@@ -1727,6 +1850,7 @@ namespace iw
 			if (draggingMarquee_)
 			{
 				draggingMarquee_ = false;
+				draggingStripSize_ = false;
 				if (frame_) frame_->release_capture();
 			}
 			if (deferSingleSelection_ && pressedIndex_ >= 0)
@@ -1794,15 +1918,16 @@ namespace iw
 		{
 			const bool control = key.control;
 			const bool shift = key.shift;
+			const bool plain = !control && !shift && !key.alt;
 			const bool activeFit = active_view().zoom.is_effectively_fit(active_view().bounds);
 			const app::recti activeBounds = active_view().bounds;
-			if (quickZoom_ && key.key == platform::KeyCode::space)
+			if (quickZoom_ && plain && key.key == platform::KeyCode::space)
 			{
 				commit_quick_zoom();
 				if (frame_) frame_->release_capture();
-				return 0;
+				return 1;
 			}
-			if (fullscreen_ && (control || activeFit) &&
+			if (!key.alt && fullscreen_ && (control || activeFit) &&
 			    (key.key == platform::KeyCode::left || key.key == platform::KeyCode::right))
 			{
 				step_fullscreen_selection(key.key == platform::KeyCode::left ? -1 : 1, control);
@@ -1853,7 +1978,8 @@ namespace iw
 				invalidate();
 				return 0;
 			}
-			if (control && key.key == platform::KeyCode::space && active_selection().focus() >= 0)
+			if (control && !shift && !key.alt && key.key == platform::KeyCode::space &&
+			    active_selection().focus() >= 0)
 			{
 				active_selection().click(active_selection().focus(), true, false);
 				notify_selection();
@@ -1861,24 +1987,38 @@ namespace iw
 				return 0;
 			}
 			const int focused = active_selection().focus();
-			if (!control && key.key == platform::KeyCode::enter && focused >= 0 &&
-			    static_cast<size_t>(focused) < items_.size() && media::is_media(items_[focused].kind) &&
-			    activationHandler_)
+			if (plain && key.key == platform::KeyCode::enter)
 			{
-				activationHandler_(files_[focused]);
-				return 0;
+				if (fullscreen_)
+					step_fullscreen_selection(1, false);
+				else if (focused >= 0 && static_cast<size_t>(focused) < items_.size())
+				{
+					const auto kind = items_[focused].kind;
+					if (kind == files::ItemKind::image && commandHandlers_.enterFullscreen)
+						commandHandlers_.enterFullscreen();
+					else if ((kind == files::ItemKind::folder || media::is_media(kind)) && activationHandler_)
+						activationHandler_(files_[focused]);
+					else if (kind != files::ItemKind::image && commandHandlers_.openWith)
+						commandHandlers_.openWith();
+				}
+				return 1;
 			}
-			if (key.key == platform::KeyCode::enter && commandHandlers_.enterFullscreen)
+			if (plain && key.key == platform::KeyCode::space)
 			{
-				commandHandlers_.enterFullscreen();
-				return 0;
+				if (focused >= 0 && static_cast<size_t>(focused) < items_.size() &&
+				    media::is_media(items_[focused].kind) && activationHandler_)
+					activationHandler_(files_[focused]);
+				return 1;
 			}
-			if (key.key == platform::KeyCode::escape)
+			if (plain && key.key == platform::KeyCode::escape) return back_out() ? 1 : 0;
+			if (plain && (key.character == L'Z' || key.character == L'z') && displayed_image())
 			{
-				if (cancel_transient_state()) return 0;
-				if (!active_view().zoom.is_fit()) set_fit(true);
-				else if (commandHandlers_.leaveFullscreen) commandHandlers_.leaveFullscreen();
-				return 0;
+				const auto& zoom = active_view().zoom;
+				if (zoom.is_fit())
+					set_zoom(zoom.explicit_scale(), {activeBounds.x + activeBounds.width / 2,
+					                               activeBounds.y + activeBounds.height / 2});
+				else set_fit(true);
+				return 1;
 			}
 			int next = -1;
 			if (key.key == platform::KeyCode::left) next = spatial_neighbor(active_selection().focus(), -1, 0);
@@ -1889,9 +2029,6 @@ namespace iw
 			if (key.key == platform::KeyCode::end && !files_.empty()) next = static_cast<int>(files_.size()) - 1;
 			if (key.key == platform::KeyCode::pageUp) next = spatial_neighbor(active_selection().focus(), 0, -2);
 			if (key.key == platform::KeyCode::pageDown) next = spatial_neighbor(active_selection().focus(), 0, 2);
-			if (key.key == platform::KeyCode::space)
-				next = active_selection().focus() + 1 < static_cast<int>(files_.size()) ? active_selection().focus() + 1
-				                                                                        : (files_.empty() ? -1 : 0);
 			if (next >= 0)
 			{
 				active_selection().navigate(next, control, shift);
@@ -1931,7 +2068,8 @@ namespace iw
 		renderer.clip(immersive_zoom() ? imagePane_ : imageScroll_.viewport(imagePane_));
 		const bool showPrimary = !fullscreen_ || !immersive_zoom() || !activeComparison_;
 		const bool showCollage = collage_active() && !collage_.empty();
-		if (showPrimary && showCollage) paint_collage(renderer);
+		if (media_preview()) paint_media_preview(renderer);
+		else if (showPrimary && showCollage) paint_collage(renderer);
 		else if (showPrimary && displayed_image())
 		{
 			const auto* image = displayed_image();
@@ -1953,7 +2091,7 @@ namespace iw
 			}
 			const std::wstring_view message = primaryLoading_.failure() == ui::LoadingModel::Failure::unreadable
 			                                      ? L"This image could not be read"
-			                                  : path_.empty() ? L"Select an image to view"
+			                                  : path_.empty() ? L"Select an item to preview"
 			                                                  : L"Loading image...";
 			renderer.text(message, primaryView_.bounds, platform::system_color(platform::SystemColor::windowText),
 			              platform::TextFormat::center | platform::TextFormat::verticalCenter |
@@ -1984,7 +2122,16 @@ namespace iw
 		{
 			renderer.fill(splitterBounds_, platform::calc_hande_color(hoveringSplitter_, draggingSplitter_, false));
 			paint_items(renderer);
-			if (fullscreen_) renderer.scrollbar(thumbnailScroll_);
+			if (fullscreen_)
+			{
+				renderer.scrollbar(thumbnailScroll_);
+				if (thumbnailScroll_.visible())
+					for (const auto& item : itemFlow_.children)
+						if (item.id == fullscreenSelection_.focus() || item.id == fullscreenSelection_.secondary())
+							renderer.scrollbar_mark(thumbnailScroll_,
+							                         item.bounds.x - itemsViewport_.x + thumbnailScroll_.offset +
+							                             item.bounds.width / 2);
+			}
 			else renderer.scrollbar(itemsScroll_);
 			if (draggingMarquee_)
 			{
@@ -2003,7 +2150,7 @@ namespace iw
 			                 platform::system_color(platform::SystemColor::highlight));
 
 		const auto& feedbackView = active_view();
-		if (showCollage || feedbackView.bounds.is_empty() || feedbackView.sourceWidth <= 0 ||
+		if (media_preview() || showCollage || feedbackView.bounds.is_empty() || feedbackView.sourceWidth <= 0 ||
 		    feedbackView.sourceHeight <= 0)
 			return;
 		const bool temporary = quickZoom_;
@@ -2017,9 +2164,11 @@ namespace iw
 		app::recti zoomBadge{feedbackView.bounds.right() - zoomTextSize.width - feedbackPadding * 2 - metric(8),
 		                     feedbackView.bounds.y + metric(8), zoomTextSize.width + feedbackPadding * 2,
 		                     (std::max)(metric(24), zoomTextSize.height + feedbackPadding)};
-		renderer.blend_fill(zoomBadge, temporary ? color{255, 244, 190, 220} : color{245, 245, 245, 220});
+		const auto overlay = platform::system_color(platform::SystemColor::face);
+		const auto foreground = platform::system_color(platform::SystemColor::windowText);
+		renderer.fill(zoomBadge, temporary ? platform::system_color(platform::SystemColor::checked) : overlay);
 		renderer.outline(zoomBadge, platform::system_color(platform::SystemColor::shadow));
-		renderer.text(zoomText, zoomBadge, colors::black,
+		renderer.text(zoomText, zoomBadge, foreground,
 		              platform::TextFormat::center | platform::TextFormat::verticalCenter |
 		                  platform::TextFormat::singleLine);
 		const bool provisional = activeComparison_ ? comparisonLoading_.provisional() : primaryLoading_.provisional();
@@ -2030,8 +2179,8 @@ namespace iw
 			                                    renderer.measure_text(improvingText).width + feedbackPadding * 2);
 			const app::recti qualityBadge{zoomBadge.right() - qualityWidth, zoomBadge.bottom() + metric(4),
 			                              qualityWidth, metric(22)};
-			renderer.blend_fill(qualityBadge, color{245, 245, 245, 220});
-			renderer.text(improvingText, qualityBadge, colors::black,
+			renderer.fill(qualityBadge, overlay);
+			renderer.text(improvingText, qualityBadge, foreground,
 			              platform::TextFormat::center | platform::TextFormat::verticalCenter |
 			                  platform::TextFormat::singleLine);
 		}
@@ -2050,6 +2199,7 @@ namespace iw
 		comparisonPropertyHeaderBounds_ = {};
 		stripHeaderBounds_ = {};
 		stripToggleBounds_ = {};
+		stripSizeBounds_ = {};
 
 		ui::Element image;
 		image.id = -10;
@@ -2147,6 +2297,9 @@ namespace iw
 			stripHeaderBounds_ = {itemsViewport_.x, itemsViewport_.y, itemsViewport_.width, metric(32)};
 			stripToggleBounds_ = {stripHeaderBounds_.right() - metric(32), stripHeaderBounds_.y, metric(32),
 			                      metric(32)};
+			if (thumbnailsExpanded_ && stripHeaderBounds_.width >= metric(280))
+				stripSizeBounds_ = {stripToggleBounds_.x - metric(142), stripHeaderBounds_.y, metric(124),
+				                    stripHeaderBounds_.height};
 			if (!thumbnailsExpanded_)
 			{
 				itemsViewport_ = {};
@@ -2202,6 +2355,7 @@ namespace iw
 		primaryView_.bounds = {imageViewport.x + metric(12), imagePane_.y - imageScroll_.offset + metric(12),
 		                       (std::max)(0, imageViewport.width - metric(24)),
 		                       (std::max)(0, imageSectionHeight - metric(24))};
+		layout_media_preview();
 		arrange_collage();
 		propertyFlow_ = {};
 		propertyFlow_.style.padding = metric(12);
@@ -2409,6 +2563,13 @@ namespace iw
 
 	void ImageCanvas::notify_selection()
 	{
+		if (player_)
+		{
+			const auto focused = active_selection().focus();
+			if (focused < 0 || static_cast<size_t>(focused) >= files_.size() ||
+			    !paths::equal(files_[focused], path_))
+				stop_media();
+		}
 		rebuild_properties();
 		rebuild_collage();
 		imageScroll_.offset = 0;
@@ -2592,8 +2753,6 @@ namespace iw
 			properties_.push_back({L"Frame rate", std::format(L"{:.3f} fps", metadata.frameRate)});
 		if (!metadata.codec.empty()) properties_.push_back({L"Codec", metadata.codec});
 		if (!metadata.mediaError.empty()) properties_.push_back({L"Media", metadata.mediaError});
-		if (media::is_media(displayedKind_))
-			properties_.push_back({L"Playback", L"Double-click the item or press Enter to play."});
 		std::wstring exposure;
 		for (const auto& value : {metadata.exposure, metadata.aperture, metadata.iso, metadata.focalLength})
 			if (!value.empty()) exposure += (exposure.empty() ? L"" : L"  ") + value;
@@ -2637,13 +2796,14 @@ namespace iw
 			const int x = rightAligned ? available.right() - panelWidth : available.x;
 			const app::recti panel{x, available.bottom() - panelHeight, panelWidth, panelHeight};
 			header = {panel.x, panel.y, panel.width, headerHeight};
-			renderer.blend_fill(panel, colors::light_gray.with_alpha(opacity));
+			const auto foreground = platform::system_color(platform::SystemColor::windowText);
+			renderer.blend_fill(panel, platform::system_color(platform::SystemColor::face).with_alpha(opacity));
 			toggle = {panel.right() - headerHeight, panel.y, headerHeight, headerHeight};
 			renderer.text(title, {panel.x + metric(12), panel.y + metric(4), panel.width - metric(52), metric(26)},
-			              colors::black,
+			              foreground,
 			              platform::TextFormat::left | platform::TextFormat::verticalCenter |
 			                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
-			renderer.text(expanded ? L"\x25BC" : L"\x25B2", toggle, colors::black,
+			renderer.text(expanded ? L"\x25BC" : L"\x25B2", toggle, foreground,
 			              platform::TextFormat::center | platform::TextFormat::verticalCenter |
 			                  platform::TextFormat::singleLine);
 			if (!expanded) return;
@@ -2656,15 +2816,15 @@ namespace iw
 				const int cellX = panel.x + column * cellWidth;
 				const int y = panel.y + headerHeight + line * rowHeight;
 				const int labelWidth = renderer.measure_text(row.name).width;
-				renderer.text(glyph(row.name), {cellX + metric(8), y, metric(22), rowHeight}, colors::black,
+				renderer.text(glyph(row.name), {cellX + metric(8), y, metric(22), rowHeight}, foreground,
 				              platform::TextFormat::center | platform::TextFormat::verticalCenter |
 				                  platform::TextFormat::singleLine);
-				renderer.text(row.name, {cellX + metric(36), y, labelWidth, rowHeight}, colors::black,
+				renderer.text(row.name, {cellX + metric(36), y, labelWidth, rowHeight}, foreground,
 				              platform::TextFormat::left | platform::TextFormat::verticalCenter |
 				                  platform::TextFormat::singleLine);
 				renderer.text(row.value,
 				              {cellX + metric(44) + labelWidth, y, cellWidth - labelWidth - metric(52), rowHeight},
-				              colors::black,
+				              foreground,
 				              platform::TextFormat::left | platform::TextFormat::verticalCenter |
 				                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
 			}
@@ -2744,16 +2904,26 @@ namespace iw
 	{
 		if (fullscreen_)
 		{
-			renderer.blend_fill(stripHeaderBounds_, colors::light_gray.with_alpha(225));
-			renderer.text(L"Images",
+			const auto foreground = platform::system_color(platform::SystemColor::windowText);
+			renderer.fill(stripHeaderBounds_, platform::system_color(platform::SystemColor::face));
+			renderer.text(L"Filmstrip",
 			              {stripHeaderBounds_.x + metric(12), stripHeaderBounds_.y,
 			               stripHeaderBounds_.width - metric(52), stripHeaderBounds_.height},
-			              colors::black,
+			              foreground,
 			              platform::TextFormat::left | platform::TextFormat::verticalCenter |
 			                  platform::TextFormat::singleLine);
-			renderer.text(thumbnailsExpanded_ ? L"\x25BC" : L"\x25B2", stripToggleBounds_, colors::black,
+			renderer.text(thumbnailsExpanded_ ? L"\x25BC" : L"\x25B2", stripToggleBounds_, foreground,
 			              platform::TextFormat::center | platform::TextFormat::verticalCenter |
 			                  platform::TextFormat::singleLine);
+			if (!stripSizeBounds_.is_empty())
+			{
+				const int y = stripSizeBounds_.y + stripSizeBounds_.height / 2;
+				const int knob = (stripSizeBounds_.width - 1) * (thumbnailSize_ - 64) / 192;
+				renderer.fill({stripSizeBounds_.x, y - 1, stripSizeBounds_.width, 2},
+				              platform::system_color(platform::SystemColor::shadow));
+				renderer.fill({stripSizeBounds_.x + knob - metric(4), y - metric(8), metric(8), metric(16)},
+				              platform::system_color(platform::SystemColor::highlight));
+			}
 			if (!thumbnailsExpanded_) return;
 		}
 		const bool details = mode_ == ItemMode::details && !fullscreen_;

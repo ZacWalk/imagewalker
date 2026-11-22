@@ -172,7 +172,8 @@ namespace iw::undo
 			for (size_t i = 0; i < a.size(); ++i)
 				if (a[i].relative != b[i].relative || a[i].snapshot.exists != b[i].snapshot.exists ||
 				    a[i].snapshot.directory != b[i].snapshot.directory ||
-				    a[i].snapshot.reparse != b[i].snapshot.reparse || a[i].snapshot.size != b[i].snapshot.size ||
+				    a[i].snapshot.reparse != b[i].snapshot.reparse ||
+				    (!a[i].snapshot.directory && a[i].snapshot.size != b[i].snapshot.size) ||
 				    a[i].digest != b[i].digest)
 					return false;
 			return true;
@@ -779,8 +780,11 @@ namespace iw::undo
 				}
 				{
 					const auto file = ::platform::open_file_lock(desktop::file_path(source));
+					const auto copiedFile = ::platform::open_file_lock(desktop::file_path(destination));
 					const auto parent = files::snapshot_file(source.parent_path());
-					if (!file || !parent || parent->volume != sourceParent->volume ||
+					const auto fromDigest = file ? ::platform::file_sha256(file) : std::nullopt;
+					const auto toDigest = copiedFile ? ::platform::file_sha256(copiedFile) : std::nullopt;
+					if (!fromDigest || toDigest != fromDigest || !parent || parent->volume != sourceParent->volume ||
 					    parent->identity != sourceParent->identity || !batch.validate_before({source}, result.detail) ||
 					    !batch.validate_completed({destination}, result.detail))
 						fail(

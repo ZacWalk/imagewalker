@@ -56,7 +56,10 @@ namespace iw::platform
 		highlightText,
 		grayText,
 		buttonText,
-		scrollbar
+		scrollbar,
+		hover,
+		checked,
+		warningText
 	};
 
 	enum class WindowMessage
@@ -103,6 +106,7 @@ namespace iw::platform
 		space,
 		deleteKey,
 		f2,
+		f7,
 		enter,
 		escape,
 		divide,
@@ -187,6 +191,7 @@ namespace iw::platform
 		explicit Font(std::unique_ptr<Impl> impl);
 		friend class DrawContext;
 		friend std::shared_ptr<Font> create_message_font(unsigned int dpi);
+		friend std::shared_ptr<Font> command_icon_font(unsigned int dpi);
 	};
 
 	using FontPtr = std::shared_ptr<Font>;
@@ -262,6 +267,9 @@ namespace iw::platform
 		v,
 		x,
 		z,
+		left,
+		right,
+		up,
 		deleteKey,
 		enterKey,
 		f1,
@@ -370,6 +378,7 @@ namespace iw::platform
 	bool dispatch_menu_accelerator(char32_t key, ::platform::key_state keys);
 	void shutdown_runtime();
 	FontPtr create_message_font(unsigned int dpi);
+	FontPtr command_icon_font(unsigned int dpi);
 	enum class BitmapAsset
 	{
 		fileFolder,
@@ -387,7 +396,7 @@ namespace iw::platform
 	app::sizei drag_threshold();
 
 	// One value per 24-pixel tile of Res\ToolbarSymbols.bmp, in strip order: the value is the
-	// toolbar image index, so a tile without a value shifts every glyph after it.
+	// toolbar image index for the historical bitmap strip. New chrome icons follow it.
 	enum class CommandBitmap
 	{
 		none = -1,
@@ -405,7 +414,10 @@ namespace iw::platform
 		drive,
 		photosOnly,
 		sort,
-		breadcrumbChevron
+		breadcrumbChevron,
+		fit,
+		zoomIn,
+		zoomOut
 	};
 
 	struct Command
@@ -485,6 +497,7 @@ namespace iw::platform
 		std::filesystem::path path;
 		std::wstring label;
 	};
+	std::optional<std::vector<Breadcrumb>> child_folders(const std::filesystem::path& path);
 
 	struct StatusInfo
 	{
@@ -701,7 +714,8 @@ namespace iw::platform
 		std::wstring_view filterPattern;
 	};
 
-	std::optional<std::filesystem::path> choose_folder(const WindowFramePtr& owner, std::wstring_view title);
+	std::optional<std::filesystem::path> choose_folder(const WindowFramePtr& owner, std::wstring_view title,
+	                                                   const std::filesystem::path& initial = {});
 	std::optional<std::filesystem::path> choose_open_file(const WindowFramePtr& owner, const OpenFileOptions& options);
 	std::optional<std::filesystem::path> choose_save_file(const WindowFramePtr& owner, const SaveFileOptions& options);
 
@@ -766,10 +780,6 @@ namespace iw::platform
 	bool perform_file_operation(const WindowFramePtr& owner, FileOperation operation,
 	                            std::span<const std::filesystem::path> sources,
 	                            const std::filesystem::path& destination = {});
-
-	// No Recycle Bin, and a network path may have no recoverable bin at all. Kept separate
-	// from FileOperation::recycle so a caller cannot reach it by passing the wrong enumerator.
-	bool delete_permanently(std::span<const std::filesystem::path> paths, std::error_code& error);
 
 	enum class RuntimeMode
 	{

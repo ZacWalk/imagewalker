@@ -6,8 +6,8 @@
 // Copyright (C) 1998-2026 Zac Walker. MIT licence - see LICENSE.
 // For more information on ImageWalker see www.ImageWalker.com
 
-#define WINVER 0x0502
-#define _WIN32_WINNT 0x0502
+#define WINVER 0x0601
+#define _WIN32_WINNT 0x0601
 #define _WIN32_WINDOWS 0x0502
 #define _WIN32_IE 0x0700
 

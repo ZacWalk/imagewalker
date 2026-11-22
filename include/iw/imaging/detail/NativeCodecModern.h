@@ -29,6 +29,7 @@ namespace iw::imaging::detail
 
 #include <iw/imaging/Codec.h>
 
+#include <iw/imaging/ImageResampler.h>
 #include <iw/imaging/detail/PlatformFileStream.h>
 #include <libfiles/decode.h>
 #include <libfiles/document.h>
@@ -69,10 +70,12 @@ namespace iw::imaging::detail
 
 		inline libfiles::image_format identify_format(libfiles::reader& input, const std::wstring_view extension)
 		{
-			const auto scanned = libfiles::scan(input);
-			if (scanned.format != libfiles::image_format::unknown) return scanned.format;
-			if (const auto by_extension = format_from_extension(extension)) return *by_extension;
-			return libfiles::image_format::unknown;
+			const auto head = input.view(0, static_cast<std::size_t>((std::min)(input.size(), std::uint64_t{16})));
+			const auto format = libfiles::detect_image_format(head);
+			if (format != libfiles::image_format::unknown) return format;
+			// A .webp extension is not enough to send another RIFF file to the WebP decoder.
+			const auto hint = format_from_extension(extension).value_or(libfiles::image_format::unknown);
+			return hint == libfiles::image_format::webp ? libfiles::image_format::unknown : hint;
 		}
 
 		inline bool cancelled(const DecodeOptions& options)
@@ -97,8 +100,9 @@ namespace iw::imaging::detail
 			libfiles::pixel_buffer allocate(const libfiles::frame_info& value) override
 			{
 				frame = value;
-				if (value.width == 0 || value.height == 0 ||
-				    static_cast<std::uint64_t>(value.width) * value.height > options_.maximumBytes / 4)
+				if (value.width == 0 || value.height == 0 || value.width > INT_MAX || value.height > INT_MAX ||
+				    static_cast<std::uint64_t>(value.width) * value.height >
+				        (std::min)(options_.maximumBytes, static_cast<std::uint64_t>(SIZE_MAX)) / 4)
 					return {};
 				try
 				{
@@ -169,6 +173,71 @@ namespace iw::imaging::detail
 			return result;
 		}
 
+		inline sizei preview_size(const sizei source, const DecodeOptions& options)
+		{
+			if (source.cx <= 0 || source.cy <= 0 || options.maximumWidth <= 0 || options.maximumHeight <= 0)
+				return source;
+			const auto fit = (std::min)(static_cast<double>(options.maximumWidth) / source.cx,
+			                            static_cast<double>(options.maximumHeight) / source.cy);
+			// Match the existing viewer's full/half/quarter tiers; thumbnails have a hard fit bound instead.
+			if (!options.thumbnail)
+			{
+				const int divisor = fit <= .25 ? 4 : fit <= .5 ? 2 : 1;
+				return {1 + (source.cx - 1) / divisor, 1 + (source.cy - 1) / divisor};
+			}
+			const auto scale = (std::min)(1.0, fit);
+			return {std::clamp(static_cast<int>(std::lround(source.cx * scale)), 1, options.maximumWidth),
+			        std::clamp(static_cast<int>(std::lround(source.cy * scale)), 1, options.maximumHeight)};
+		}
+
+		inline void bound_preview(DecodeResult& result, const DecodeOptions& options)
+		{
+			if (!result || options.maximumWidth <= 0 || options.maximumHeight <= 0) return;
+			auto& image = result.image;
+			const auto size = preview_size({image.originalWidth, image.originalHeight}, options);
+			if (image.width <= size.cx && image.height <= size.cy) return;
+			try
+			{
+				auto pixels = resample_bgra(image.pixels, {image.width, image.height},
+				                            {0.0, 0.0, static_cast<double>(image.width),
+				                             static_cast<double>(image.height)},
+				                            size);
+				if (!pixels.empty())
+				{
+					image.pixels = std::move(pixels);
+					image.width = size.cx;
+					image.height = size.cy;
+					result.reduced = true;
+					return;
+				}
+			}
+			catch (const std::bad_alloc&)
+			{
+			}
+			result.image = {};
+			result.error = ImageError::resource_limit;
+			result.message = L"The preview could not be resized within its memory limit.";
+		}
+
+		struct FirstFrame final : libfiles::document_sink
+		{
+			explicit FirstFrame(const DecodeOptions& options) : keeper(options.maximumBytes), options(options) {}
+			bool begin_frame(const libfiles::document_frame& frame) override
+			{
+				if (complete) return false;
+				return keeper.begin_frame(frame);
+			}
+			void row(std::uint32_t y, std::span<const std::uint8_t> bytes) override { keeper.row(y, bytes); }
+			void end_frame(const libfiles::document_frame&) override { complete = true; }
+			void progress(std::uint32_t current, std::uint32_t total) override
+			{
+				if (options.progress) options.progress(static_cast<int>(current), static_cast<int>(total));
+			}
+			libfiles::document_keeper keeper;
+			const DecodeOptions& options;
+			bool complete{};
+		};
+
 		inline DecodeResult decode_reader(libfiles::reader& input, const std::wstring_view extension,
 		                                  const DecodeOptions& options)
 		{
@@ -187,10 +256,7 @@ namespace iw::imaging::detail
 				return result;
 			}
 
-			const auto scanned = libfiles::scan(input);
-			const auto format = scanned.format != libfiles::image_format::unknown
-			                        ? scanned.format
-			                        : format_from_extension(extension).value_or(libfiles::image_format::unknown);
+			const auto format = identify_format(input, extension);
 			if (format == libfiles::image_format::unknown ||
 			    (!libfiles::can_decode(format) && !libfiles::can_decode_document(format)))
 			{
@@ -206,14 +272,40 @@ namespace iw::imaging::detail
 				const bool bounded = options.thumbnail || format == libfiles::image_format::webp;
 				decode_options.target_width = bounded ? options.maximumWidth : 0;
 				decode_options.target_height = bounded ? options.maximumHeight : 0;
+				if (format == libfiles::image_format::jpeg && !bounded && options.maximumWidth > 0 &&
+				    options.maximumHeight > 0)
+				{
+					const auto scanned = libfiles::scan(input);
+					if (scanned.width > 0 && scanned.height > 0 && scanned.width <= INT_MAX &&
+					    scanned.height <= INT_MAX)
+					{
+						const auto angle = scanned.orientation.value_or(1);
+						const bool turn = options.applyOrientation && angle >= 5 && angle <= 8;
+						sizei stored{static_cast<int>(scanned.width), static_cast<int>(scanned.height)};
+						if (turn) std::swap(stored.cx, stored.cy);
+						auto target = preview_size(stored, options);
+						if (turn) std::swap(target.cx, target.cy);
+						decode_options.target_width = target.cx;
+						decode_options.target_height = target.cy;
+					}
+				}
 				decode_options.round_webp_size_down = format == libfiles::image_format::webp;
 				decode_options.source_format = format;
 				const auto decoded = libfiles::decode(input, sink, decode_options);
 				result = map_decode_result(decoded, sink, options);
-				if (!result && decoded.error.empty() && decoded.refused) result.error = ImageError::resource_limit;
+				bound_preview(result, options);
 				return result;
 			}
 
+			const auto scanned = libfiles::scan(input);
+			// libtiff's RGBA path can already reflect the rows. WIC exposes stored rows,
+			// letting the display layer apply each non-default TIFF orientation once.
+			if (format == libfiles::image_format::tiff && scanned.orientation.value_or(1) != 1)
+			{
+				result.error = ImageError::unsupported;
+				result.message = L"This TIFF orientation needs the Windows codec.";
+				return result;
+			}
 			libfiles::document_options document_options;
 			document_options.thumbnail_width = options.thumbnail ? static_cast<std::uint32_t>(options.maximumWidth) : 0;
 			document_options.thumbnail_height = options.thumbnail ? static_cast<std::uint32_t>(options.maximumHeight)
@@ -224,32 +316,38 @@ namespace iw::imaging::detail
 			{
 				return cancelled(options);
 			};
-			document_options.progress = [&options](const std::uint32_t current, const std::uint32_t total)
-			{
-				if (options.progress) options.progress(current, total);
-			};
-			libfiles::decoded_document document;
-			const auto decoded = libfiles::decode_document(input, format, document, document_options);
+			FirstFrame output(options);
+			const auto decoded = libfiles::decode_document(input, format, output, document_options);
 			if (decoded.cancelled || cancelled(options))
 			{
 				result.error = ImageError::cancelled;
 				result.message = L"Image decoding was cancelled.";
 				return result;
 			}
-			if (decoded.resource_limit)
+			if (decoded.resource_limit || (decoded.refused && !output.complete))
 			{
 				result.error = ImageError::resource_limit;
 				result.message = L"The image exceeds the decoded-memory limit.";
 				return result;
 			}
-			if (!decoded.success || document.frames.empty())
+			const bool keepComplete = decoded.refused ||
+			                          (decoded.truncated && (format == libfiles::image_format::gif ||
+			                                                 format == libfiles::image_format::tiff));
+			if (!output.complete || (!decoded.success && !keepComplete))
 			{
+				// WIC supports some TIFF sample layouts and compressions not in the native build.
+				if (format == libfiles::image_format::tiff && scanned.success && !decoded.truncated)
+				{
+					result.error = ImageError::unsupported;
+					result.message = L"This TIFF encoding needs the Windows codec.";
+					return result;
+				}
 				result.error = decoded.truncated ? ImageError::read_failed : ImageError::invalid_input;
 				result.message = std::wstring(decoded.error.begin(), decoded.error.end());
 				if (result.message.empty()) result.message = L"The image could not be decoded.";
 				return result;
 			}
-			const auto& frame = document.frames.front();
+			const auto& frame = output.keeper.document.frames.front();
 			if (static_cast<std::uint64_t>(frame.width) * frame.height > options.maximumBytes / 4)
 			{
 				result.error = ImageError::resource_limit;
@@ -263,31 +361,42 @@ namespace iw::imaging::detail
 			result.image.originalHeight = scanned.height ? static_cast<int>(scanned.height) : result.image.height;
 			result.image.pixels.resize(static_cast<std::size_t>(frame.width) * frame.height);
 			libfiles::copy_bgra(frame.rows(), result.image.pixels, frame.width, false);
-			if (options.applyOrientation && result.orientation >= 2 && result.orientation <= 8)
+			for (const auto& warning : decoded.warnings) result.warnings.emplace_back(warning.begin(), warning.end());
+			if (options.applyOrientation && !orient_upright(result.image, result.orientation))
 			{
-				if (!orient_upright(result.image, result.orientation))
-				{
-					result.image = {};
-					result.error = ImageError::read_failed;
-					result.message = L"The image orientation could not be applied.";
-					return result;
-				}
-				result.orientation = 1;
-				if (result.image.originalWidth != result.image.width ||
-				    result.image.originalHeight != result.image.height)
-				{
-					// orient_upright swaps the stored original dimensions for
-					// sideways EXIF values; keep the logical upright source size.
-					if (result.image.originalWidth == static_cast<int>(scanned.width) &&
-					    result.image.originalHeight == static_cast<int>(scanned.height))
-						std::swap(result.image.originalWidth, result.image.originalHeight);
-				}
+				result.image = {};
+				result.error = ImageError::read_failed;
+				result.message = L"The image orientation could not be applied.";
+				return result;
 			}
-			else if (result.orientation >= 5 && result.orientation <= 8)
-				std::swap(result.image.originalWidth, result.image.originalHeight);
 			result.reduced = result.image.width != result.image.originalWidth ||
 			                 result.image.height != result.image.originalHeight;
+			bound_preview(result, options);
 			return result;
+		}
+
+		inline DecodeResult read_bounded(libfiles::reader& input, const std::wstring_view extension,
+		                                 const DecodeOptions& options)
+		{
+			try
+			{
+				return decode_reader(input, extension, options);
+			}
+			catch (const libfiles::read_error& error)
+			{
+				const std::string_view message(error.what());
+				DecodeResult result;
+				result.error = ImageError::read_failed;
+				result.message.assign(message.begin(), message.end());
+				return result;
+			}
+			catch (const std::bad_alloc&)
+			{
+				DecodeResult result;
+				result.error = ImageError::resource_limit;
+				result.message = L"The image exceeds the decoded-memory limit.";
+				return result;
+			}
 		}
 	}
 
@@ -319,7 +428,7 @@ namespace iw::imaging::detail
 			return result;
 		}
 		libfiles::reader input(bytes);
-		return decode_reader(input, extension, options);
+		return read_bounded(input, extension, options);
 	}
 
 	inline DecodeResult modern_decode_native(const std::filesystem::path& path, const DecodeOptions& options)
@@ -334,7 +443,7 @@ namespace iw::imaging::detail
 			return result;
 		}
 		libfiles::reader input(source);
-		return decode_reader(input, path.extension().wstring(), options);
+		return read_bounded(input, path.extension().wstring(), options);
 	}
 
 	inline bool modern_native_dimensions(const std::filesystem::path& path, int& width, int& height)

@@ -1,22 +1,35 @@
 cmake_minimum_required(VERSION 3.28)
 
 project(imagewalker-all
-        DESCRIPTION "Standalone x64 ImageWalker applications with shared imaging sources"
+        DESCRIPTION "Standalone ImageWalker applications with shared imaging sources"
         LANGUAGES C CXX)
 
 if(NOT MSVC)
     message(FATAL_ERROR "ImageWalker builds with MSVC on Windows only.")
 endif()
-if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    message(FATAL_ERROR "x64 only -- configure with one of the x64 presets.")
+if(NOT MSVC_CXX_ARCHITECTURE_ID MATCHES "^(X86|x64)$")
+    message(FATAL_ERROR "ImageWalker builds for x86 or x64, not ${MSVC_CXX_ARCHITECTURE_ID}.")
 endif()
 
-find_path(IW_ATL_INCLUDE_DIR atlbase.h HINTS ENV INCLUDE)
-if(NOT IW_ATL_INCLUDE_DIR)
-    message(FATAL_ERROR "ATL is required. Add Microsoft.VisualStudio.Component.VC.ATL to the selected Visual Studio C++ installation; see docs/build.md.")
+option(IW_BUILD_10_ONLY "Build just the Windows SDK edition, ImageWalker 1.0" OFF)
+if(NOT IW_BUILD_10_ONLY)
+    find_path(IW_ATL_INCLUDE_DIR atlbase.h HINTS ENV INCLUDE)
+    if(NOT IW_ATL_INCLUDE_DIR)
+        message(FATAL_ERROR "The 2.x apps require ATL. Add Microsoft.VisualStudio.Component.VC.ATL or use IW_BUILD_10_ONLY for 1.0.")
+    endif()
 endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+# Release builds are compiled for speed. The presets build RelWithDebInfo, which keeps the PDBs
+# the crash reporter needs, so it is the release configuration - but CMake's RelWithDebInfo
+# downgrades /O2's implied /Ob2 to /Ob1, which limits inlining to functions the source marked
+# inline. Replaced rather than appended, since appending /Ob2 leaves both on the command line and
+# every compile then reports D9025, and here, before anything is added, so every app, the shared
+# imaging sources and every library fetched or vendored below inline fully.
+foreach(lang C CXX)
+    string(REPLACE "/Ob1" "/Ob2" CMAKE_${lang}_FLAGS_RELWITHDEBINFO "${CMAKE_${lang}_FLAGS_RELWITHDEBINFO}")
+endforeach()
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 20)
@@ -62,20 +75,36 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin" CACHE PATH "" FORCE
 # the dependency before any consumer targets so their public usage
 # requirements, including include paths, remain target-owned.
 include(FetchContent)
-if(NOT DEFINED FETCHCONTENT_SOURCE_DIR_LIBDESKTOP
-   AND EXISTS "${PROJECT_SOURCE_DIR}/../libdesktop/CMakeLists.txt")
+option(IW_USE_SIBLING_DEPS "Automatically use sibling library checkouts for development" ON)
+find_package(Git REQUIRED)
+
+if(NOT IW_BUILD_10_ONLY)
+set(IW_LIBDESKTOP_SIBLING "${PROJECT_SOURCE_DIR}/../libdesktop")
+set(IW_LIBDESKTOP_THEME_HEADER "include/libdesktop/ui/style.h")
+if(IW_USE_SIBLING_DEPS AND NOT DEFINED FETCHCONTENT_SOURCE_DIR_LIBDESKTOP
+   AND EXISTS "${IW_LIBDESKTOP_SIBLING}/${IW_LIBDESKTOP_THEME_HEADER}")
     set(FETCHCONTENT_SOURCE_DIR_LIBDESKTOP "${PROJECT_SOURCE_DIR}/../libdesktop" CACHE PATH
         "A libdesktop checkout to build instead of the published revision")
+endif()
+if(FETCHCONTENT_SOURCE_DIR_LIBDESKTOP)
+    file(STRINGS "${FETCHCONTENT_SOURCE_DIR_LIBDESKTOP}/${IW_LIBDESKTOP_THEME_HEADER}"
+        IW_LIBDESKTOP_PALETTE_API REGEX "void set_palette\\(")
+    if(NOT IW_LIBDESKTOP_PALETTE_API)
+        message(STATUS "The local libdesktop has no palette override; using the patched pin.")
+        set(FETCHCONTENT_SOURCE_DIR_LIBDESKTOP "")
+    endif()
 endif()
 FetchContent_Declare(libdesktop
     GIT_REPOSITORY https://github.com/ZacWalk/libdesktop.git
     GIT_TAG        d172a12c6e3df0831a641133b96d073559a99db5
+    PATCH_COMMAND "${CMAKE_COMMAND}"
+        "-DIW_GIT=${GIT_EXECUTABLE}"
+        "-DIW_PATCH=${PROJECT_SOURCE_DIR}/third-party/patches/libdesktop-install-palette.patch"
+        -P "${PROJECT_SOURCE_DIR}/cmake/apply-libdesktop-patch.cmake"
     EXCLUDE_FROM_ALL)
 FetchContent_MakeAvailable(libdesktop)
 
-# Settings shared by the WTL app targets (1.0 through 2.3). Deliberately NOT
-# applied to third-party, nor to 3.0, which is modern code held to strict
-# conformance.
+# Settings shared by the 2.x WTL app targets.
 add_library(iw_flags INTERFACE)
 add_library(iw::flags ALIAS iw_flags)
 target_compile_features(iw_flags INTERFACE cxx_std_20)
@@ -104,19 +133,20 @@ target_compile_options(iw_flags INTERFACE
 # generator expressions never fired and /OPT:REF was never applied.
 target_compile_options(iw_flags INTERFACE $<$<NOT:$<CONFIG:Debug>>:/Zi>)
 target_link_options(iw_flags INTERFACE $<$<NOT:$<CONFIG:Debug>>:/DEBUG /OPT:REF /OPT:ICF /INCREMENTAL:NO>)
-# Character set is per-app: ImageWalker 1.0 is MBCS; all three 2.x ports are Unicode.
 target_compile_definitions(iw_flags INTERFACE
     STRICT
     _CRT_SECURE_NO_WARNINGS
     _WINSOCK_DEPRECATED_NO_WARNINGS
-    WINVER=0x0A00 _WIN32_WINNT=0x0A00 _WIN32_IE=0x0A00
+    WINVER=0x0601 _WIN32_WINNT=0x0601 _WIN32_IE=0x0A00
 )
+target_link_options(iw_flags INTERFACE /SUBSYSTEM:WINDOWS,6.01)
 target_include_directories(iw_flags INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_include_directories(iw_flags INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include/core")
 target_include_directories(iw_flags INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include/wtl")
 target_link_libraries(iw_flags INTERFACE
     comctl32 shlwapi gdi32 user32 ole32 oleaut32 uuid advapi32 shell32 comdlg32 winspool htmlhelp
     dbghelp version)  # iw/crashreport.h
+endif()
 
 # Keeps the ~100 third-party targets out of the way in the VS solution tree.
 set(CMAKE_FOLDER "third-party")
@@ -124,12 +154,12 @@ add_subdirectory(third-party)
 
 unset(CMAKE_FOLDER)
 
-# Header-only shared imaging and its standalone regression consumers.
-include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/imagewalker-imaging.cmake")
-
-# One directory per release. 3.0 brings its own compiler settings; the rest
-# share iw::flags.
-set(IW_VERSIONS 10 20 22 23 30)
+if(IW_BUILD_10_ONLY)
+    set(IW_VERSIONS 10)
+else()
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/imagewalker-imaging.cmake")
+    set(IW_VERSIONS 10 20 22 23 30)
+endif()
 
 foreach(ver IN LISTS IW_VERSIONS)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/src${ver}/CMakeLists.txt")
@@ -151,11 +181,16 @@ endif()
 # in the same directory keep separate settings and separate logs.
 foreach(ver IN LISTS IW_VERSIONS)
     if(TARGET imagewalker${ver})
+        # The WTL editions use /permissive for legacy lookup, which MSVC cannot
+        # use to scan C++ modules. These targets use headers only.
+        if(ver MATCHES "^2[023]$")
+            set_property(TARGET imagewalker${ver} PROPERTY CXX_SCAN_FOR_MODULES OFF)
+        endif()
         # Application-scoped test runs include the shared imaging checks; make
         # their executable a build dependency so a focused run is never
         # reported as "not run" merely because it was not selected as a build
         # target.
-        if(TARGET imagewalker_imaging_tests)
+        if(TARGET imagewalker_imaging_tests AND NOT ver EQUAL 10)
             add_dependencies(imagewalker${ver} imagewalker_imaging_tests)
         endif()
         set_target_properties(imagewalker${ver} PROPERTIES
@@ -173,7 +208,11 @@ endforeach()
 
 # Visual Studio generator: open build/vs/imagewalker-all.slnx and just hit F5.
 if(CMAKE_GENERATOR MATCHES "Visual Studio")
-    set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT imagewalker30)
+    if(IW_BUILD_10_ONLY)
+        set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT imagewalker10)
+    else()
+        set_property(DIRECTORY PROPERTY VS_STARTUP_PROJECT imagewalker30)
+    endif()
 
     foreach(ver IN LISTS IW_VERSIONS)
         if(TARGET imagewalker${ver})
@@ -202,9 +241,11 @@ endif()
 # the top of that script.
 find_package(Python3 3.9 REQUIRED COMPONENTS Interpreter)
 
-add_test(NAME imagewalker30-icon COMMAND "${Python3_EXECUTABLE}"
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_icon.py")
-set_tests_properties(imagewalker30-icon PROPERTIES LABELS "iw;iw30;headless" TIMEOUT 30)
+if(TARGET imagewalker30)
+    add_test(NAME imagewalker30-icon COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_icon.py")
+    set_tests_properties(imagewalker30-icon PROPERTIES LABELS "iw;iw30;headless" TIMEOUT 30)
+endif()
 
 add_test(NAME help-compiler COMMAND "${Python3_EXECUTABLE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/test_chmbuild.py")

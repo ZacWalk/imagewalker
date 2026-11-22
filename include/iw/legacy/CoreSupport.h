@@ -388,6 +388,11 @@ namespace IW
 
 		static bool CreateAllDirectories(const CString &strFolder)
 		{
+			if (strFolder.GetLength() >= MAX_PATH)
+			{
+				::SetLastError(ERROR_FILENAME_EXCED_RANGE);
+				return false;
+			}
 			TCHAR sz[MAX_PATH], szCurrent[MAX_PATH];
 			_tcscpy_s(sz, MAX_PATH, strFolder);
 
@@ -403,8 +408,9 @@ namespace IW
 			_tcscpy_s(szCurrent, MAX_PATH, sz);
 
 			// base case . . .if directory exists
-			if(GetFileAttributes(sz)!=-1)
-				return true;
+			const DWORD attributes = GetFileAttributes(sz);
+			if (attributes != INVALID_FILE_ATTRIBUTES)
+				return (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 
 			// remove ending folder
 			// recursive call, one less directory

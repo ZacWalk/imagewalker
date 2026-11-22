@@ -6,13 +6,11 @@
 Analyze. A collection maps each root into Remote\root-name; a single-folder
 scope maps directly to Remote. Missing roots and overlapping or reparse-point
 trees are refused rather than silently omitted.</p>
-<p>Review the four-column comparison and each copy/delete direction. Analyze
-does not write. Run revalidates every row before acting, and a destination
-created or changed after Review is not silently replaced.</p>
-<p class="note">Deletion does not use the Recycle Bin. A plan containing
-deletions requires a counted confirmation. Cancel stops future rows and leaves
-completed work in place; inspect all results after a partial run.</p>
-<p>Recovery copies are secured before deletion or replacement. After closing
-Sync, Edit &gt; Undo can restore completed changes in the current session.
-Files changed outside ImageWalker are refused, not overwritten.</p>
+<p>Review the four-column comparison and the directions for copying missing
+files. Analyze does not write. Run never replaces or removes either side's
+existing files. Files with different sizes or modified times are flagged and
+kept on both sides.</p>
+<p class="note">Cancel stops future rows and leaves completed copies in place.
+After closing Sync, Edit &gt; Undo can remove completed copies in the current
+session if they have not changed.</p>
 <p><a href="iw30.html">ImageWalker 3.0 help</a></p></body></html>

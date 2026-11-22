@@ -1,18 +1,15 @@
 #include "StdAfx.h"
 
 #include "FixedPoint.h"
+#include "ImageView.h"
 #include "Selection.h"
 #include "Jobs.h"
 #include "LoadAny.h"
-#include <iw/imaging/Pixel.h>
-#include <setjmp.h>
-extern "C"
-{
-#include <jpeglib.h>
-#include <png.h>
-}
+#include <libfiles/encode.h>
 #include "dibthumb.h"
 #include "Thumb.h"
+#include "AddressBar.h"
+#include "window_screenshot.h"
 
 #include "iw/commontests.h"
 #include "iw/channelaveragetests.h"
@@ -21,6 +18,261 @@ extern "C"
 #include "resource.h"
 
 // ImageWalker 1.0 -- run with /test.
+
+IW_TEST(StartupSplashDecodesFromTheExecutable)
+{
+	CDib splash;
+	IW_CHECK(splash.LoadResource(IDR_SPLASH, {0, 0}));
+	if (splash.IsOpen()) IW_CHECK(splash.Size() == CSize(608, 200));
+}
+
+IW_TEST(ViewerFooterMakesRoomForStatusAtNarrowWidths)
+{
+	const INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_BAR_CLASSES};
+	IW_CHECK(InitCommonControlsEx(&controls));
+	CWindow parent(CreateWindowEx(0, _T("STATIC"), nullptr, WS_POPUP, 0, 0, 960, 400,
+		nullptr, nullptr, GetModuleHandle(nullptr), nullptr));
+	if (!parent)
+	{
+		IW_CHECK(parent.IsWindow());
+		return;
+	}
+	CStatusBarCtrl status;
+	CImageView view;
+	const bool ready = status.Create(parent, CRect(0, 0, 900, 24), nullptr, WS_CHILD, 0, IDC_STATUS_BAR) &&
+		view.Create(parent, CRect(0, 0, 180, 200), nullptr, WS_CHILD) && view.CreateFooterControls(status);
+	IW_CHECK(ready);
+	if (ready)
+	{
+		const CWindow zoom = status.GetDlgItem(CImageView::kZoomTrackId);
+		const CWindow toolbar = status.GetDlgItem(CImageView::kToolBarId);
+		const int controlsEnd = view.LayoutFooterControls(CRect(0, 0, 850, 24));
+		CRect zoomBounds, toolbarBounds;
+		zoom.GetWindowRect(&zoomBounds);
+		toolbar.GetWindowRect(&toolbarBounds);
+		status.ScreenToClient(&zoomBounds);
+		status.ScreenToClient(&toolbarBounds);
+		IW_CHECK(zoomBounds.left < 12 && zoomBounds.right > zoomBounds.left &&
+			zoomBounds.right <= toolbarBounds.left && toolbarBounds.right <= controlsEnd && controlsEnd < 400);
+		IW_CHECK((zoom.GetStyle() & WS_VISIBLE) && (toolbar.GetStyle() & WS_VISIBLE));
+		const auto before = view.GetScaleType();
+		status.SendMessage(WM_HSCROLL, MAKEWPARAM(TB_ENDTRACK, 0), reinterpret_cast<LPARAM>(zoom.m_hWnd));
+		IW_CHECK(view.GetScaleType() == before);
+		view.SetFullscreen(true);
+		IW_CHECK(view.IsFit());
+		view.Command(ID_MODE_ACTUALSIZE);
+		IW_CHECK(view.IsActualSize());
+		view.SetFullscreen(false);
+		IW_CHECK(view.GetScaleType() == before);
+		view.LayoutFooterControls(CRect(0, 0, 330, 24));
+		IW_CHECK(!(zoom.GetStyle() & WS_VISIBLE) && (toolbar.GetStyle() & WS_VISIBLE));
+		const int smallControlsEnd = view.LayoutFooterControls(CRect(0, 0, 110, 24));
+		IW_CHECK(!(toolbar.GetStyle() & WS_VISIBLE) && smallControlsEnd == 0);
+
+		CPreviewSelection selection{{{_T("C:\\samples\\orange.png"), nullptr, 2048, false, true}}, 1, 2048};
+		view.Show(selection);
+		CJobLoad loaded(&view, selection.items.front().strName, nullptr, nullptr);
+		loaded.m_bLoaded = loaded.m_dib.Create(120, 80, 24, FALSE);
+		IW_CHECK(loaded.m_bLoaded);
+		if (loaded.m_bLoaded)
+		{
+			ZeroMemory(loaded.m_dib.GetBitmap(), loaded.m_dib.m_nStorageWidth * 80);
+			view.OnLoaded(loaded);
+			IW_CHECK(view.StatusText() == _T("orange.png  120 x 80  24-bit RGB  2 KB"));
+			view.Show({});
+			IW_CHECK(view.StatusText().IsEmpty());
+		}
+	}
+	parent.DestroyWindow();
+}
+
+IW_TEST(FitFillsThePaneAfterPannableZoom)
+{
+	CWindow parent(CreateWindowEx(0, _T("STATIC"), nullptr, WS_POPUP, 0, 0, 240, 240,
+		nullptr, nullptr, GetModuleHandle(nullptr), nullptr));
+	CImageView view;
+	const bool ready = parent && view.Create(parent, {0, 0, 180, 200}, nullptr, WS_CHILD);
+	IW_CHECK(ready);
+	if (ready)
+	{
+		// Fullscreen zoom is temporary; the test must not save a new preference.
+		view.SetFullscreen(true);
+		view.Command(ID_MODE_ACTUALSIZE);
+
+		CJobLoad loaded(&view, "fit-fixture.bmp", nullptr, nullptr);
+		loaded.m_bLoaded = loaded.m_dib.Create(640, 320, 24, FALSE);
+		IW_CHECK(loaded.m_bLoaded);
+		if (loaded.m_bLoaded)
+		{
+			ZeroMemory(loaded.m_dib.GetBitmap(), loaded.m_dib.m_nStorageWidth * 320);
+			view.OnLoaded(loaded);
+			IW_CHECK(view.ViewRect().Width() < 180 && view.ViewRect().Height() < 200);
+
+			view.Command(ID_MODE_FITTOWINDOW);
+			IW_CHECK(view.ViewRect().Size() == CSize(180, 200));
+			IW_CHECK(view.m_sizeScroll == CSize(180, 90));
+		}
+	}
+	if (parent) parent.DestroyWindow();
+}
+
+IW_TEST(FullscreenAndNextPhotoHaveDifferentAccelerators)
+{
+	const HACCEL table = ::LoadAcceleratorsA(::GetModuleHandleA(nullptr), MAKEINTRESOURCEA(IDR_MAINFRAME));
+	if (!table) { IW_CHECK(table != nullptr); return; }
+	std::vector<ACCEL> entries(::CopyAcceleratorTable(table, nullptr, 0));
+	::CopyAcceleratorTable(table, entries.data(), static_cast<int>(entries.size()));
+	const auto command = [&entries](WORD key, BYTE modifiers)
+	{
+		const auto entry = std::ranges::find_if(entries, [=](const ACCEL& item)
+		{
+			return item.key == key && (item.fVirt & (FVIRTKEY | FCONTROL | FSHIFT | FALT)) == modifiers;
+		});
+		return entry == entries.end() ? 0 : entry->cmd;
+	};
+	IW_CHECK_EQ(command(VK_RETURN, FVIRTKEY), ID_VIEW_ACTIVATE);
+	IW_CHECK_EQ(command(VK_SPACE, FVIRTKEY), ID_VIEW_NEXTIMAGE);
+	IW_CHECK_EQ(command(VK_SPACE, FVIRTKEY | FCONTROL | FSHIFT), ID_MODE_FULLSCREEN);
+	IW_CHECK_EQ(command(VK_F11, FVIRTKEY), ID_MODE_FULLSCREEN);
+	IW_CHECK_EQ(command(VK_LEFT, FVIRTKEY | FALT), ID_BROWSE_BACK);
+}
+
+IW_TEST(StartupFolderPrefersRememberedThenPictures)
+{
+	const auto com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+	CShellItem remembered, pictures;
+	IW_CHECK(remembered.Open(nullptr, CSIDL_DRIVES));
+	if (pictures.Open(nullptr, CSIDL_MYPICTURES) && !remembered.IsNull())
+	{
+		std::vector<CShellItem> visits;
+		const auto open = [&](const CShellItem& item)
+		{
+			visits.push_back(item);
+			return item == pictures;
+		};
+		IW_CHECK(IW::OpenStartupFolder(nullptr, {}, open) && visits.size() == 1 && visits.front() == pictures);
+		visits.clear();
+		IW_CHECK(IW::OpenStartupFolder(nullptr, remembered, open) && visits.size() == 2 &&
+			visits[0] == remembered && visits[1] == pictures);
+		int calls = 0;
+		IW_CHECK(IW::OpenStartupFolder(nullptr, remembered, [&](const CShellItem& item)
+		{
+			++calls;
+			return item == remembered;
+		}) && calls == 1);
+	}
+	if (SUCCEEDED(com)) CoUninitialize();
+}
+
+IW_TEST(AddressEditCommitsPastedFolderAndRestoresOnEscape)
+{
+	CAddressBar address;
+	CShellItem folder;
+	int navigations = 0;
+	const auto navigate = [&](const CShellItem& item) { folder = item; ++navigations; return true; };
+	const auto com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+	const INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_USEREX_CLASSES};
+	CWindow parent(CreateWindowEx(0, _T("STATIC"), nullptr, WS_POPUP, 0, 0, 200, 80,
+		nullptr, nullptr, GetModuleHandle(nullptr), nullptr));
+	IW_CHECK(parent && InitCommonControlsEx(&controls) && address.Create(parent, IDC_ADDRESS_COMBO));
+	if (parent && address.IsWindow())
+	{
+		TCHAR path[MAX_PATH]{};
+		const UINT length = GetWindowsDirectory(path, _countof(path));
+		IW_CHECK(length > 0 && length < _countof(path));
+		if (length > 0 && length < _countof(path))
+		{
+			address.SetAddress(_T("Previous folder"), 0);
+			const CWindow edit(address.Edit());
+			edit.SetWindowText(CString(_T("  \"")) + path + _T("\"  "));
+			MSG message{edit, WM_KEYDOWN, VK_RETURN};
+			IW_CHECK(address.HandleKey(message, folder, navigate));
+			CString actual;
+			IW_CHECK(folder.GetPath(actual) && actual.CompareNoCase(path) == 0);
+			IW_CHECK_EQ(navigations, 1);
+			address.SetAddress(path, 0);
+			edit.SetWindowText(_T("Incomplete edit"));
+			message.wParam = VK_ESCAPE;
+			IW_CHECK(address.HandleKey(message, folder, navigate));
+			edit.GetWindowText(actual);
+			IW_CHECK(actual == path && navigations == 1);
+
+			edit.SetWindowText("System32");
+			message.wParam = VK_RETURN;
+			IW_CHECK(address.HandleKey(message, folder, navigate));
+			IW_CHECK(folder.GetPath(actual) && actual.CompareNoCase(CString(path) + "\\System32") == 0);
+			IW_CHECK_EQ(navigations, 2);
+
+			edit.SetWindowText("..");
+			IW_CHECK(address.HandleKey(message, folder, navigate));
+			IW_CHECK(folder.GetPath(actual) && actual.CompareNoCase(path) == 0);
+			IW_CHECK_EQ(navigations, 3);
+		}
+	}
+	if (parent) parent.DestroyWindow();
+	if (SUCCEEDED(com)) CoUninitialize();
+}
+
+IW_TEST(ThumbnailFittingKeepsPixelsInsideTheirOwnImageArea)
+{
+	const CRect cell(THUMB_X, THUMB_Y, 2 * THUMB_X, 2 * THUMB_Y + 20);
+	const auto wide = ThumbnailImageRect(cell, {4096, 2048});
+	const auto tall = ThumbnailImageRect(cell, {100, 400});
+	const auto icon = ThumbnailImageRect(cell, {16, 20});
+	IW_CHECK(wide.Size() == CSize(IMAGE_X, IMAGE_Y / 2));
+	IW_CHECK(tall.Size() == CSize(IMAGE_X / 4, IMAGE_Y));
+	IW_CHECK(icon.Size() == CSize(16, 20));
+	for (const auto& bounds : {wide, tall, icon})
+	{
+		IW_CHECK(bounds.left >= cell.left && bounds.right <= cell.right);
+		IW_CHECK(bounds.top >= cell.top && bounds.bottom < cell.top + THUMB_Y);
+		IW_CHECK(abs(bounds.CenterPoint().x - cell.CenterPoint().x) <= 1);
+	}
+}
+
+IW_TEST(ThumbnailGridCentersOccupiedColumnsAndKeepsHitsCorrectWhenResized)
+{
+	CThumbnailGrid grid;
+	grid.Layout(300, 11, 80, 20);
+	IW_CHECK(grid.columns == 3 && grid.Cell(0).left == 18 && grid.Cell(2).right == 282);
+	IW_CHECK(grid.Hit(grid.Cell(4).CenterPoint(), 11) == 4);
+	IW_CHECK(grid.Hit(CPoint(17, 15), 11) == -1 && grid.Hit(CPoint(282, 15), 11) == -1);
+	IW_CHECK(grid.Hit(grid.Cell(11).CenterPoint(), 11) == -1);
+
+	grid.Layout(375, 2, 128, 20);
+	IW_CHECK(abs(grid.Cell(0).left - (375 - grid.Cell(1).right)) <= 1);
+	IW_CHECK(grid.Hit(grid.Cell(1).CenterPoint(), 2) == 1);
+
+	grid.Layout(94, 11, 256, 20);
+	IW_CHECK(grid.columns == 1 && grid.Cell(0).Width() == 94);
+	IW_CHECK(grid.Hit(grid.Cell(8).CenterPoint(), 11) == 8);
+}
+
+IW_TEST(PaintBufferIsReusedAndClipsScrolledPixels)
+{
+	CDibDC paint;
+	const bool created = paint.EnsurePaintBuffer({95, 70}) != FALSE;
+	IW_CHECK(created);
+	if (!created) return;
+	::PatBlt(paint, 0, 0, 95, 70, BLACKNESS);
+	const HBITMAP buffer = paint.GetDib().GetHBitmap();
+	IW_CHECK(paint.EnsurePaintBuffer({103, 78}));
+	IW_CHECK(paint.GetDib().GetHBitmap() == buffer);
+
+	const CRect dirty(10, 11, 20, 21);
+	paint.SetMapping({7, 9}, dirty);
+	CRect logical(0, 0, 50, 50);
+	paint.Draw(logical, 0xff0000ff);
+	IW_CHECK(paint.GetDib().GetBitmap(10, 11)[0] == 255);
+	IW_CHECK(paint.GetDib().GetBitmap(9, 11)[0] == 0);
+	IW_CHECK(paint.GetDib().GetBitmap(20, 11)[0] == 0);
+
+	paint.FillRect(&logical, reinterpret_cast<HBRUSH>(::GetStockObject(WHITE_BRUSH)));
+	::GdiFlush();
+	IW_CHECK(paint.GetDib().GetBitmap(10, 11)[2] == 255);
+	IW_CHECK(paint.GetDib().GetBitmap(9, 11)[2] == 0);
+	IW_CHECK(paint.GetDib().GetBitmap(20, 11)[2] == 0);
+}
 
 IW_TEST(VersionResourceNamesImageWalker10)
 {
@@ -78,11 +330,14 @@ IW_TEST(FixedPointConvertsBothWays)
 	IW_CHECK(FIXED_TO_DOUBLE(DOUBLE_TO_FIXED(0.25)) == 0.25);
 }
 
-IW_TEST(SharedPackedPixelsMaskEachFiveBitChannel)
+IW_TEST(NativePackedPixelsMaskEachFiveBitChannel)
 {
 	for (unsigned value = 0; value <= 0xffff; ++value)
 	{
-		const auto color = iw::imaging::unpack_bgr555(static_cast<std::uint16_t>(value));
+		const BYTE pixel[] = {static_cast<BYTE>(value), static_cast<BYTE>(value >> 8), 0, 0};
+		const libfiles::pixel_rows rows{1, 1, libfiles::document_storage::bgr555, 4, false, pixel, {}, {}};
+		std::uint32_t color{};
+		libfiles::copy_bgra(rows, {&color, 1}, 1, false);
 		IW_CHECK_EQ((color >> 16) & 255, ((value >> 10) & 31) << 3);
 		IW_CHECK_EQ((color >> 8) & 255, ((value >> 5) & 31) << 3);
 		IW_CHECK_EQ(color & 255, (value & 31) << 3);
@@ -105,6 +360,27 @@ IW_TEST(ThreeByteCompositingPreservesOpaquePixelsAndAlphaEndpoints)
 			IW_CHECK_EQ(destination[channel], expected);
 		}
 		IW_CHECK_EQ(destination[3], 0xCD);
+	}
+}
+
+IW_TEST(PreviewScalingKeepsTransparentColorsOutOfVisiblePixels)
+{
+	CDib source;
+	if (!source.Create(2, 1, 32, FALSE))
+	{
+		IW_CHECK(source.IsOpen());
+		return;
+	}
+	const DWORD pixels[] = {0xffff0000, 0x0000ff00};
+	std::memcpy(source.GetBitmap(), pixels, sizeof(pixels));
+	CDibScale scaled;
+	IW_CHECK(scaled.Scale(source, {1, 1}, nullptr));
+	if (scaled.m_dib.IsOpen())
+	{
+		DWORD pixel{};
+		std::memcpy(&pixel, scaled.m_dib.GetBitmap(), sizeof(pixel));
+		IW_CHECK_EQ(pixel, 0x80ff0000u);
+		IW_CHECK(scaled.m_dib.OriginalSize() == CSize(2, 1));
 	}
 }
 
@@ -545,23 +821,12 @@ namespace
 
 	std::vector<BYTE> MakePng(unsigned width, unsigned height, const std::vector<BYTE>& rgba)
 	{
-		png_image image = {};
-		image.version = PNG_IMAGE_VERSION;
-		image.width = width;
-		image.height = height;
-		image.format = PNG_FORMAT_RGBA;
-		png_alloc_size_t size = 0;
-		const bool measured = png_image_write_to_memory(&image, nullptr, &size, 0, rgba.data(), 0, nullptr) != 0;
-		IW_CHECK(measured);
-		std::vector<BYTE> bytes(measured ? static_cast<size_t>(size) : 0);
-		if (measured)
-		{
-			const bool written = png_image_write_to_memory(&image, bytes.data(), &size, 0, rgba.data(), 0, nullptr) != 0;
-			IW_CHECK(written);
-			bytes.resize(written ? static_cast<size_t>(size) : 0);
-		}
-		png_image_free(&image);
-		return bytes;
+		auto bgra = rgba;
+		for (size_t i = 0; i < bgra.size(); i += 4) std::swap(bgra[i], bgra[i + 2]);
+		auto encoded = libfiles::encode_document({bgra.data(), width * 4, width, height, libfiles::pixel_format::bgra8},
+		                                         libfiles::image_format::png);
+		IW_CHECK(encoded.success);
+		return std::move(encoded.data);
 	}
 
 	std::vector<BYTE> MakeTiff(const std::vector<BYTE>& rgba, bool bigEndian)
@@ -606,57 +871,16 @@ namespace
 		return bytes;
 	}
 
-	struct JpegFixtureWriter
+	std::vector<BYTE> JpegFixture(int id)
 	{
-		struct Error
-		{
-			jpeg_error_mgr base;
-			jmp_buf jump;
-		} error = {};
-		jpeg_compress_struct info = {};
-		unsigned char* bytes = nullptr;
-		unsigned long size = 0;
-
-		~JpegFixtureWriter()
-		{
-			jpeg_destroy_compress(&info);
-			free(bytes);
-		}
-
-		static void OnError(j_common_ptr info)
-		{
-			auto* error = reinterpret_cast<Error*>(info->err);
-			longjmp(error->jump, 1);
-		}
-
-		bool Write(unsigned width, unsigned height, std::vector<BYTE>& pixels, bool grayscale, bool cmyk = false)
-		{
-			info.err = jpeg_std_error(&error.base);
-			error.base.error_exit = OnError;
-			// No automatic objects requiring destruction may cross this jump.
-#pragma warning(suppress: 4611)
-			if (setjmp(error.jump))
-				return false;
-			jpeg_create_compress(&info);
-			jpeg_mem_dest(&info, &bytes, &size);
-			info.image_width = width;
-			info.image_height = height;
-			info.input_components = grayscale ? 1 : cmyk ? 4 : 3;
-			info.in_color_space = grayscale ? JCS_GRAYSCALE : cmyk ? JCS_CMYK : JCS_RGB;
-			jpeg_set_defaults(&info);
-			for (int i = 0; i < info.num_components; ++i)
-				info.comp_info[i].h_samp_factor = info.comp_info[i].v_samp_factor = 1;
-			jpeg_set_quality(&info, 100, TRUE);
-			jpeg_start_compress(&info, TRUE);
-			while (info.next_scanline < info.image_height)
-			{
-				JSAMPROW row = pixels.data() + static_cast<size_t>(info.next_scanline) * width * info.input_components;
-				jpeg_write_scanlines(&info, &row, 1);
-			}
-			jpeg_finish_compress(&info);
-			return true;
-		}
-	};
+		const auto module = ::GetModuleHandleA(nullptr);
+		const auto found = ::FindResourceA(module, MAKEINTRESOURCEA(id), RT_RCDATA);
+		const auto data = found ? ::LoadResource(module, found) : nullptr;
+		const auto* bytes = data ? static_cast<const BYTE*>(::LockResource(data)) : nullptr;
+		const auto length = found ? ::SizeofResource(module, found) : 0;
+		IW_CHECK(bytes && length > 2);
+		return bytes && length > 2 ? std::vector<BYTE>(bytes, bytes + length) : std::vector<BYTE>{};
+	}
 }
 
 IW_TEST(BmpLoaderDecodesBottomUpRowsPaddingAndPalette)
@@ -807,7 +1031,6 @@ IW_TEST(JpegLoaderDecodesColorAndGrayscaleAndRecoversAfterBadHeader)
 	CLoadAny loader;
 	for (bool grayscale : { false, true })
 	{
-		std::vector<BYTE> pixels;
 		std::vector<BYTE> rgba;
 		// Constant, MCU-aligned blocks avoid edge ringing. A small tolerance
 		// accounts for JPEG's lossy color conversion and the fast IDCT.
@@ -818,22 +1041,15 @@ IW_TEST(JpegLoaderDecodesColorAndGrayscaleAndRecoversAfterBadHeader)
 				if (grayscale)
 				{
 					const BYTE value = static_cast<BYTE>(32 + index * 64);
-					pixels.push_back(value);
 					rgba.insert(rgba.end(), 3, value);
 				}
 				else
 				{
-					pixels.insert(pixels.end(), loaderColors[index], loaderColors[index] + 3);
 					rgba.insert(rgba.end(), loaderColors[index], loaderColors[index] + 3);
 				}
 				rgba.push_back(255);
 			}
-		JpegFixtureWriter writer;
-		const bool written = writer.Write(16, 16, pixels, grayscale);
-		IW_CHECK(written);
-		if (!written)
-			return;
-		std::vector<BYTE> bytes(writer.bytes, writer.bytes + writer.size);
+		auto bytes = JpegFixture(grayscale ? ID_TEST_JPEG_GRAY : ID_TEST_JPEG_RGB);
 		for (BOOL thumbnail : { FALSE, TRUE })
 			CheckDecode(loader, bytes, 16, 16, grayscale ? 8 : 24, rgba, 3, thumbnail);
 		CheckRejected(loader, { 0xFF, 0xD8, 0xFF, 0xD9 });
@@ -853,18 +1069,13 @@ IW_TEST(ImageLoaderRejectsEmptyAndUnknownSignatures)
 
 IW_TEST(JpegLoaderShowsPixelsAsStoredWithoutExifRotation)
 {
-	std::vector<BYTE> pixels(32 * 16 * 3, 128);
-	JpegFixtureWriter writer;
-	const bool written = writer.Write(32, 16, pixels, false);
-	IW_CHECK(written);
-	if (!written)
-		return;
+	auto bytes = JpegFixture(ID_TEST_JPEG_ORIENTATION);
+	if (bytes.empty()) return;
 	// Exif orientation 6, which a decoder that turned photos upright would show as 16x32.
 	const BYTE exif[] = { 0xFF, 0xE1, 0, 34, 'E', 'x', 'i', 'f', 0, 0,
 		'I', 'I', 42, 0, 8, 0, 0, 0,
 		1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0,
 		0, 0, 0, 0 };
-	std::vector<BYTE> bytes(writer.bytes, writer.bytes + writer.size);
 	bytes.insert(bytes.begin() + 2, std::begin(exif), std::end(exif));
 	CLoadAny loader;
 	for (BOOL thumbnail : { FALSE, TRUE })
@@ -874,6 +1085,75 @@ IW_TEST(JpegLoaderShowsPixelsAsStoredWithoutExifRotation)
 		IW_CHECK_EQ(dib.Width(), 32u);
 		IW_CHECK_EQ(dib.Height(), 16u);
 	}
+}
+
+IW_TEST(FileDecodeBoundsPreviewAndDoesNotChangeTheSource)
+{
+	TCHAR temp[MAX_PATH]{};
+	const auto length = ::GetTempPathA(_countof(temp), temp);
+	GUID unique{};
+	if (!length || length >= _countof(temp) || FAILED(::CoCreateGuid(&unique)))
+	{
+		IW_CHECK(false);
+		return;
+	}
+	wchar_t id[40]{};
+	::StringFromGUID2(unique, id, _countof(id));
+	const CString path = CString(temp) + NarrowText(id) + ".jpg";
+	const auto bytes = JpegFixture(ID_TEST_JPEG_CMYK_LARGE);
+	if (bytes.empty()) return;
+
+	struct Fixture
+	{
+		HANDLE file;
+		~Fixture() { if (file != INVALID_HANDLE_VALUE) ::CloseHandle(file); }
+	} fixture{::CreateFileA(path, GENERIC_READ | GENERIC_WRITE | DELETE, FILE_SHARE_READ | FILE_SHARE_DELETE,
+	                        nullptr, CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr)};
+	IW_CHECK(fixture.file != INVALID_HANDLE_VALUE);
+	if (fixture.file == INVALID_HANDLE_VALUE) return;
+	DWORD written{};
+	IW_CHECK(::WriteFile(fixture.file, bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr) &&
+	         written == bytes.size());
+	IW_CHECK(::FlushFileBuffers(fixture.file));
+
+	CDib dib;
+	CLoadAny loader;
+	IW_CHECK(loader.Load(&dib, path, nullptr, TRUE, 64));
+	if (dib.IsOpen())
+	{
+		IW_CHECK(dib.Size() == CSize(64, 64));
+		IW_CHECK(dib.OriginalSize() == CSize(96, 96));
+	}
+
+	std::vector<BYTE> after(bytes.size());
+	DWORD read{};
+	IW_CHECK(::SetFilePointerEx(fixture.file, {}, nullptr, FILE_BEGIN) &&
+	         ::ReadFile(fixture.file, after.data(), static_cast<DWORD>(after.size()), &read, nullptr) &&
+	         read == bytes.size() && after == bytes);
+}
+
+IW_TEST(ScreenshotKeepsAnOccupiedOutput)
+{
+	wchar_t temp[MAX_PATH]{};
+	const auto length = ::GetTempPathW(_countof(temp), temp);
+	if (!length || length >= _countof(temp))
+	{
+		IW_CHECK(false);
+		return;
+	}
+	const auto saved = iw::publication::temporary_sibling(std::filesystem::path(temp) / L"capture.png", L"iw10-test-");
+	IW_CHECK(!saved.empty());
+	if (saved.empty()) return;
+	const bool created = iw::screenshot::write_new(saved, {1, 2, 3});
+	IW_CHECK(created);
+	if (!created) return;
+	IW_CHECK(!iw::screenshot::write_new(saved, {4, 5}));
+	const iw::publication::File file(::CreateFileW(saved.c_str(), GENERIC_READ | DELETE, 0,
+	                                              nullptr, OPEN_EXISTING, FILE_FLAG_DELETE_ON_CLOSE, nullptr));
+	BYTE bytes[4]{};
+	DWORD read{};
+	IW_CHECK(file && ::ReadFile(file.get(), bytes, sizeof(bytes), &read, nullptr) &&
+	         read == 3 && bytes[0] == 1 && bytes[1] == 2 && bytes[2] == 3);
 }
 
 IW_TEST(NameSortOrdersShellItemsAlphabetically)
@@ -940,34 +1220,20 @@ IW_TEST(JpegLoaderConvertsAdobeCmykToRgb)
 	// quadrants meet on an 8-pixel block edge that maps exactly onto a thumbnail pixel edge.
 	for (unsigned size : { 16u, 96u })
 	{
-		std::vector<BYTE> pixels;
-		for (unsigned y = 0; y < size; ++y)
-			for (unsigned x = 0; x < size; ++x)
-			{
-				const unsigned index = (x / (size / 2)) + 2 * (y / (size / 2));
-				pixels.insert(pixels.end(), samples[index], samples[index] + 4);
-			}
-		JpegFixtureWriter writer;
-		const bool written = writer.Write(size, size, pixels, false, true);
-		IW_CHECK(written);
-		if (!written)
-			return;
-		std::vector<BYTE> bytes(writer.bytes, writer.bytes + writer.size);
-		const bool scaled = size > IMAGE_X;
-		const unsigned out = scaled ? IMAGE_X : size;
-		std::vector<BYTE> rgba;
-		for (unsigned y = 0; y < out; ++y)
-			for (unsigned x = 0; x < out; ++x)
-			{
-				const BYTE* s = samples[(x / (out / 2)) + 2 * (y / (out / 2))];
-				for (int channel = 0; channel < 3; ++channel)
-					rgba.push_back(static_cast<BYTE>(s[channel] * s[3] / 255));
-				rgba.push_back(255);
-			}
+		auto bytes = JpegFixture(size == 16 ? ID_TEST_JPEG_CMYK : ID_TEST_JPEG_CMYK_LARGE);
 		for (BOOL thumbnail : { FALSE, TRUE })
 		{
-			if (scaled && !thumbnail)
-				continue;
+			const bool scaled = thumbnail && size > IMAGE_X;
+			const unsigned out = scaled ? IMAGE_X : size;
+			std::vector<BYTE> rgba;
+			for (unsigned y = 0; y < out; ++y)
+				for (unsigned x = 0; x < out; ++x)
+				{
+					const BYTE* s = samples[(x / (out / 2)) + 2 * (y / (out / 2))];
+					for (int channel = 0; channel < 3; ++channel)
+						rgba.push_back(static_cast<BYTE>(s[channel] * s[3] / 255));
+					rgba.push_back(255);
+				}
 			CheckDecode(loader, bytes, out, out, scaled ? 32 : 24, rgba, 3, thumbnail);
 		}
 	}

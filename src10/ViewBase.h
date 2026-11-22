@@ -21,24 +21,27 @@ inline CDib& BackgroundTile()
 }
 
 template <class T>
-class CViewBase : public CWindowImpl<T>
+class CViewBase : public SdkWindow
 {
 public:
 	enum JUST { j_none, j_center, j_centerx, j_top };
 
 	enum { kScrollBarV = 0x7f01, kScrollBarH = 0x7f02, kBarRange = 10000 };
 
-	DECLARE_WND_CLASS_EX(nullptr, CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS, -1)
-
-	BEGIN_MSG_MAP(CViewBase)
-		MSG_WM_PAINT(OnPaint)
-		MESSAGE_HANDLER(WM_PRINTCLIENT, OnPrintClient)
-		MSG_WM_SIZE(OnSize)
-		MSG_WM_ERASEBKGND(OnEraseBkgnd)
-		MSG_WM_VSCROLL(OnVScroll)
-		MSG_WM_HSCROLL(OnHScroll)
-		MSG_WM_MOUSEWHEEL(OnMouseWheel)
-	END_MSG_MAP()
+	LRESULT WindowMessage(UINT message, WPARAM wParam, LPARAM lParam) override
+	{
+		switch (message)
+		{
+		case WM_PAINT: OnPaint(); return 0;
+		case WM_PRINTCLIENT: OnPrintClient(reinterpret_cast<HDC>(wParam)); return 0;
+		case WM_ERASEBKGND: return TRUE;
+		case WM_VSCROLL: OnVScroll(LOWORD(wParam), HIWORD(wParam), reinterpret_cast<HWND>(lParam)); return 0;
+		case WM_HSCROLL: OnHScroll(LOWORD(wParam), HIWORD(wParam), reinterpret_cast<HWND>(lParam)); return 0;
+		case WM_MOUSEWHEEL: return OnMouseWheel(GET_KEYSTATE_WPARAM(wParam), GET_WHEEL_DELTA_WPARAM(wParam),
+		                                      MessagePoint(lParam));
+		}
+		return SdkWindow::WindowMessage(message, wParam, lParam);
+	}
 
 	// The drawable area: the client rect less whatever the gutters take.
 	CRect ViewRect() const
@@ -144,10 +147,10 @@ public:
 
 protected:
 	// Called from the derived OnCreate.
-	void InitViewBase()
+	bool InitViewBase()
 	{
-		m_barV.Create(this->m_hWnd, CRect(0, 0, 0, 0), nullptr, WS_CHILD | SBS_VERT, 0, kScrollBarV);
-		m_barH.Create(this->m_hWnd, CRect(0, 0, 0, 0), nullptr, WS_CHILD | SBS_HORZ, 0, kScrollBarH);
+		return m_barV.Create(this->m_hWnd, {}, nullptr, WS_CHILD | SBS_VERT, 0, kScrollBarV) &&
+			m_barH.Create(this->m_hWnd, {}, nullptr, WS_CHILD | SBS_HORZ, 0, kScrollBarH);
 	}
 
 	// The gutter a derived view always wants, whether or not a bar is showing.
@@ -159,66 +162,32 @@ protected:
 
 	CScrollBar m_barV;
 	CScrollBar m_barH;
+	HBRUSH m_backgroundBrush{};
 
 	// What a derived view's own gutter controls take, at the far end of each
 	// gutter. The bars start at the near end and get the rest.
 	int m_nReservedBottom = 0;
 	int m_nReservedRight = 0;
 
-	void OnSize(UINT, CSize size)
-	{
-		// Sized to the whole client, so a gutter appearing does not force a
-		// reallocation part way through a layout pass.
-		if (size.cx > 0 && size.cy > 0)
-			m_ddc.Create(size.cx, size.cy, 24);
-
-		this->SetMsgHandled(FALSE);
-	}
-
-	BOOL OnEraseBkgnd(CDCHandle dc)
-	{
-		CRect rc;
-		this->GetClientRect(&rc);
-
-		const CRect rcView = ViewRect();
-		const auto brush = reinterpret_cast<HBRUSH>(LongToHandle(COLOR_BTNFACE + 1));
-
-		// The view area repaints itself from the offscreen DIB. The gutters have
-		// nothing behind the strip and the hidden bar, so they are filled here.
-		if (rcView.right < rc.right)
-		{
-			CRect rcRight(rcView.right, rc.top, rc.right, rc.bottom);
-			dc.FillRect(&rcRight, brush);
-		}
-
-		if (rcView.bottom < rc.bottom)
-		{
-			CRect rcBottom(rc.left, rcView.bottom, rc.right, rc.bottom);
-			dc.FillRect(&rcBottom, brush);
-		}
-
-		return TRUE;
-	}
-
-	void OnPaint(CDCHandle)
+	void OnPaint()
 	{
 		CPaintDC dc(this->m_hWnd);
 
 		CRect r;
 		dc.GetClipBox(&r);
-		r &= ViewRect();
-
 		if (!r.IsRectEmpty())
 			DrawTo(dc.m_hDC, r);
 	}
 
 	// PrintWindow, which is how the screenshot harness captures the app.
-	LRESULT OnPrintClient(UINT, WPARAM wParam, LPARAM, BOOL&)
+	void OnPrintClient(HDC dc)
 	{
-		if (wParam != 0)
-			DrawTo(reinterpret_cast<HDC>(wParam), ViewRect());
-
-		return 0;
+		if (dc)
+		{
+			CRect client;
+			this->GetClientRect(&client);
+			DrawTo(dc, client);
+		}
 	}
 
 	void OnVScroll(int nSBCode, short nPos, CScrollBar bar)
@@ -318,9 +287,9 @@ protected:
 
 		CRect current;
 		wnd.GetWindowRect(&current);
-		wnd.GetParent().ScreenToClient(&current);
+		CWindow(wnd.GetParent()).ScreenToClient(&current);
 
-		if (current == rect && wnd.IsWindowVisible())
+		if (current == rect && (wnd.GetStyle() & WS_VISIBLE))
 			return;
 
 		wnd.SetWindowPos(nullptr, rect.left, rect.top, rect.Width(), rect.Height(),
@@ -329,7 +298,7 @@ protected:
 
 	static void HideControl(CWindow wnd)
 	{
-		if (wnd.IsWindow() && wnd.IsWindowVisible())
+		if (wnd.IsWindow() && (wnd.GetStyle() & WS_VISIBLE))
 			wnd.ShowWindow(SW_HIDE);
 	}
 
@@ -371,25 +340,45 @@ private:
 
 		if (bBarV && cx > 0)
 			PlaceControl(m_barV, CRect(rectClient.right - cx, 0, rectClient.right,
-			                           max(rectClient.Height() - cy - m_nReservedBottom, 0L)));
+			                           max(rectClient.Height() - cy - m_nReservedBottom, 0)));
 		else
 			HideControl(m_barV);
 
 		if (bBarH && cy > 0)
 			PlaceControl(m_barH, CRect(0, rectClient.bottom - cy,
-			                           max(rectClient.Width() - cx - m_nReservedRight, 0L),
+			                           max(rectClient.Width() - cx - m_nReservedRight, 0),
 			                           rectClient.bottom));
 		else
 			HideControl(m_barH);
 	}
 
-	void DrawTo(HDC hDC, const CRect& rect)
+	void DrawTo(HDC hDC, const CRect& dirty)
 	{
-		if (m_ddc.m_hDC == nullptr || rect.IsRectEmpty())
+		const CRect view = ViewRect();
+		const auto brush = ::GetSysColorBrush(COLOR_BTNFACE);
+		const CRect right = dirty & CRect(view.right, 0, dirty.right, view.bottom);
+		const CRect bottom = dirty & CRect(0, view.bottom, dirty.right, dirty.bottom);
+		if (!right.IsRectEmpty()) ::FillRect(hDC, &right, brush);
+		if (!bottom.IsRectEmpty()) ::FillRect(hDC, &bottom, brush);
+
+		const CRect rect = dirty & view;
+		if (rect.IsRectEmpty()) return;
+		if (!m_ddc.EnsurePaintBuffer(view.Size()))
+		{
+			::FillRect(hDC, &rect, brush);
 			return;
+		}
 
 		m_ddc.SetMapping(m_pointScroll, rect);
-		m_ddc.Tile(BackgroundTile(), m_pointScroll);
+		const CRect logical = rect + m_pointScroll;
+		if (m_backgroundBrush)
+			m_ddc.FillRect(&logical, m_backgroundBrush);
+		else if (auto& tile = BackgroundTile(); tile.IsOpen())
+			m_ddc.Tile(tile, m_pointScroll);
+		else
+		{
+			m_ddc.FillRect(&logical, ::GetSysColorBrush(COLOR_BTNSHADOW));
+		}
 
 		static_cast<T*>(this)->OnDraw(m_ddc);
 

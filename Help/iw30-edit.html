@@ -1,22 +1,34 @@
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN">
 <html><head><meta http-equiv="Content-Type" content="text/html; charset=Windows-1252">
-<title>3.0 Photo Edit</title><link rel="stylesheet" type="text/css" href="iw.css"></head>
-<body><h1>Photo Edit</h1>
-<p>Focus a photo and press F12 or choose Edit. Adjustments change a live preview;
+<title>3.0 Photo and Media Edit</title><link rel="stylesheet" type="text/css" href="iw.css"></head>
+<body><h1>Photo and Media Edit</h1>
+<h2>Photos</h2>
+<p>Focus a photo and press E or choose Edit. Adjustments change a live preview;
 the original file is untouched until Save. Use the photo strip to select
 another image. Leaving a changed draft offers Save, Don't Save and Cancel.</p>
 <p>Rotate and straighten correct orientation; colour controls adjust the
 appearance. Auto straighten looks for strong straight edges, while Auto colour
 adjusts luminance and white balance. Inspect automatic results before saving.</p>
-<p>Save renders at full resolution. In-place Save makes an original backup by
-default. Save as proposes an unused -edit name. A failed save retains the
-draft, and a format change requires an explicit destination choice.</p>
+<p>Drag the blue comparison handle to see the original on the left and the
+finished edit on the right. Choose Preview to see them side by side, or
+Compare for a persistent divider. Escape cancels an active drag first;
+otherwise it leaves Edit.</p>
+<p>The colour histogram updates with the preview. Drag one of the three
+handles under the graph to adjust Darks, Midtones or Lights; double-click to
+reset it. Click an adjustment's number to type a value, then press Enter.</p>
+<p>Save renders at full resolution and keeps the original beside the edited
+photo under an unused -original name. Save as proposes an unused -edit name
+and never replaces another file. A failed save retains the draft.</p>
 <p>Photos are edited upright, as the camera recorded them, and Save writes
-upright pixels. Saving in the photo's own format keeps its camera details,
-dates, GPS position, captions and colour profile; the orientation is
-reset so other programs do not turn the photo again. Saving as a different
-format keeps only the colour profile, and WebP keeps none.</p>
-<p>Perspective shows four draggable corners on the original photo. Place them
+upright pixels. Save and Save as can carry camera details, dates, GPS
+position, captions and the colour profile when the output format supports
+them. Orientation is reset so other programs do not turn the photo again.
+BMP and WebP output do not carry photo metadata or a colour profile.</p>
+<p>Photo Edit writes one picture at eight bits per channel. Use Save as to keep
+the original when editing a multi-page TIFF, an animation, an HDR or higher
+bit depth image, or a file whose content does not match its extension.</p>
+<p>Horizontal and Vertical correct perspective. Corners shows four draggable
+points on the original photo for more control. Place them
 clockwise around the document, then inspect Preview. Auto document proposes a
 complete, contrasting quadrilateral; if it cannot find one it reports that
 result and leaves the draft intact. You can always adjust the corners manually.</p>
@@ -24,4 +36,18 @@ result and leaves the draft intact. You can always adjust the corners manually.<
 cancels an active drag. Draft Undo and Redo restore adjustments without writing
 the file. Perspective output is bounded to 128 million pixels and four times
 the source area; unsupported geometry is refused.</p>
+<h2>Video and audio</h2>
+<p>Focus a video or audio file and press E. Drag the handles below the
+preview to set a range, or use I and O to mark the playhead. Space plays
+or pauses. Packet-copy trims use packet boundaries and may start at an
+earlier video keyframe, so check the saved range.</p>
+<p>Remove sound from a video or turn a supported video in 90-degree steps.
+Rotation is stored in the MP4 or QuickTime track, not encoded into the
+picture. The index-first option makes these files ready for progressive playback.</p>
+<p>ImageWalker copies compressed packets without re-encoding. Save keeps
+the original beside the new file. Save As rebuilds the container under a
+new name, even without edits, and never overwrites an existing file.
+If a container cannot retain the tracks, the save is refused. You can
+cancel before publication. The preview uses the same built-in playback
+decoders as Browse, with installed Windows codecs as a fallback.</p>
 <p><a href="iw30.html">ImageWalker 3.0 help</a></p></body></html>

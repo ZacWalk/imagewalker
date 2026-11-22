@@ -96,7 +96,7 @@ void CDib::Attach(CDib& dib)
 	m_nStorageWidth = dib.m_nStorageWidth;
 	m_nOriginalType = dib.m_nOriginalType;
 	m_uFlags = dib.m_uFlags;
-	m_strInfo = dib.m_strInfo;
+	m_strInfo = std::move(dib.m_strInfo);
 	m_sizeOriginal = dib.m_sizeOriginal;
 
 	dib.m_pBMI = nullptr;

@@ -4,6 +4,7 @@
 #include "Platform.h"
 
 #include <algorithm>
+#include <array>
 #include <cwctype>
 #include <memory>
 #include <vector>
@@ -84,13 +85,6 @@ namespace iw::platform
 
 	namespace
 	{
-		constexpr color chromeBackground{245, 245, 245};
-		constexpr color chromeText{32, 32, 32};
-		constexpr color chromeDisabled{130, 130, 130};
-		constexpr color chromeHover{218, 232, 247};
-		constexpr color chromeChecked{202, 220, 241};
-		constexpr color chromeBorder{190, 190, 190};
-
 		int scale_metric(const int value, const unsigned int dpi)
 		{
 			return value * static_cast<int>(dpi ? dpi : 96) / 96;
@@ -104,6 +98,7 @@ namespace iw::platform
 			explicit ChromeReactor(std::weak_ptr<ChromeSurface> owner) : owner_(std::move(owner)) {}
 
 			MessageResult mouse(const WindowFramePtr& frame, MouseMessage message, const MouseInput& input) override;
+			MessageResult message(const WindowFramePtr& frame, WindowMessage message) override;
 			void paint(const WindowFramePtr& frame, DrawContext& draw) override;
 			void size(const WindowFramePtr&, app::sizei, MeasureContext&) override {}
 
@@ -117,6 +112,7 @@ namespace iw::platform
 			CommandPtr command;
 			std::vector<MenuItem> menu;
 			std::filesystem::path breadcrumb;
+			bool folderChoices{};
 		};
 
 		class ChromeSurface final : public CommandSurface, public std::enable_shared_from_this<ChromeSurface>
@@ -134,6 +130,7 @@ namespace iw::platform
 				options.eraseBackground = false;
 				top_ = owner_->create_child(std::make_shared<ChromeReactor>(weak_from_this()), options);
 				statusFrame_ = owner_->create_child(std::make_shared<ChromeReactor>(weak_from_this()), options);
+				set_dpi(owner_->dpi());
 				return top_ && statusFrame_;
 			}
 
@@ -151,6 +148,7 @@ namespace iw::platform
 
 			void set_task_toolbar(std::vector<ToolbarItem> items) override
 			{
+				++folderMenuGeneration_;
 				taskToolbar_ = std::move(items);
 				taskActive_ = true;
 				invalidate();
@@ -174,6 +172,7 @@ namespace iw::platform
 			                     std::function<void(const std::filesystem::path&)> selected) override
 			{
 				breadcrumbs_ = std::move(breadcrumbs);
+				++folderMenuGeneration_;
 				breadcrumbSelected_ = std::move(selected);
 				invalidate();
 			}
@@ -206,8 +205,8 @@ namespace iw::platform
 					return client;
 				}
 				const int menuHeight = menus_.empty() ? 0 : scale_metric(24, dpi_);
-				const int topHeight = (std::min)(scale_metric(36, dpi_), (std::max)(0, client.height - menuHeight));
-				const int statusHeight = (std::min)(scale_metric(28, dpi_),
+				const int topHeight = (std::min)(scale_metric(38, dpi_), (std::max)(0, client.height - menuHeight));
+				const int statusHeight = (std::min)(scale_metric(32, dpi_),
 				                                    (std::max)(0, client.height - menuHeight - topHeight));
 				top_->move({client.x, client.y + menuHeight, client.width, topHeight});
 				statusFrame_->move({client.x, client.bottom() - statusHeight, client.width, statusHeight});
@@ -225,6 +224,7 @@ namespace iw::platform
 				if (dpi_ == effective) return;
 				dpi_ = effective;
 				font_ = create_message_font(dpi_);
+				iconFont_ = command_icon_font(dpi_);
 				invalidate();
 			}
 
@@ -242,53 +242,128 @@ namespace iw::platform
 
 			MessageResult mouse(const WindowFramePtr& frame, const MouseMessage message, const MouseInput& input)
 			{
+				if (frame == statusFrame_ && sliderDragging_ &&
+				    (message == MouseMessage::move || message == MouseMessage::leftButtonUp))
+				{
+					change_thumbnail_size(input.point.x);
+					if (message == MouseMessage::leftButtonUp)
+					{
+						sliderDragging_ = false;
+						frame->release_capture();
+					}
+					return 1;
+				}
+				if (message == MouseMessage::leave)
+				{
+					hoverCommand_.reset();
+					hoverBreadcrumb_ = {};
+					invalidate();
+					return 0;
+				}
 				if (message != MouseMessage::leftButtonDown && message != MouseMessage::move) return 0;
 				auto& hits = frame == top_ ? topHits_ : statusHits_;
 				if (message == MouseMessage::move)
 				{
+					frame->track_mouse_leave();
 					const auto hit = hit_test(hits, input.point);
 					const auto command = hit ? hit->command : CommandPtr{};
-					if (command != hoverCommand_)
+					const auto breadcrumb = frame == top_ && hit && !hit->command ? hit->bounds : app::recti{};
+					if (command != hoverCommand_ || breadcrumb != hoverBreadcrumb_)
 					{
 						hoverCommand_ = command;
-						frame->invalidate();
+						hoverBreadcrumb_ = breadcrumb;
+						invalidate();
 					}
 					return 0;
 				}
-				const auto hit = hit_test(hits, input.point);
-				if (!hit) return 0;
-				if (frame == statusFrame_ && !hit->command && thumbnailChanged_)
+				const auto found = hit_test(hits, input.point);
+				if (!found) return 0;
+				const auto hit = *found;
+				if (frame == statusFrame_ && !hit.command && thumbnailChanged_ && !taskActive_)
 				{
-					const int value = std::clamp(64 + (input.point.x - hit->bounds.x) * (256 - 64) /
-					                                      (std::max)(1, hit->bounds.width),
-					                             64, 256);
-					thumbnailSize_ = value;
-					thumbnailChanged_(value);
-					frame->invalidate();
+					sliderDragging_ = true;
+					frame->set_capture();
+					change_thumbnail_size(input.point.x);
+					return 1;
+				}
+				if (hit.folderChoices)
+				{
+					show_folder_choices(hit.breadcrumb, hit.bounds);
+					return 1;
+				}
+				if (!hit.breadcrumb.empty())
+				{
+					if (breadcrumbSelected_) breadcrumbSelected_(hit.breadcrumb);
 					return 0;
 				}
-				if (!hit->breadcrumb.empty())
+				if (hit.command && hit.command->enabled && !hit.command->enabled()) return 0;
+				if (!hit.menu.empty())
 				{
-					if (breadcrumbSelected_) breadcrumbSelected_(hit->breadcrumb);
-					return 0;
+					std::vector<PopupItem> popup;
+					for (const auto& item : hit.menu) append_popup(popup, item);
+					show_popup_menu(frame, frame->client_to_screen({hit.bounds.x, hit.bounds.bottom()}), popup);
 				}
-				if (hit->command)
-				{
-					if (!hit->command->enabled || hit->command->enabled())
-					{
-						if (!hit->menu.empty())
-						{
-							std::vector<PopupItem> popup;
-							for (const auto& item : hit->menu) append_popup(popup, item);
-							show_popup_menu(frame, input.screenPoint, popup);
-						}
-						else if (hit->command->invoke) hit->command->invoke();
-					}
-				}
+				else if (hit.command && hit.command->invoke) hit.command->invoke();
 				return 0;
 			}
 
+			void capture_lost() { sliderDragging_ = false; }
+
 		private:
+			void change_thumbnail_size(const int x)
+			{
+				if (!thumbnailChanged_ || sliderBounds_.width <= 1) return;
+				const int offset = std::clamp(x - sliderBounds_.x, 0, sliderBounds_.width - 1);
+				const int value = 64 + offset * 192 / (sliderBounds_.width - 1);
+				if (value == thumbnailSize_) return;
+				thumbnailSize_ = value;
+				const auto changed = thumbnailChanged_;
+				changed(value);
+				statusFrame_->invalidate();
+			}
+
+			void show_folder_choices(const std::filesystem::path& path, const app::recti anchor)
+			{
+				const auto generation = ++folderMenuGeneration_;
+				const auto weak = weak_from_this();
+				if (!queue_work(WorkQueue::shell, [weak, path, anchor, generation]
+				{
+					auto choices = child_folders(path);
+					queue_ui([weak, anchor, generation, choices = std::move(choices)]
+					{
+						const auto self = weak.lock();
+						if (!self || generation != self->folderMenuGeneration_ || self->taskActive_ ||
+						    self->fullscreen_)
+							return;
+						std::vector<PopupItem> menu;
+						if (choices)
+							for (const auto& child : *choices)
+							{
+								auto command = std::make_shared<Command>();
+								command->name = child.label;
+								command->invoke = [select = self->breadcrumbSelected_, folder = child.path]
+								{
+									if (select) select(folder);
+								};
+								menu.push_back(PopupItem::action(std::move(command), child.label));
+							}
+						if (menu.empty())
+						{
+							auto empty = std::make_shared<Command>();
+							empty->name = choices ? L"No subfolders" : L"Could not read this folder";
+							empty->enabled = []
+							{
+								return false;
+							};
+							const auto text = empty->name;
+							menu.push_back(PopupItem::action(std::move(empty), text));
+						}
+						show_popup_menu(self->top_, self->top_->client_to_screen({anchor.x, anchor.bottom()}), menu);
+					});
+				}))
+					write_diagnostic(L"The folder menu worker is unavailable.\n");
+			}
+
 			static const Hit* hit_test(const std::vector<Hit>& hits, const app::pointi point)
 			{
 				for (const auto& hit : hits)
@@ -319,17 +394,144 @@ namespace iw::platform
 
 			const std::vector<ToolbarItem>& active_toolbar() const { return taskActive_ ? taskToolbar_ : toolbar_; }
 
-			int command_width(DrawContext& draw, const CommandPtr& command) const
+			static constexpr auto centered_text = TextFormat::center | TextFormat::verticalCenter |
+			                                      TextFormat::singleLine | TextFormat::endEllipsis;
+
+			static wchar_t symbol_code(const CommandBitmap bitmap)
 			{
-				if (!command) return scale_metric(8, dpi_);
-				const auto text = toolbar_label(*command);
-				return (std::max)(scale_metric(56, dpi_), draw.measure_text(text, TextFormat::singleLine, font_).width +
-				                                              scale_metric(20, dpi_));
+				using enum CommandBitmap;
+				switch (bitmap)
+				{
+				case forward: return L'\uE72A';
+				case back: return L'\uE72B';
+				case refresh: return L'\uE72C';
+				case folderTree: return L'\uE8B7';
+				case openFolder: return L'\uE838';
+				case about: return L'\uE946';
+				case details: return L'\uE8FD';
+				case thumbnails: return L'\uE91B';
+				case matrix: return L'\uE80A';
+				case photo:
+				case photosOnly: return L'\uE8B9';
+				case sort: return L'\uE8CB';
+				case breadcrumbChevron: return L'\uE76C';
+				case fit: return L'\uE799';
+				case zoomIn: return L'\uE8A3';
+				case zoomOut: return L'\uE71F';
+				default: return 0;
+				}
+			}
+
+			void draw_symbol(DrawContext& draw, const CommandBitmap bitmap, const app::recti box, const color ink) const
+			{
+				if (const auto glyph = symbol_code(bitmap); glyph && !box.is_empty())
+					draw.text(std::wstring_view(&glyph, 1), box, ink, centered_text, iconFont_);
+			}
+
+			int command_width(DrawContext& draw, const ToolbarItem& item) const
+			{
+				const auto& command = *item.command;
+				const bool icon = symbol_code(command.bitmap) != 0;
+				int width = scale_metric(icon ? 34 : 16, dpi_);
+				if (!icon || command.toolbarText)
+					width += draw.measure_text(toolbar_label(command), TextFormat::singleLine, font_).width;
+				if (item.kind == ToolbarItemKind::menu) width += scale_metric(13, dpi_);
+				return width;
+			}
+
+			void paint_command(DrawContext& draw, const ToolbarItem& item, app::recti bounds) const
+			{
+				const auto& command = *item.command;
+				const bool enabled = !command.enabled || command.enabled();
+				const auto ink = system_color(enabled ? SystemColor::buttonText : SystemColor::grayText);
+				if (enabled && command.checked && command.checked())
+					draw.fill(bounds, system_color(SystemColor::checked));
+				else if (enabled && hoverCommand_ == item.command) draw.fill(bounds, system_color(SystemColor::hover));
+				if (item.kind == ToolbarItemKind::menu)
+				{
+					const int arrowWidth = scale_metric(13, dpi_);
+					draw.text(L"\u25BE", {bounds.right() - arrowWidth, bounds.y, arrowWidth, bounds.height}, ink,
+					          centered_text, font_);
+					bounds.width -= arrowWidth;
+				}
+				if (symbol_code(command.bitmap))
+				{
+					const int iconWidth = scale_metric(34, dpi_);
+					draw_symbol(draw, command.bitmap, {bounds.x, bounds.y, iconWidth, bounds.height}, ink);
+					bounds.x += iconWidth;
+					bounds.width -= iconWidth;
+					if (!command.toolbarText) return;
+				}
+				if (bounds.width > 0) draw.text(toolbar_label(command), bounds, ink, centered_text, font_);
+			}
+
+			void paint_breadcrumbs(DrawContext& draw, const app::recti field)
+			{
+				const int divider = scale_metric(22, dpi_);
+				if (field.width < divider * 2 || breadcrumbs_.empty()) return;
+				const auto ink = system_color(SystemColor::windowText);
+				const auto muted = system_color(SystemColor::grayText);
+				const auto width_of = [&](const Breadcrumb& part)
+				{
+					return (std::min)(scale_metric(150, dpi_),
+					                  draw.measure_text(part.label, TextFormat::singleLine, font_).width +
+					                      scale_metric(14, dpi_));
+				};
+				const int overflow = scale_metric(28, dpi_);
+				const int available = field.width - divider - scale_metric(4, dpi_);
+				size_t first = breadcrumbs_.size() - 1;
+				const int leafWidth = (std::min)(width_of(breadcrumbs_.back()), available);
+				int needed = leafWidth;
+				while (first > 0)
+				{
+					const int preceding = width_of(breadcrumbs_[first - 1]) + divider;
+					const int reserve = first > 1 ? overflow : 0;
+					if (needed + preceding + reserve > available) break;
+					needed += preceding;
+					--first;
+				}
+
+				int x = field.x;
+				if (first > 0 && available - leafWidth >= overflow)
+				{
+					const app::recti hit{x, field.y + 1, overflow, field.height - 2};
+					if (hoverBreadcrumb_ == hit) draw.fill(hit, system_color(SystemColor::hover));
+					draw.text(L"\u2026", hit, ink, centered_text, font_);
+					std::vector<MenuItem> ancestors;
+					for (size_t i = 0; i < first; ++i)
+					{
+						auto command = std::make_shared<Command>();
+						command->name = breadcrumbs_[i].label;
+						command->invoke = [select = breadcrumbSelected_, path = breadcrumbs_[i].path]
+						{
+							if (select) select(path);
+						};
+						ancestors.push_back(MenuItem::action(std::move(command)));
+					}
+					topHits_.push_back({hit, {}, std::move(ancestors), {}});
+					x += overflow;
+				}
+				for (size_t i = first; i < breadcrumbs_.size(); ++i)
+				{
+					const bool current = i + 1 == breadcrumbs_.size();
+					const auto& part = breadcrumbs_[i];
+					const int width = (std::min)(width_of(part), field.right() - x - divider - scale_metric(4, dpi_));
+					const app::recti hit{x, field.y + 1, width, field.height - 2};
+					if (!current && hoverBreadcrumb_ == hit) draw.fill(hit, system_color(SystemColor::hover));
+					draw.text(part.label, hit, current ? ink : muted, centered_text, font_);
+					if (!current) topHits_.push_back({hit, {}, {}, part.path});
+					const app::recti split{hit.right(), field.y + 1, divider, field.height - 2};
+					if (hoverBreadcrumb_ == split) draw.fill(split, system_color(SystemColor::hover));
+					draw_symbol(draw, CommandBitmap::breadcrumbChevron, split, ink);
+					topHits_.push_back({split, {}, {}, part.path, true});
+					x += width + divider;
+				}
 			}
 
 			void paint_top(DrawContext& draw)
 			{
 				const auto bounds = top_->client_rect();
+				const auto chromeBackground = system_color(SystemColor::face);
 				draw.fill(bounds, chromeBackground);
 				topHits_.clear();
 				int x = scale_metric(4, dpi_);
@@ -341,91 +543,87 @@ namespace iw::platform
 						continue;
 					}
 					if (!item.command) continue;
-					const auto width = command_width(draw, item.command);
+					const auto width = command_width(draw, item);
 					const app::recti hit{x, 0, width, bounds.height};
-					const bool enabled = !item.command->enabled || item.command->enabled();
-					const bool checked = item.command->checked && item.command->checked();
-					const bool hovered = hoverCommand_ == item.command;
-					if (checked) draw.fill(hit, chromeChecked);
-					else if (hovered) draw.fill(hit, chromeHover);
-					if (!enabled) draw.fill(hit, chromeBackground);
-					const auto text = toolbar_label(*item.command);
-					draw.text(text, hit, enabled ? chromeText : chromeDisabled,
-					          TextFormat::center | TextFormat::verticalCenter | TextFormat::singleLine |
-					              TextFormat::endEllipsis,
-					          font_);
+					paint_command(draw, item, hit);
 					topHits_.push_back({hit, item.command, item.menuItems, {}});
 					x += width;
 				}
 				if (!taskActive_ && !breadcrumbs_.empty())
 				{
 					x += scale_metric(8, dpi_);
-					for (const auto& breadcrumb : breadcrumbs_)
-					{
-						const auto width = draw.measure_text(breadcrumb.label, TextFormat::singleLine, font_).width +
-						                   scale_metric(18, dpi_);
-						const app::recti hit{x, 0, width, bounds.height};
-						draw.text(breadcrumb.label, hit, chromeText,
-						          TextFormat::center | TextFormat::verticalCenter | TextFormat::singleLine |
-						              TextFormat::endEllipsis,
-						          font_);
-						topHits_.push_back({hit, {}, {}, breadcrumb.path});
-						x += width;
-					}
+					const int margin = scale_metric(4, dpi_);
+					paint_breadcrumbs(draw, {x, margin, bounds.width - x - margin, bounds.height - margin * 2});
 				}
 			}
 
 			void paint_status(DrawContext& draw)
 			{
 				const auto bounds = statusFrame_->client_rect();
+				const auto chromeBackground = system_color(SystemColor::face);
+				const auto chromeText = system_color(SystemColor::buttonText);
 				draw.fill(bounds, chromeBackground);
 				statusHits_.clear();
-				draw.text(statusInfo_.text,
-				          {scale_metric(7, dpi_), 0, bounds.width - scale_metric(180, dpi_), bounds.height}, chromeText,
+				const int sliderWidth = taskActive_ || bounds.width <= scale_metric(530, dpi_)
+				                            ? 0
+				                            : std::clamp(bounds.width - scale_metric(578, dpi_), scale_metric(52, dpi_),
+				                                         scale_metric(112, dpi_));
+				int x = bounds.width - sliderWidth - scale_metric(8, dpi_);
+				if (!taskActive_)
+					for (auto it = statusToolbar_.rbegin(); it != statusToolbar_.rend(); ++it)
+					{
+						const auto& item = *it;
+						if (item.kind == ToolbarItemKind::separator)
+						{
+							x -= scale_metric(8, dpi_);
+							continue;
+						}
+						if (!item.command) continue;
+						const int width = command_width(draw, item);
+						x -= width;
+						const app::recti hit{x, 0, width, bounds.height};
+						paint_command(draw, item, hit);
+						statusHits_.push_back({hit, item.command, item.menuItems, {}});
+					}
+				const int margin = scale_metric(7, dpi_);
+				sliderBounds_ = {};
+				if (sliderWidth)
+				{
+					const app::recti slider{bounds.width - sliderWidth, 0, sliderWidth - margin, bounds.height};
+					sliderBounds_ = slider;
+					const int thumb = scale_metric(8, dpi_);
+					const int center = (slider.width - 1) * (std::clamp(thumbnailSize_, 64, 256) - 64) / (256 - 64);
+					draw.fill({slider.x, bounds.height / 2 - 1, slider.width, 2}, system_color(SystemColor::shadow));
+					draw.fill({slider.x + center - thumb / 2, bounds.height / 2 - thumb, thumb, thumb * 2},
+					          system_color(SystemColor::highlight));
+					statusHits_.push_back({slider, {}, {}, {}});
+				}
+				const int progressWidth = !statusInfo_.scanning && statusInfo_.progressPercent < 100 &&
+				                                  x > scale_metric(200, dpi_)
+				                              ? scale_metric(85, dpi_)
+				                              : 0;
+				if (progressWidth > 0)
+				{
+					const app::recti bar{x - progressWidth - margin, bounds.height / 2 - 3, progressWidth, 6};
+					draw.outline(bar, system_color(SystemColor::shadow));
+					draw.fill({bar.x, bar.y, bar.width * std::clamp(statusInfo_.progressPercent, 0, 100) / 100,
+					           bar.height},
+					          system_color(SystemColor::highlight));
+				}
+				const auto hint = hoverCommand_ ? (hoverCommand_->tooltip.empty() ? toolbar_label(*hoverCommand_)
+				                                                                  : hoverCommand_->tooltip)
+				                                : statusInfo_.text;
+				draw.text(hint, {margin, 0, (std::max)(0, x - progressWidth - margin * 2), bounds.height}, chromeText,
 				          TextFormat::left | TextFormat::verticalCenter | TextFormat::singleLine |
 				              TextFormat::endEllipsis,
 				          font_);
-				if (!statusInfo_.scanning && statusInfo_.progressPercent < 100)
-				{
-					const int width = scale_metric(140, dpi_);
-					const app::recti bar{bounds.width - width - scale_metric(10, dpi_), scale_metric(6, dpi_), width,
-					                     bounds.height - scale_metric(12, dpi_)};
-					draw.outline(bar, chromeBorder);
-					draw.fill({bar.x + 1, bar.y + 1,
-					           (std::max)(0, (bar.width - 2) * std::clamp(statusInfo_.progressPercent, 0, 100) / 100),
-					           (std::max)(0, bar.height - 2)},
-					          chromeChecked);
-				}
-				const int sliderWidth = scale_metric(150, dpi_);
-				int x = bounds.width - sliderWidth - scale_metric(8, dpi_);
-				for (const auto& item : statusToolbar_)
-				{
-					if (item.kind == ToolbarItemKind::separator)
-					{
-						x -= scale_metric(8, dpi_);
-						continue;
-					}
-					if (!item.command) continue;
-					const int width = command_width(draw, item.command);
-					x -= width;
-					const app::recti hit{x, 0, width, bounds.height};
-					const bool enabled = !item.command->enabled || item.command->enabled();
-					const bool checked = item.command->checked && item.command->checked();
-					if (checked) draw.fill(hit, chromeChecked);
-					draw.text(toolbar_label(*item.command), hit, enabled ? chromeText : chromeDisabled,
-					          TextFormat::center | TextFormat::verticalCenter | TextFormat::singleLine |
-					              TextFormat::endEllipsis,
-					          font_);
-					statusHits_.push_back({hit, item.command, item.menuItems, {}});
-				}
-				const app::recti slider{bounds.width - sliderWidth, 0, sliderWidth, bounds.height};
-				statusHits_.push_back({slider, {}, {}, {}});
 			}
 
 			WindowFramePtr owner_;
 			WindowFramePtr top_;
 			WindowFramePtr statusFrame_;
 			FontPtr font_;
+			FontPtr iconFont_;
 			std::vector<Menu> menus_;
 			std::vector<ToolbarItem> toolbar_;
 			std::vector<ToolbarItem> taskToolbar_;
@@ -437,16 +635,27 @@ namespace iw::platform
 			std::vector<Hit> topHits_;
 			std::vector<Hit> statusHits_;
 			CommandPtr hoverCommand_;
+			app::recti hoverBreadcrumb_;
+			app::recti sliderBounds_;
+			std::uint64_t folderMenuGeneration_{};
 			int thumbnailSize_{128};
-			unsigned int dpi_{96};
+			unsigned int dpi_{};
 			bool taskActive_{};
 			bool fullscreen_{};
+			bool sliderDragging_{};
 		};
 
 		MessageResult ChromeReactor::mouse(const WindowFramePtr& frame, const MouseMessage message,
 		                                   const MouseInput& input)
 		{
 			if (const auto owner = owner_.lock()) return owner->mouse(frame, message, input);
+			return 0;
+		}
+
+		MessageResult ChromeReactor::message(const WindowFramePtr&, const WindowMessage message)
+		{
+			if (message == WindowMessage::captureLost)
+				if (const auto owner = owner_.lock()) owner->capture_lost();
 			return 0;
 		}
 

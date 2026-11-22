@@ -51,7 +51,7 @@ namespace iw
 		TaskView(const TaskView&) = delete;
 		TaskView& operator=(const TaskView&) = delete;
 
-		bool create(const platform::WindowFramePtr& parent, Host host);
+		bool create(const platform::WindowFramePtr& parent, Host host, bool reuseFrame = false);
 		platform::WindowFramePtr frame() const { return frame_; }
 		void set_dpi(unsigned int dpi);
 		void set_bounds(app::recti bounds);
@@ -69,6 +69,7 @@ namespace iw
 		void analyze();
 		virtual void start_run();
 		void cancel();
+		void escape();
 
 		// False vetoes the close, which is how a running task keeps itself alive.
 		virtual bool request_close();
@@ -104,6 +105,9 @@ namespace iw
 		virtual std::wstring review_cell(const tasks::TaskRow& row, size_t column) const;
 		// Positions the drawn edits or the video the view shows over its own drawing.
 		virtual void layout_hosted_controls() {}
+		virtual void release_hosted_controls() {}
+		virtual int tool_panel_width() const { return 300; }
+		virtual bool panel_shows_targets() const { return uses_plan(); }
 
 		// False means the view has no reviewed plan, so no analysis and no runner.
 		virtual bool uses_plan() const { return true; }
@@ -112,6 +116,7 @@ namespace iw
 		virtual void draw_content(const ui::CanvasRenderer& renderer, app::recti bounds);
 		virtual bool content_mouse(platform::MouseMessage message, const platform::MouseInput& input);
 		virtual bool content_key(const platform::KeyInput& input);
+		virtual bool content_key_first(const platform::KeyInput&) const { return false; }
 		virtual bool content_dragging() const { return false; }
 		// The panel raises anything needing a window; the base handles folder pickers and choices.
 		virtual void control_activated(ui::Control& control);
@@ -186,6 +191,7 @@ namespace iw
 		size_t runningRow_{};
 		size_t completed_{};
 		size_t total_{};
+		int rowHeight_{};
 		bool analyzing_{};
 		bool running_{};
 		bool cancelling_{};
@@ -194,6 +200,7 @@ namespace iw
 		bool optionsChangedDuringRun_{};
 		bool trackingMouse_{};
 		bool panelCapture_{};
+		bool ownsFrame_{};
 		ui::VerticalScroll* draggedScroll_{};
 		int scrollGrab_{};
 		platform::CommandPtr runCommand_;

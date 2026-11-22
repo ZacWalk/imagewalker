@@ -8,6 +8,7 @@
 #pragma once
 
 #include "ViewDialogs.h"
+#include "ViewPaneTheme.h"
 
 inline void PopulateSearchByDateCombos(CComboBox &comboMonth, CComboBox &comboYear)
 {
@@ -118,6 +119,7 @@ public:
 
 	// Set by the pane before the dialog is created; the panel drives the search itself.
 	FolderState *_pFolder;
+	IW::Skin::PaneTheme _paneTheme;
 
 	CSearchPanelDlg() : _pFolder(nullptr)
 	{
@@ -132,6 +134,8 @@ public:
 		COMMAND_ID_HANDLER(ID_SEARCH_STOP, OnStop)
 		COMMAND_ID_HANDLER(ID_VIEW_REFRESHX, OnStop)
 		COMMAND_ID_HANDLER(IDC_SEARCH_ADV, OnAdvanced)
+
+		CHAIN_MSG_MAP_MEMBER(_paneTheme)
 
 	ALT_MSG_MAP(1)
 
@@ -152,12 +156,8 @@ public:
 		if (hWndFocus != m_hWnd && !IsChild(hWndFocus))
 			return false;
 
-		if (pMsg->message == WM_KEYDOWN && pMsg->wParam == VK_RETURN)
-		{
-			Search(Search::Current);
-			return true;
-		}
-
+		// In particular, Enter belongs to an open drop-down or the focused
+		// button. Search Current is already the template's default button.
 		return IsDialogMessage(pMsg) != FALSE;
 	}
 
@@ -229,6 +229,10 @@ public:
 
 		CComboBox comboMonth = GetDlgItem(IDC_MONTH);
 		CComboBox comboYear = GetDlgItem(IDC_YEAR);
+
+		IW::Skin::PaneTheme::AttachDropDownList(comboSize);
+		IW::Skin::PaneTheme::AttachDropDownList(comboMonth);
+		IW::Skin::PaneTheme::AttachDropDownList(comboYear);
 
 		PopulateSearchByDateCombos(comboMonth, comboYear);
 		

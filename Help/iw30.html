@@ -3,15 +3,29 @@
 <title>ImageWalker 3.0</title><link rel="stylesheet" type="text/css" href="iw.css"></head>
 <body><h1>ImageWalker 3.0</h1>
 <p>Choose Browse to view the current folder. The mode strip opens Convert,
-Rename, Edit and Sync; pressing an active mode returns to Browse. Folders
-toggles the folder tree, and Full screen hides the browsing chrome.</p>
+Rename, Edit and Sync and hides while a task is open. Close or Escape returns
+to Browse, with a prompt if a draft or an operation is still active. Folders
+toggles the folder tree.</p>
+<p>Hover over a toolbar icon to read its command in the status bar. Click a
+folder in the path next to the toolbar to return to it, or click its
+chevron (&gt;) to choose a subfolder. When the path is too wide, the ellipsis
+opens the earlier folders. Fit and Zoom are in the status bar alongside the
+thumbnail size slider.</p>
+<p>Enter opens the focused folder or shows a photo full screen. F11 toggles
+full screen; once there, Enter advances to the next photo. Drag the size
+slider above the filmstrip to resize thumbnails. The arrow shows or hides
+the filmstrip. Blue ticks on its scrollbar show where the selected photos
+are in the folder. Alt+Left and Alt+Right go Back and Forward; Alt+Up opens the
+parent folder.</p>
 <p>Photos are shown upright, following the orientation the camera recorded.</p>
+<p>ImageWalker follows the Windows app colour setting, using a dark palette in
+Dark mode and a light palette in Light mode. Windows contrast themes take priority.</p>
 <h2>File workflows</h2><ul>
 <li><a href="iw30-openwith.html">Open with an application or configured tool</a></li>
 <li><a href="iw30-transfer.html">Copy or move files and sidecars</a></li>
 <li><a href="iw30-convert.html">Convert or resize images</a></li>
 <li><a href="iw30-rename.html">Batch rename</a></li>
-<li><a href="iw30-edit.html">Photo Edit</a></li>
+<li><a href="iw30-edit.html">Edit photos, video and audio</a></li>
 <li><a href="iw30-sync.html">Synchronize folders</a></li></ul>
 <p>Convert, Rename and Sync require a reviewed plan. Analyze reads the sources,
 Review lists every proposed action, and Run performs that snapshot. Changing
@@ -22,18 +36,25 @@ Success, Failed, Skipped and Not run outcomes before repeating a batch.
 Closing a busy task asks whether to cancel; Close returns to Browse, not Exit.</p>
 <p>Settings and the latest-run diagnostic log are kept beside the executable.
 The Debug executable has separate settings and log files.</p>
-<p>Double-click a video or audio file, or press Enter, to open its playback
-task. A single selection previews its poster and properties. Play/Pause, Stop,
-seek and volume use the installed Windows media components; unavailable
-components are reported without disabling image browsing.</p>
+<p>Double-click a video or audio file, or press Enter or Space, to play it
+in Browse without leaving the item list. Space plays or pauses; F7 mutes or
+unmutes. Choose Sound to set the playback volume, or use the timeline to seek.
+Escape stops playback and returns to the poster; selecting another item also
+stops playback. If Photos Only is on, turn it off to browse for audio and
+video.</p>
+<p>ImageWalker has built-in decoders for common formats such as H.264 and
+HEVC video, VP8 and VP9, MP3, AAC, FLAC and Opus. It uses Windows playback
+codecs as a fallback where available. To hear sound, select an enabled
+Windows audio output.</p>
 <h2>Undo and recovery</h2>
-<p>Edit &gt; Undo (Ctrl+Z) undoes a Photo Edit draft, or the latest completed
+<p>Edit &gt; Undo (Ctrl+Z) undoes a photo or media edit draft, or the latest completed
 file task after the task view is closed. File Undo asks for confirmation and
 refuses externally changed files. It covers Convert, Rename, Sync, the
-Copy/Move dialog and Photo Edit saves; Windows shell clipboard/drop and Recycle
+Copy/Move dialog and Edit saves; Windows shell clipboard/drop and Recycle
 Bin actions use Windows recovery instead.</p>
 <p class="note">Automatic Undo lasts for the current session. Original bytes
 and recovery manifests remain in imagewalker30.undo beside the executable after
 exit or a crash, but are not replayed automatically or removed automatically.
 Keep these copies until you no longer need recovery.</p>
-<p><a href="index.html">Help for earlier versions</a></p></body></html>
+<p><a href="support.html">Get support or report a problem</a>.
+<a href="index.html">Help for earlier versions</a>.</p></body></html>

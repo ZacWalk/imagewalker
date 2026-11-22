@@ -1,5 +1,5 @@
 // ImageWalker by Zac Walker
-// Native media probing, poster decoding and playback decoding; no network or downloaded codecs.
+// Local media probing, poster decoding and playback; no network or downloaded codecs.
 
 #pragma once
 
@@ -83,7 +83,7 @@ namespace iw::media
 		Decoder(const Decoder&) = delete;
 		Decoder& operator=(const Decoder&) = delete;
 
-		bool open(const std::filesystem::path& path);
+		bool open(const std::filesystem::path& path, const std::stop_token& stop = {});
 		// Converts the audio to format, resampling it; false leaves the file silent.
 		bool decode_audio(const AudioFormat& format);
 		const std::wstring& error() const;
@@ -91,6 +91,7 @@ namespace iw::media
 		bool has_video() const;
 		// The file has sound, decoded or not.
 		bool has_audio() const;
+		const std::wstring& notice() const;
 		bool can_seek() const;
 		std::optional<std::int64_t> duration() const;
 

@@ -218,17 +218,20 @@ namespace iw::tests
 		                                                                          : color{};
 		reporter.check(centre.r > 180 && centre.g > 120 && centre.b < 100 && centre.a == 255,
 		               L"the folder glyph is the application's folder picture scaled to its row");
+		reporter.check(glyph && surface_pixel(*glyph, 0, 0) == color{0, 0, 0, 0},
+		               L"the folder icon's corners remain transparent after scaling, including on dark backgrounds");
 
 		draw.reset();
 		view->on_mouse_move({100, line(1).top + row / 2}, false);
 		view->paint(draw, false);
-		reporter.check(filled(line(2), {217, 217, 217}) && !filled(line(2), highlight) &&
-		                   filled(line(1), {229, 241, 251}),
+		const auto quietSelection = platform::system_color(platform::SystemColor::checked);
+		const auto hover = platform::system_color(platform::SystemColor::hover);
+		reporter.check(filled(line(2), quietSelection) && !filled(line(2), highlight) && filled(line(1), hover),
 		               L"a tree without the keyboard shows its selection quietly, and the row under the pointer");
 		draw.reset();
 		view->on_mouse_leave();
 		view->paint(draw, false);
-		reporter.check(!filled(line(1), {229, 241, 251}), L"the pointer leaving the tree clears its row");
+		reporter.check(!filled(line(1), hover), L"the pointer leaving the tree clears its row");
 
 		TestControlHost host;
 		host.tree->elements.push_back(view);

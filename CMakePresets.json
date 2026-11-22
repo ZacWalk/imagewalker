@@ -32,6 +32,16 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" }
     },
     {
+      "name": "x86-release",
+      "inherits": "base",
+      "displayName": "x86 Release",
+      "architecture": { "value": "x86", "strategy": "external" },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "IW_OUTPUT_DIR": { "type": "PATH", "value": "${sourceDir}/exe/x86" }
+      }
+    },
+    {
       "name": "vs",
       "displayName": "Visual Studio 2026 (x64) - .sln for IDE debugging",
       "generator": "Visual Studio 18 2026",
@@ -51,12 +61,14 @@
   "buildPresets": [
     { "name": "x64-debug", "configurePreset": "x64-debug" },
     { "name": "x64-release", "configurePreset": "x64-release" },
+    { "name": "x86-release", "configurePreset": "x86-release" },
     { "name": "vs-debug", "configurePreset": "vs", "configuration": "Debug" },
     { "name": "vs-release", "configurePreset": "vs", "configuration": "RelWithDebInfo" }
   ],
   "testPresets": [
     { "name": "x64-debug", "configurePreset": "x64-debug", "output": { "outputOnFailure": true, "verbosity": "verbose" } },
     { "name": "x64-release", "configurePreset": "x64-release", "output": { "outputOnFailure": true, "verbosity": "verbose" } },
+    { "name": "x86-release", "configurePreset": "x86-release", "output": { "outputOnFailure": true, "verbosity": "verbose" } },
     { "name": "vs-debug", "configurePreset": "vs", "configuration": "Debug", "output": { "outputOnFailure": true, "verbosity": "verbose" } },
     { "name": "vs-release", "configurePreset": "vs", "configuration": "RelWithDebInfo", "output": { "outputOnFailure": true, "verbosity": "verbose" } }
   ]

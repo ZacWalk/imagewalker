@@ -122,9 +122,9 @@ namespace iw::imaging
 	const wchar_t* image_save_format_name(ImageSaveFormat format);
 	const wchar_t* image_save_extension(ImageSaveFormat format);
 
-	// The caller owns this temporary file and decides whether and how to publish it.
-	OperationResult encode_to_file(const PixelImage& image, const std::filesystem::path& temporary,
-	                               ImageSaveFormat format, const SaveOptions& options = {});
+	// The caller owns the output and decides whether and how to publish it.
+	OperationResult encode(const PixelImage& image, ImageSaveFormat format, const SaveOptions& options,
+	                       const std::function<bool(std::span<const std::uint8_t>)>& write);
 }
 
 #include <iw/imaging/detail/Codec.h>

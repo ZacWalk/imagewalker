@@ -25,6 +25,8 @@ CDibDC::~CDibDC()
 {
 	if (m_h)
 		SelectObject(m_h);
+	if (m_hDC)
+		::DeleteDC(m_hDC);
 }
 
 
@@ -35,18 +37,26 @@ BOOL CDibDC::Create(int x, int y, int bpp)
 		if (m_h)
 			SelectObject(m_h);
 
-		// Detach() already clears m_hDC.
-		::DeleteDC(Detach());
+		::DeleteDC(m_hDC);
+		m_hDC = nullptr;
 		m_h = nullptr;
 	}
 
 	if (!m_dib.Create(x, y, bpp, TRUE))
 		return FALSE;
 
-	if (!CreateCompatibleDC(nullptr))
+	m_hDC = ::CreateCompatibleDC(nullptr);
+	if (!m_hDC)
 		return FALSE;
 
 	m_h = SelectObject(m_dib.GetHBitmap());
+	if (!m_h || m_h == HGDI_ERROR)
+	{
+		::DeleteDC(m_hDC);
+		m_hDC = nullptr;
+		m_h = nullptr;
+		return FALSE;
+	}
 	SetBkMode(TRANSPARENT);
 
 	// Default Clipping
@@ -55,6 +65,15 @@ BOOL CDibDC::Create(int x, int y, int bpp)
 	return TRUE;
 }
 
+BOOL CDibDC::EnsurePaintBuffer(CSize size)
+{
+	if (m_hDC && m_dib.IsOpen() && static_cast<int>(m_dib.Width()) >= size.cx &&
+		static_cast<int>(m_dib.Height()) >= size.cy)
+		return TRUE;
+
+	const auto reserve = [](LONG pixels) { return pixels < INT_MAX - 127 ? ((pixels + 127) / 128) * 128 : pixels; };
+	return Create(reserve(size.cx), reserve(size.cy), 24) || Create(size.cx, size.cy, 24);
+}
 
 void Blend24(BYTE* destination, UINT source)
 {
@@ -92,12 +111,12 @@ public:
 		if (!m_pLineIn)
 			throw E_OUTOFMEMORY;
 
-		m_pByte = pDibSrc->GetBitmap(rectClip.top - point.y);
+		this->m_pByte = pDibSrc->GetBitmap(rectClip.top - point.y);
 
 		for (UINT y = 0; y < nHeight; y++)
 		{
 			auto pDst = pDibDst->GetBitmap(rectClip.left, rectClip.top + y);
-			GetLine(m_pLineIn, static_cast<LPBYTE>(ScanLine()), uStart, nWidth + uStart);
+			this->GetLine(m_pLineIn, this->ScanLine(), uStart, nWidth + uStart);
 			auto pSrc = (BYTE*)m_pLineIn;
 
 			for (UINT x = 0; x < nWidth; x += 1)
@@ -170,9 +189,9 @@ void CDibDC::Draw(CDib& dib, CPoint point)
 }
 
 
-void CDibDC::Draw(LPRECT pRect, unsigned rgb)
+void CDibDC::Draw(const RECT& rect, unsigned rgb)
 {
-	CRect rectDst(pRect);
+	CRect rectDst(rect);
 	rectDst += GetViewportOrg();
 
 	CRect r;
@@ -226,16 +245,17 @@ public:
 		UINT nTop = rectDraw.top - rectDst.top;
 		UINT nLeft = rectDraw.left - rectDst.left;
 
-		m_pRgb = (COLORREF*)dibSrc.GetColor();
+		this->m_pRgb = (COLORREF*)dibSrc.GetColor();
 
 		for (UINT y = 0; y < nHeightDraw; y++)
 		{
 			LPBYTE pLineDst = dibDst.GetBitmap(rectDraw.left, rectDraw.top + y);
-			LPBYTE pLineSrc = dibSrc.GetBitmap(((y + nTop) * nHeightSrc) / nHeightDst);
+			LPBYTE pLineSrc = dibSrc.GetBitmap(static_cast<UINT>(std::uint64_t{y + nTop} * nHeightSrc / nHeightDst));
 
 			for (UINT x = 0; x < nWidthDraw; x++)
 			{
-				UINT u = GetPixel(pLineSrc, ((x + nLeft) * nWidthSrc) / nWidthDst);
+				const UINT source = static_cast<UINT>(std::uint64_t{x + nLeft} * nWidthSrc / nWidthDst);
+				const UINT u = this->GetPixel(pLineSrc, source);
 				Blend24(pLineDst, u);
 				pLineDst += 3;
 			}

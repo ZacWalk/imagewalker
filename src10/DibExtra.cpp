@@ -2,8 +2,7 @@
 #include "Dib.h"
 #include "LoadAny.h"
 #include "iw/logfile.h"
-#include <iw/imaging/Document.h>
-#include <iw/imaging/ImageEdits.h>
+#include <libfiles/document.h>
 
 // Members that ImageWalker 1.0's copy of dib.lib had and 1.05's does not. That library's
 // sources are not in the repository at any revision, so these are written from
@@ -34,21 +33,13 @@ BOOL CDib::Set(CDib* pDib)
 	return IsOpen();
 }
 
-CFontHandle* CDibDC::SelectObject(HFONT hFont)
-{
-	if (hFont == nullptr)
-		return nullptr;
-
-	m_fontOld = SelectFont(hFont);
-	return &m_fontOld;
-}
-
 // The scrolled origin, so tiling and drawing line up with the scroll position.
 void CDibDC::SetMapping(CPoint pointScroll, CRect rect)
 {
 	m_pointMapping = pointScroll;
 	m_rectMapping = rect;
 	SetViewportOrg(-pointScroll.x, -pointScroll.y);
+	SetClip(rect);
 }
 
 void CDibDC::Tile(CDib& dib, CPoint pointOffset)
@@ -87,6 +78,41 @@ CDibScale::~CDibScale()
 {
 }
 
+namespace
+{
+	struct Sample
+	{
+		unsigned first, second, weight;
+	};
+
+	Sample Locate(unsigned x, unsigned source, unsigned target)
+	{
+		const double center = (static_cast<double>(x) + 0.5) * source / target - 0.5;
+		const double position = std::clamp(center, 0.0, static_cast<double>(source - 1));
+		const auto first = static_cast<unsigned>(position);
+		return {first, min(first + 1, source - 1), static_cast<unsigned>((position - first) * 256 + 0.5)};
+	}
+
+	std::uint32_t Interpolate(const std::uint32_t (&colors)[4], unsigned x, unsigned y)
+	{
+		const unsigned weights[] = {(256 - x) * (256 - y), x * (256 - y), (256 - x) * y, x * y};
+		unsigned alpha = 0, blue = 0, green = 0, red = 0;
+		for (unsigned i = 0; i < 4; ++i)
+		{
+			// Interpolate with alpha-weighted RGB so transparent edges do not bleed.
+			const unsigned a = weights[i] * (colors[i] >> 24);
+			alpha += a;
+			blue += a * (colors[i] & 255);
+			green += a * ((colors[i] >> 8) & 255);
+			red += a * ((colors[i] >> 16) & 255);
+		}
+		if (!alpha) return 0;
+		const unsigned half = alpha / 2;
+		return ((alpha + 32768) >> 16) << 24 | ((red + half) / alpha) << 16 |
+			((green + half) / alpha) << 8 | (blue + half) / alpha;
+	}
+}
+
 BOOL CDibScale::Scale(CDib& dibSrc, CSize sizeDst, CStatus* pStatus)
 {
 	if (!dibSrc.IsOpen() || sizeDst.cx <= 0 || sizeDst.cy <= 0)
@@ -95,6 +121,10 @@ BOOL CDibScale::Scale(CDib& dibSrc, CSize sizeDst, CStatus* pStatus)
 		return FALSE;
 	}
 	if (pStatus && pStatus->Exit()) return FALSE;
+	// The display can scale the visible portion directly when this optional cache is too large.
+	constexpr std::uint64_t maxCachedPixels = 256ull * 1024 * 1024 / sizeof(std::uint32_t);
+	if (static_cast<std::uint64_t>(sizeDst.cx) * sizeDst.cy > maxCachedPixels)
+		return FALSE;
 	try
 	{
 		using Format = libfiles::document_storage;
@@ -102,8 +132,6 @@ BOOL CDibScale::Scale(CDib& dibSrc, CSize sizeDst, CStatus* pStatus)
 		frame.width = static_cast<std::uint32_t>(dibSrc.Width());
 		frame.height = static_cast<std::uint32_t>(dibSrc.Height());
 		frame.stride = static_cast<std::size_t>(dibSrc.m_nStorageWidth);
-		frame.bottom_up = true;
-		frame.pixels = {dibSrc.GetBitmap(), frame.stride * frame.height};
 		switch (dibSrc.Bpp())
 		{
 		case 1: frame.storage = Format::indexed1; break;
@@ -118,18 +146,52 @@ BOOL CDibScale::Scale(CDib& dibSrc, CSize sizeDst, CStatus* pStatus)
 		}
 		if (dibSrc.Bpp() <= 8)
 			frame.palette = {reinterpret_cast<const std::uint32_t*>(dibSrc.GetColor()), size_t{1} << dibSrc.Bpp()};
-		auto source = iw::imaging::pixels_from_rows(frame);
-		auto scaled = iw::edits::resize_image(source, {sizeDst.cx, sizeDst.cy});
-		if (pStatus && pStatus->Exit()) return FALSE;
 		CDib result;
-		if (scaled.pixels.empty() || !result.Create(scaled.width, scaled.height, 32, FALSE))
-		{
-			IW::Logging::Error(_T("Unable to allocate the scaled image"));
+		if (!result.Create(sizeDst.cx, sizeDst.cy, 32, FALSE))
 			return FALSE;
+
+		std::vector<Sample> columns(result.Width());
+		for (unsigned x = 0; x < result.Width(); ++x) columns[x] = Locate(x, frame.width, result.Width());
+		std::vector<std::uint32_t> row0(frame.width), row1(frame.width);
+		const auto read = [&](unsigned y, std::vector<std::uint32_t>& row)
+		{
+			auto single = frame;
+			single.height = 1;
+			single.pixels = {dibSrc.GetBitmap(y), frame.stride};
+			libfiles::copy_bgra(single, row, frame.width, false);
+		};
+		unsigned first = UINT_MAX, second = UINT_MAX;
+		for (unsigned y = 0; y < result.Height(); ++y)
+		{
+			if (pStatus && pStatus->Status(static_cast<int>(y), sizeDst.cy)) return FALSE;
+			const auto vertical = Locate(y, frame.height, result.Height());
+			if (vertical.first != first)
+			{
+				if (vertical.first == second)
+				{
+					row0.swap(row1);
+					second = first;
+				}
+				else
+					read(vertical.first, row0);
+				first = vertical.first;
+			}
+			if (vertical.second != first && vertical.second != second)
+			{
+				read(vertical.second, row1);
+				second = vertical.second;
+			}
+			const auto& lower = vertical.second == first ? row0 : row1;
+			auto* row = reinterpret_cast<std::uint32_t*>(result.GetBitmap(y));
+			for (unsigned x = 0; x < result.Width(); ++x)
+			{
+				const auto horizontal = columns[x];
+				const std::uint32_t colors[] = {row0[horizontal.first], row0[horizontal.second],
+				                                lower[horizontal.first], lower[horizontal.second]};
+				row[x] = Interpolate(colors, horizontal.weight, vertical.weight);
+			}
 		}
-		for (int y = 0; y < scaled.height; ++y)
-			memcpy(result.GetBitmap(y), scaled.pixels.data() + static_cast<size_t>(y) * scaled.width,
-				static_cast<size_t>(scaled.width) * 4);
+		if (pStatus && pStatus->Exit()) return FALSE;
 		result.m_sizeOriginal = dibSrc.OriginalSize();
 		result.m_strInfo = dibSrc.m_strInfo;
 		m_dib.Attach(result);

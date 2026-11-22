@@ -276,12 +276,12 @@ public:
 	void ShowSearchPane() { SetMode(Mode::Search); }
 	void StartSearch(Search::Type type) { _searchPane.GetDialog().Search(type); }
 	void SignalImageLoadComplete(CImageLoad *pInfo);
-	void SignalSearching();
-	void SignalSearchingComplete();
-	void SignalSearchingFolder(const CString &strPath);
+	void SignalSearching(UINT_PTR generation);
+	void SignalSearchingComplete(UINT_PTR generation);
+	void SignalSearchingFolder(const CString &strPath, UINT_PTR generation);
 	void SignalThumbnailing();
 	void SignalThumbnailingComplete();
-	void PostFromWorker(UINT msg);
+	void PostFromWorker(UINT msg, WPARAM wParam = 0);
 	void SortOrderChanged(int order);
 	void StartSearchThread(Search::Type type, const Search::Spec &ss); 
 	void StartSearching();

@@ -1583,11 +1583,8 @@ IW_TEST(ARenameTemplateNumbersAndKeepsTheOriginalName)
 namespace
 {
 
-RENAMEPLAN MakeRenamePlan(LPCTSTR szA, LPCTSTR szB)
+RENAMEPLAN MakeRenamePlan(WorkflowTestFiles &fixture, LPCTSTR szA, LPCTSTR szB)
 {
-	// A folder that is not there, so the "already on disk" test cannot fire and
-	// what is left under test is the template and the clash detection.
-	const CString strFolder = _T("C:\\iw-no-such-folder\\");
 	const LPCTSTR names[] = { szA, szB };
 
 	RENAMEPLAN plan;
@@ -1595,11 +1592,11 @@ RENAMEPLAN MakeRenamePlan(LPCTSTR szA, LPCTSTR szB)
 	for (LPCTSTR sz : names)
 	{
 		RenameItem item;
-		item.strFolder = strFolder;
+		item.strFolder = fixture.folder;
 		item.strBase = sz;
 		item.strExt = _T(".jpg");
 		item.strName = item.strBase + item.strExt;
-		item.strPath = strFolder + item.strName;
+		item.strPath = fixture.Path(item.strName);
 		plan.push_back(item);
 	}
 
@@ -1610,66 +1607,57 @@ RENAMEPLAN MakeRenamePlan(LPCTSTR szA, LPCTSTR szB)
 
 IW_TEST(TheRenamePreviewRefusesNamesThatWouldCollide)
 {
-	// Two files, one name. Renaming one and skipping the other is not a decision
-	// to take on the user's behalf, so it stops the run instead -- and BOTH rows
-	// say so, because the clean-looking one is where the user would go to look.
-	RENAMEPLAN same = MakeRenamePlan(_T("a"), _T("b"));
+	WorkflowTestFiles fixture;
+	IW_CHECK(!fixture.folder.IsEmpty());
+	if (fixture.folder.IsEmpty()) return;
+
+	RENAMEPLAN same = MakeRenamePlan(fixture, _T("a"), _T("b"));
 	BuildRenamePlan(same, _T("fixed"), 1);
 	IW_CHECK(!same[0].strProblem.IsEmpty());
 	IW_CHECK(!same[1].strProblem.IsEmpty());
 
 	// A character the file system will not take.
-	RENAMEPLAN bad = MakeRenamePlan(_T("a"), _T("b"));
+	RENAMEPLAN bad = MakeRenamePlan(fixture, _T("a"), _T("b"));
 	BuildRenamePlan(bad, _T("a:b#"), 1);
 	IW_CHECK(!bad[0].strProblem.IsEmpty());
+	BuildRenamePlan(bad, _T("NUL"), 1);
+	IW_CHECK(!bad[0].strProblem.IsEmpty());
 
-	// Shifting the numbering means every new name is one that another file in the
-	// run holds right now. That is fine -- the rename goes through temporary
-	// names -- and calling it a clash would break the commonest use there is.
-	RENAMEPLAN shifted = MakeRenamePlan(_T("1"), _T("2"));
+	// Shifting the numbering must not move existing originals out of the way.
+	RENAMEPLAN shifted = MakeRenamePlan(fixture, _T("1"), _T("2"));
+	IW_CHECK(WriteWorkflowMarker(shifted[0].strPath, 'A'));
+	IW_CHECK(WriteWorkflowMarker(shifted[1].strPath, 'B'));
 	BuildRenamePlan(shifted, _T("#"), 2);
 	IW_CHECK(shifted[0].strNewName == CString(_T("2.jpg")));
 	IW_CHECK(shifted[1].strNewName == CString(_T("3.jpg")));
-	IW_CHECK(shifted[0].strProblem.IsEmpty());
+	IW_CHECK(!shifted[0].strProblem.IsEmpty());
 	IW_CHECK(shifted[1].strProblem.IsEmpty());
+	IW_CHECK_EQ(CopyRenamePlan(shifted).nCopied, 0u);
+	IW_CHECK_EQ(ReadWorkflowMarker(shifted[1].strPath), 'B');
 }
 
-// The name that is already taken is the only rule in the plan that looks at the
-// disk, and it is what stops a rename landing on somebody else's file.
-IW_TEST(TheRenamePreviewSeesANameThatIsAlreadyTaken)
+IW_TEST(RenamedCopiesLeaveLateArrivalsAndOriginalsUntouched)
 {
-	TCHAR szTempDir[MAX_PATH] = { 0 };
-	::GetTempPath(MAX_PATH, szTempDir);
+	WorkflowTestFiles fixture;
+	IW_CHECK(!fixture.folder.IsEmpty());
+	if (fixture.folder.IsEmpty()) return;
 
-	const CString strFolder = IW::Path::Combine(szTempDir, _T("iw-rename-test"));
-	::CreateDirectory(strFolder, nullptr);
+	RENAMEPLAN plan = MakeRenamePlan(fixture, _T("a"), _T("b"));
+	IW_CHECK(WriteWorkflowMarker(plan[0].strPath, 'A'));
+	IW_CHECK(WriteWorkflowMarker(plan[1].strPath, 'B'));
+	BuildRenamePlan(plan, _T("New #"), 1);
+	IW_CHECK(plan[0].strProblem.IsEmpty() && plan[1].strProblem.IsEmpty());
+	const CString first = fixture.Path(_T("New 1.jpg"));
+	const CString late = fixture.Path(_T("New 2.jpg"));
+	IW_CHECK(WriteWorkflowMarker(late, 'L'));
 
-	const CString strTaken = IW::Path::Combine(strFolder, _T("taken.jpg"));
-
-	{
-		IW::CFile f;
-		IW_CHECK(f.OpenForWrite(strTaken));
-	}
-
-	RENAMEPLAN plan;
-	RenameItem item;
-	item.strFolder = strFolder;
-	item.strBase = _T("b");
-	item.strExt = _T(".jpg");
-	item.strName = _T("b.jpg");
-	item.strPath = IW::Path::Combine(strFolder, item.strName);
-	plan.push_back(item);
-
-	BuildRenamePlan(plan, _T("taken"), 1);
-	IW_CHECK(plan[0].strNewName == CString(_T("taken.jpg")));
-	IW_CHECK(!plan[0].strProblem.IsEmpty());
-
-	// And free again the moment nothing holds it.
-	::DeleteFile(strTaken);
-	BuildRenamePlan(plan, _T("taken"), 1);
-	IW_CHECK(plan[0].strProblem.IsEmpty());
-
-	::RemoveDirectory(strFolder);
+	const RenameCopyResult result = CopyRenamePlan(plan);
+	IW_CHECK_EQ(result.nCopied, 1u);
+	IW_CHECK(result.strFailed == late);
+	IW_CHECK_EQ(ReadWorkflowMarker(first), 'A');
+	IW_CHECK_EQ(ReadWorkflowMarker(late), 'L');
+	IW_CHECK_EQ(ReadWorkflowMarker(plan[0].strPath), 'A');
+	IW_CHECK_EQ(ReadWorkflowMarker(plan[1].strPath), 'B');
 }
 
 // The Convert tool hands whatever the decoder produced straight to the encoder,

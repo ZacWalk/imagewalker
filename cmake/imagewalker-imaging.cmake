@@ -26,7 +26,7 @@ set_source_files_properties("${PROJECT_SOURCE_DIR}/tests/imaging/legacy.cpp"
     PROPERTIES COMPILE_OPTIONS "/EHs;/permissive;/wd4996;/wd4100;/wd4239")
 add_test(NAME imagewalker-imaging COMMAND imagewalker_imaging_tests)
 set_tests_properties(imagewalker-imaging PROPERTIES TIMEOUT 120
-    LABELS "imagewalker-imaging;iw10;iw20;iw22;iw23;iw30;headless")
+    LABELS "imagewalker-imaging;iw20;iw22;iw23;iw30;headless")
 
 add_executable(imagewalker_headers_tests
     "${PROJECT_SOURCE_DIR}/tests/imaging/header-main.cpp"
@@ -42,10 +42,10 @@ set_source_files_properties(
     PROPERTIES COMPILE_OPTIONS "/permissive;/wd4996;/wd4100;/wd4239")
 add_test(NAME imagewalker-headers COMMAND imagewalker_headers_tests)
 set_tests_properties(imagewalker-headers PROPERTIES TIMEOUT 120
-    LABELS "imagewalker-imaging;iw10;iw20;iw22;iw23;iw30;headless")
+    LABELS "imagewalker-imaging;iw20;iw22;iw23;iw30;headless")
 
 add_test(NAME imagewalker-boundary COMMAND "${CMAKE_COMMAND}"
     "-DIW_SOURCE_DIR=${PROJECT_SOURCE_DIR}" -P
     "${PROJECT_SOURCE_DIR}/tests/imaging/check-boundary.cmake")
 set_tests_properties(imagewalker-boundary PROPERTIES TIMEOUT 120
-    LABELS "imagewalker-imaging;iw10;iw20;iw22;iw23;iw30;headless")
+    LABELS "imagewalker-imaging;iw20;iw22;iw23;iw30;headless")

@@ -174,15 +174,16 @@ public:
 
 CDibScale *CreateScale(CDib &dib, CSize sizeDst, CStatus *pStatus);
 
-class CDibDC : public CDC  
+class CDibDC : public GdiDraw
 {
 public:
    CDibDC();
    virtual ~CDibDC();
 
    BOOL Create(int x, int y, int bpp);
+   BOOL EnsurePaintBuffer(CSize size);
    
-   void Draw(LPRECT pRect, unsigned rgb);
+   void Draw(const RECT& rect, unsigned rgb);
    void Draw(CDib &dib, CPoint point);
    void Draw(CDib &dib, CRect r);
    void Draw(CDib &dib, CRect r, CDibScale *pScale);
@@ -191,18 +192,12 @@ public:
    
    void SetMapping(CPoint pointScroll, CRect rect);
    
-   CFontHandle *SelectObject(HFONT hFont);
-
-   // The MFC-shaped members WTL does not carry: CDC has no SelectObject, and
-   // its GetViewportOrg fills an out parameter instead of returning the point.
    HGDIOBJ SelectObject(HGDIOBJ hObject) { return ::SelectObject(m_hDC, hObject); }
-
-   using CDC::GetViewportOrg;
 
    CPoint GetViewportOrg() const
    {
       POINT pt = { 0, 0 };
-      CDC::GetViewportOrg(&pt);
+      ::GetViewportOrgEx(m_hDC, &pt);
       return CPoint(pt);
    }
 
@@ -211,24 +206,18 @@ public:
    
    CRect  m_rectMapping;
    
-   // Unmanaged: the DC never owns a font it did not create.
-   CFontHandle m_fontOld;
-   
    CDib  &GetDib() { return m_dib; };
    CRect &GetClip() { return m_rectClip; };
    void  SetClip(const CRect &r) 
    { 
       m_rectClip = r;
 
-      POINT ptOrg = { 0, 0 };
-      GetViewportOrg(&ptOrg);
-
-      CRect rc(r);
-      rc.OffsetRect(ptOrg.x, ptOrg.y);
-
-      CRgn rgn;
-      VERIFY(rgn.CreateRectRgnIndirect(&rc));
-      SelectClipRgn(rgn);
+      const auto region = ::CreateRectRgnIndirect(&r);
+      if (region)
+      {
+         ::SelectClipRgn(m_hDC, region);
+         ::DeleteObject(region);
+      }
    };
    
 protected:
@@ -666,7 +655,7 @@ public:   // 0.00's loaders construct these directly
    CIteratorDibFile(LPBYTE pByte, RGBQUAD *pRgb, CSize size, int nLineOffset)
    {
       m_pByte = pByte;
-      m_pRgb = (COLORREF*)pRgb;
+      this->m_pRgb = (COLORREF*)pRgb;
       m_size = size; 
       m_nLineOffset = nLineOffset;
    }
@@ -674,7 +663,7 @@ public:   // 0.00's loaders construct these directly
    CIteratorDibFile()
    {
       m_pByte = NULL;
-      m_pRgb = NULL;
+      this->m_pRgb = NULL;
       m_size = 0; 
       m_nLineOffset = 0;
    }
@@ -688,7 +677,7 @@ public:
    void Open(LPBYTE pByte, RGBQUAD *pRgb, CSize size, int nLineOffset)
    {
       m_pByte = pByte;
-      m_pRgb = (COLORREF*)pRgb;
+      this->m_pRgb = (COLORREF*)pRgb;
       m_size = size; 
       m_nLineOffset = nLineOffset;
    }
@@ -735,10 +724,7 @@ public:   // 0.00's loaders construct these directly
 public:
    void Open(CDib *pDib)
    {
-      m_pByte = pDib->GetBitmap(0);
-      m_pRgb = (COLORREF*)pDib->GetColor();
-      m_size = pDib->Size(); 
-      m_nLineOffset = -pDib->m_nStorageWidth;
+      CIteratorDibFile<Iterator>::Open(pDib->GetBitmap(0), pDib->GetColor(), pDib->Size(), -pDib->m_nStorageWidth);
    };
 };
 

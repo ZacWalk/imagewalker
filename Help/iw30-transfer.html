@@ -3,11 +3,13 @@
 <title>3.0 Copy and Move</title><link rel="stylesheet" type="text/css" href="iw.css"></head>
 <body><h1>Copy and Move</h1>
 <p>Select files and press Ctrl+Shift+C to copy or Ctrl+Shift+X to move.
-The dialog previews the selection, total size and destination folder.
-Existing .xmp, .thm and .aae companions travel with their primary file.</p>
-<p>Auto-rename is the default when a destination exists. Replace is an explicit
-choice for the entire file-and-sidecar set. Check the destination before
-confirming: a move removes the source after that row succeeds.</p>
+The dialog shows the selection and total size. Type a full folder path to see
+matching subfolders, or use Browse to pick a destination.
+Existing .xmp, .thm and .aae companions travel with their primary file.
+A companion whose stem matches more than one file is left alone.</p>
+<p>If a name is taken, Auto-rename keeps the destination and uses a new name
+for the incoming file and its companions. Check the destination before
+confirming: a move is an explicit request to remove the source after transfer.</p>
 <p>The operation runs to completion; it has no Cancel button. A failed row
 does not hide earlier results. Reopen Last Copy/Move results from the file
 context menu to inspect the outcome.</p>

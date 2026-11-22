@@ -1,6 +1,6 @@
 # Compiler warnings
 
-The four WTL applications compile at `/W4` through `iw_flags`, which allows only
+The three 2.x WTL applications compile at `/W4` through `iw_flags`, which allows only
 these framework and language-mode suppressions:
 
 - `C4100`, unused parameters in fixed WTL handler signatures;
@@ -8,7 +8,7 @@ these framework and language-mode suppressions:
 - `C4131`, old-style C declarations, which no current source needs;
 - `C4996`, the historical CRT calls compiled deliberately.
 
-ImageWalker 3.0 and the modern shared imaging sources compile with
+ImageWalker 1.0, 3.0 and the modern shared imaging sources compile with
 `/permissive-`, `/W4` and no suppressions. Keep the historical exceptions on
 `iw_flags` and the legacy test sources that need them, and never extend them to
 3.0 or the modern imaging sources.

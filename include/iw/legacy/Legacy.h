@@ -180,10 +180,12 @@ inline bool CLoadBmp::Read(const CString& strType, IW::IStreamIn* pStreamIn, IW:
 	{
 		return false;
 	}
-	if (pf.HasPalette())
+	auto page = image.GetFirstPage();
+	const int paletteEntries = page.GetPixelFormat().NumberOfPaletteEntries();
+	if (paletteEntries > 0)
 	{
-		auto palette = image.GetFirstPage().GetPalette();
-		for (UINT i = 0; i < nMaxColors; ++i) palette[i] |= 0xff000000;
+		auto palette = page.GetPalette();
+		for (int i = 0; i < paletteEntries; ++i) palette[i] |= 0xff000000;
 	}
 
 	IW::IterateImage(image, *pImageOut, pStatus);

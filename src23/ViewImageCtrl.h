@@ -211,11 +211,9 @@ public:
 		return 1;
 	}
 
-	void LoadImageFromHGlobal(HGLOBAL hGlobal)
+	bool LoadImageFromHGlobal(HGLOBAL hGlobal)
 	{
-		IW::Image image;
-		image.Copy(hGlobal);
-		_state.Image.SetImage(image, g_szEmptyString);
+		return _state.Image.ImportBitmap(hGlobal);
 	}
 
 	void OnPaint(CDCHandle dc)

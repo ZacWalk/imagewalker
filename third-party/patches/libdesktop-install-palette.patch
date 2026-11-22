@@ -1,0 +1,28 @@
+diff --git a/include/libdesktop/ui/style.h b/include/libdesktop/ui/style.h
+--- a/include/libdesktop/ui/style.h
++++ b/include/libdesktop/ui/style.h
+@@ -60,6 +60,9 @@ namespace ui
+ 
+ 		// Installs the palette. The platform layer calls this once at startup, before anything draws.
+ 		void install(const system_colors& system);
++
++		// Lets an application install its own complete palette on the UI thread.
++		void set_palette(const theme& value);
+ 	}
+ 	// Exponential decay rate for alpha fades, per second. Chosen as -ln(1 - 0.333) * 60 so that a
+ 	// 60Hz frame reproduces exactly the fixed 0.333 per frame this replaced.
+diff --git a/src/ui/ui.cpp b/src/ui/ui.cpp
+--- a/src/ui/ui.cpp
++++ b/src/ui/ui.cpp
+@@ -45,6 +45,11 @@ const ui::chrome_icon_set& ui::chrome_icons()
+ 
+ const ui::style::theme& ui::style::colors = installed_theme;
+ 
++void ui::style::set_palette(const theme& value)
++{
++	installed_theme = value;
++}
++
+ void ui::style::install(const system_colors& system)
+ {
+ 	constexpr core::color32 red = 0xaa2211;

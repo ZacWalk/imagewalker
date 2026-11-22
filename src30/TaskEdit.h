@@ -37,6 +37,7 @@ namespace iw
 
 	protected:
 		bool uses_plan() const override { return false; }
+		int tool_panel_width() const override { return 354; }
 		void build_controls() override;
 		std::vector<Column> review_columns() const override { return {}; }
 		tasks::TaskRunner::AnalyzeFunction make_analyzer() override;
@@ -45,9 +46,14 @@ namespace iw
 		void draw_content(const ui::CanvasRenderer& renderer, app::recti bounds) override;
 		bool content_mouse(platform::MouseMessage message, const platform::MouseInput& input) override;
 		bool content_key(const platform::KeyInput& input) override;
-		bool content_dragging() const override { return cropDrag_ != edits::CropHandle::none || cornerDrag_ >= 0; }
+		bool content_dragging() const override
+		{
+			return draggingCompare_ || cropDrag_ != edits::CropHandle::none || cornerDrag_ >= 0;
+		}
 		void controls_changed() override;
 		void control_activated(ui::Control& control) override;
+		void layout_hosted_controls() override;
+		void release_hosted_controls() override;
 
 	private:
 		friend struct tests::EditAccess;
@@ -75,6 +81,11 @@ namespace iw
 		void set_status_for_photo();
 		void undo(bool redo);
 		void finish_drag(bool cancel = false);
+		void open_adjustment(ui::Control& control);
+		void dismiss_adjustment(bool accept);
+		void draw_histogram(const ui::CanvasRenderer& renderer, app::recti bounds) const;
+		bool tone_mouse(platform::MouseMessage message, app::recti bounds, app::pointi point);
+		void update_histogram(const files::DecodedImage& image);
 		app::sizei original_size() const;
 		app::recti displayed_crop() const;
 		bool dirty() const { return !edits_.empty(); }
@@ -83,20 +94,34 @@ namespace iw
 		size_t index_{};
 		files::DecodedImage source_;
 		std::optional<files::FileSnapshot> sourceSnapshot_;
+		std::optional<std::array<unsigned char, 32>> sourceDigest_;
 		edits::PreviewSource previewSource_;
+		files::DecodedImage renderedPreview_;
+		edits::ImageEdits renderedEdits_;
+		app::sizei renderedSourceSize_;
+		bool renderedCropped_{};
 		std::uint64_t loadGeneration_{};
 		std::wstring saveError_;
 		bool showResult_{};
+		bool comparing_{};
+		bool draggingCompare_{};
+		bool holdingCompare_{};
+		double comparisonPosition_{0.5};
+		double beforeComparisonDrag_{0.5};
 		bool loading_{};
 		bool saving_{};
 		bool closingAfterSave_{};
-		bool backupOnOverwrite_{true};
 		int jpegQuality_{90};
 		int webpQuality_{90};
 		bool webpLossless_{};
 		edits::ImageEdits edits_;
 		edits::EditHistory history_;
 		int controlGroup_{};
+		int adjustmentId_{};
+		int toneHandle_{-1};
+		edits::ImageEdits beforeTone_;
+		std::array<std::array<unsigned, 64>, 3> histogram_{};
+		platform::TextInputPtr adjustmentInput_;
 		bool perspectiveHandles_{};
 		edits::CropHandle cropDrag_{edits::CropHandle::none};
 		int cornerDrag_{-1};
@@ -105,6 +130,7 @@ namespace iw
 		edits::ImageEdits beforeDrag_;
 		app::recti imageBounds_;
 		app::recti photoBounds_;
+		app::recti compareHandleBounds_;
 		app::recti stripBounds_;
 	};
 }

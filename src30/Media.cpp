@@ -1,9 +1,9 @@
 // ImageWalker by Zac Walker
-// Reads local audio/video information, opaque BGRA poster frames, and video and PCM for playback with Media
-// Foundation's source reader.
+// Routes local media to the bundled decoder or the Windows compatibility backend.
 
 #include "PlatformWin32.h"
 #include "Media.h"
+#include "MediaDecode.h"
 #include "MediaRuntime.h"
 #include "Platform.h"
 
@@ -193,419 +193,532 @@ namespace iw::media
 		return result >= 0.001 && result <= 1000 ? result : 0;
 	}
 
+	namespace
+	{
+		Info probe_native(const std::filesystem::path& path, const std::stop_token& stop)
+		{
+			Info info;
+			if (stop.stop_requested()) return info;
+			Runtime runtime;
+			if (!runtime.api())
+			{
+				info.error = native::unavailable_message();
+				return info;
+			}
+			ComPtr<IMFSourceReader> reader;
+			HRESULT result = runtime.result();
+			if (SUCCEEDED(result)) result = open_reader(*runtime.api(), path, VideoConversion::none, reader);
+			if (FAILED(result))
+			{
+				info.error = failure(result);
+				return info;
+			}
+			PROPVARIANT duration{};
+			if (SUCCEEDED(reader->GetPresentationAttribute(mediaSourceIndex, MF_PD_DURATION, &duration)) &&
+			    duration.vt == VT_UI8 &&
+			    duration.uhVal.QuadPart <= static_cast<ULONGLONG>((std::numeric_limits<std::int64_t>::max)()))
+			{
+				info.hasDuration = true;
+				info.duration = static_cast<std::int64_t>(duration.uhVal.QuadPart);
+			}
+			PropVariantClear(&duration);
+			for (DWORD stream = 0; stream < 64 && !stop.stop_requested(); ++stream)
+			{
+				ComPtr<IMFMediaType> type;
+				result = reader->GetNativeMediaType(stream, 0, &type);
+				if (result == MF_E_INVALIDSTREAMNUMBER) break;
+				if (FAILED(result)) continue;
+				GUID major{}, subtype{};
+				if (FAILED(type->GetGUID(MF_MT_MAJOR_TYPE, &major))) continue;
+				const bool video = major == MFMediaType_Video;
+				const bool audio = major == MFMediaType_Audio;
+				if ((!video && !audio) || (video && info.hasVideo) || (audio && info.hasAudio)) continue;
+				if (video)
+				{
+					info.hasVideo = true;
+					UINT32 width{}, height{}, numerator{}, denominator{};
+					if (SUCCEEDED(MFGetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, &width, &height)) &&
+					    valid_size(width, height))
+					{
+						info.width = static_cast<int>(width);
+						info.height = static_cast<int>(height);
+					}
+					if (SUCCEEDED(MFGetAttributeRatio(type.Get(), MF_MT_FRAME_RATE, &numerator, &denominator)))
+						info.frameRate = frame_rate(numerator, denominator);
+				}
+				if (audio) info.hasAudio = true;
+				if (SUCCEEDED(type->GetGUID(MF_MT_SUBTYPE, &subtype)))
+				{
+					if (!info.codec.empty()) info.codec += L"; ";
+					info.codec += (video ? L"Video: " : L"Audio: ") + codec_name(subtype);
+				}
+			}
+			if (stop.stop_requested()) return {};
+			if (!info.hasVideo && !info.hasAudio) info.error = failure(MF_E_INVALIDMEDIATYPE);
+			return info;
+		}
+
+		files::DecodedImage poster_native(const std::filesystem::path& path, const int maximumWidth,
+		                                  const int maximumHeight, const std::stop_token& stop)
+		{
+			files::DecodedImage image;
+			if (maximumWidth <= 0 || maximumHeight <= 0 || stop.stop_requested()) return image;
+			Runtime runtime;
+			ComPtr<IMFSourceReader> reader;
+			if (FAILED(runtime.result()) || FAILED(open_reader(*runtime.api(), path, VideoConversion::rgb, reader)))
+				return image;
+			if (FAILED(reader->SetStreamSelection(allStreams, FALSE)) ||
+			    FAILED(reader->SetStreamSelection(firstVideoStream, TRUE)))
+				return image;
+			ComPtr<IMFMediaType> output;
+			if (FAILED(runtime.api()->createMediaType(&output)) ||
+			    FAILED(output->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video)) ||
+			    FAILED(output->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32)) ||
+			    FAILED(reader->SetCurrentMediaType(firstVideoStream, nullptr, output.Get())))
+				return image;
+
+			for (int attempt = 0; attempt < 128 && !stop.stop_requested(); ++attempt)
+			{
+				DWORD flags{};
+				LONGLONG timestamp{};
+				ComPtr<IMFSample> sample;
+				if (FAILED(reader->ReadSample(firstVideoStream, 0, nullptr, &flags, &timestamp, &sample)) ||
+				    (flags & MF_SOURCE_READERF_ERROR))
+					return {};
+				if (!sample)
+				{
+					if (flags & MF_SOURCE_READERF_ENDOFSTREAM) return {};
+					continue;
+				}
+				ComPtr<IMFMediaType> actual;
+				UINT32 width{}, height{}, strideBits{};
+				if (FAILED(reader->GetCurrentMediaType(firstVideoStream, &actual)) ||
+				    FAILED(MFGetAttributeSize(actual.Get(), MF_MT_FRAME_SIZE, &width, &height)) ||
+				    !valid_size(width, height))
+					return {};
+				LONG stride{};
+				if (SUCCEEDED(actual->GetUINT32(MF_MT_DEFAULT_STRIDE, &strideBits)))
+					stride = static_cast<LONG>(strideBits);
+				else if (FAILED(runtime.api()->getStride(MFVideoFormat_RGB32.Data1, width, &stride))) return {};
+				const LockedPicture pixels(*sample.Get(), width, height, stride);
+				if (!pixels) return {};
+				const double scale = (std::min)({1.0, static_cast<double>(maximumWidth) / width,
+				                                 static_cast<double>(maximumHeight) / height});
+				image.width = (std::max)(1, static_cast<int>(width * scale));
+				image.height = (std::max)(1, static_cast<int>(height * scale));
+				image.originalWidth = static_cast<int>(width);
+				image.originalHeight = static_cast<int>(height);
+				image.pixels.resize(static_cast<size_t>(image.width) * image.height);
+				for (int y = 0; y < image.height; ++y)
+				{
+					if (stop.stop_requested()) return {};
+					const auto sourceY = static_cast<std::int64_t>(y) * height / image.height;
+					const BYTE* row = pixels.row(sourceY);
+					for (int x = 0; x < image.width; ++x)
+					{
+						const auto sourceX = static_cast<std::int64_t>(x) * width / image.width;
+						std::uint32_t pixel{};
+						std::memcpy(&pixel, row + sourceX * 4, sizeof(pixel));
+						image.pixels[static_cast<size_t>(y) * image.width + x] = pixel | 0xff000000;
+					}
+				}
+				return image;
+			}
+			return {};
+		}
+
+		struct NativeDecoder
+		{
+			// Declared first, so the reader is released before Media Foundation shuts down.
+			Runtime runtime;
+			ComPtr<IMFSourceReader> reader;
+			std::wstring error;
+			std::optional<std::int64_t> duration;
+			UINT32 width{};
+			UINT32 height{};
+			LONG stride{};
+			bool video{};
+			bool audioStream{};
+			bool audio{};
+			bool seekable{};
+
+			bool open(const std::filesystem::path& path);
+			bool decode_audio(const AudioFormat& format);
+			ReadResult read_video(VideoFrame& frame);
+			ReadResult read_audio(AudioBlock& block);
+			bool seek(std::int64_t time);
+
+			bool fail(const HRESULT result)
+			{
+				error = native::playback_failure(result);
+				return false;
+			}
+
+			HRESULT rgb32_type(ComPtr<IMFMediaType>& type) const
+			{
+				HRESULT result = runtime.api()->createMediaType(&type);
+				if (SUCCEEDED(result)) result = type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+				if (SUCCEEDED(result)) result = type->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
+				return result;
+			}
+
+			// RGB32, at a width that makes the pixels square when the file's are not.
+			HRESULT configure_video()
+			{
+				ComPtr<IMFMediaType> native;
+				HRESULT result = reader->GetNativeMediaType(firstVideoStream, 0, &native);
+				if (FAILED(result)) return result;
+				UINT32 nativeWidth{}, nativeHeight{}, numerator{}, denominator{};
+				if (SUCCEEDED(MFGetAttributeSize(native.Get(), MF_MT_FRAME_SIZE, &nativeWidth, &nativeHeight)) &&
+				    valid_size(nativeWidth, nativeHeight) &&
+				    SUCCEEDED(MFGetAttributeRatio(native.Get(), MF_MT_PIXEL_ASPECT_RATIO, &numerator, &denominator)) &&
+				    numerator && denominator && numerator != denominator)
+				{
+					const auto square = static_cast<UINT32>(
+											std::llround(static_cast<double>(nativeWidth) * numerator / denominator)) &
+					                    ~1u;
+					ComPtr<IMFMediaType> scaled;
+					if (valid_size(square, nativeHeight) && SUCCEEDED(rgb32_type(scaled)) &&
+					    SUCCEEDED(MFSetAttributeSize(scaled.Get(), MF_MT_FRAME_SIZE, square, nativeHeight)) &&
+					    SUCCEEDED(MFSetAttributeRatio(scaled.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1)) &&
+					    SUCCEEDED(reader->SetCurrentMediaType(firstVideoStream, nullptr, scaled.Get())) &&
+					    read_video_format())
+						return S_OK;
+				}
+				ComPtr<IMFMediaType> output;
+				result = rgb32_type(output);
+				if (SUCCEEDED(result)) result = reader->SetCurrentMediaType(firstVideoStream, nullptr, output.Get());
+				if (SUCCEEDED(result) && !read_video_format()) result = MF_E_INVALIDMEDIATYPE;
+				return result;
+			}
+
+			bool read_video_format()
+			{
+				ComPtr<IMFMediaType> current;
+				UINT32 currentWidth{}, currentHeight{}, strideBits{};
+				if (FAILED(reader->GetCurrentMediaType(firstVideoStream, &current)) ||
+				    FAILED(MFGetAttributeSize(current.Get(), MF_MT_FRAME_SIZE, &currentWidth, &currentHeight)) ||
+				    !valid_size(currentWidth, currentHeight))
+					return false;
+				LONG currentStride{};
+				if (SUCCEEDED(current->GetUINT32(MF_MT_DEFAULT_STRIDE, &strideBits)))
+					currentStride = static_cast<LONG>(strideBits);
+				else if (FAILED(runtime.api()->getStride(MFVideoFormat_RGB32.Data1, currentWidth, &currentStride)))
+					return false;
+				width = currentWidth;
+				height = currentHeight;
+				stride = currentStride;
+				return true;
+			}
+
+			// The next sample of a stream: none at its end, and none with an error once it fails.
+			ReadResult read(const DWORD stream, ComPtr<IMFSample>& sample, LONGLONG& time)
+			{
+				// Stream ticks and gaps arrive without a sample; a stream that sends nothing else is broken.
+				for (int attempt = 0; attempt < 1024; ++attempt)
+				{
+					DWORD flags{};
+					sample.Reset();
+					const HRESULT result = reader->ReadSample(stream, 0, nullptr, &flags, &time, &sample);
+					if (FAILED(result) || (flags & MF_SOURCE_READERF_ERROR))
+					{
+						fail(FAILED(result) ? result : E_FAIL);
+						return ReadResult::failed;
+					}
+					if ((flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) && stream == firstVideoStream &&
+					    !read_video_format())
+					{
+						fail(MF_E_INVALIDMEDIATYPE);
+						return ReadResult::failed;
+					}
+					if (flags & MF_SOURCE_READERF_ENDOFSTREAM) return ReadResult::end;
+					if (sample) return ReadResult::sample;
+				}
+				fail(MF_E_INVALID_STREAM_DATA);
+				return ReadResult::failed;
+			}
+		};
+
+		bool NativeDecoder::open(const std::filesystem::path& path)
+		{
+			auto& d = *this;
+			d.reader.Reset();
+			d.error.clear();
+			d.video = d.audioStream = d.audio = d.seekable = false;
+			d.duration.reset();
+			if (!d.runtime.api())
+			{
+				d.error = native::unavailable_message();
+				return false;
+			}
+			HRESULT result = d.runtime.result();
+			if (SUCCEEDED(result)) result = open_reader(*d.runtime.api(), path, VideoConversion::scaledRgb, d.reader);
+			if (FAILED(result)) return d.fail(result);
+			ComPtr<IMFMediaType> native;
+			d.video = SUCCEEDED(d.reader->GetNativeMediaType(firstVideoStream, 0, &native));
+			native.Reset();
+			d.audioStream = SUCCEEDED(d.reader->GetNativeMediaType(firstAudioStream, 0, &native));
+			result = d.reader->SetStreamSelection(allStreams, FALSE);
+			if (FAILED(result)) return d.fail(result);
+			if (d.video)
+			{
+				result = d.configure_video();
+				if (SUCCEEDED(result)) result = d.reader->SetStreamSelection(firstVideoStream, TRUE);
+				if (FAILED(result))
+				{
+					if (!d.audioStream) return d.fail(result);
+					platform::write_diagnostic(std::format(L"The video in {} cannot be decoded (0x{:08X}); only its "
+					                                       L"sound plays.\n",
+					                                       path.filename().wstring(),
+					                                       static_cast<unsigned long>(result)));
+					d.video = false;
+				}
+			}
+			if (!d.video && !d.audioStream) return d.fail(MF_E_INVALIDMEDIATYPE);
+			PROPVARIANT value{};
+			if (SUCCEEDED(d.reader->GetPresentationAttribute(mediaSourceIndex, MF_PD_DURATION, &value)) &&
+			    value.vt == VT_UI8 &&
+			    value.uhVal.QuadPart <= static_cast<ULONGLONG>((std::numeric_limits<std::int64_t>::max)()))
+				d.duration = static_cast<std::int64_t>(value.uhVal.QuadPart);
+			PropVariantClear(&value);
+			if (SUCCEEDED(d.reader->GetPresentationAttribute(mediaSourceIndex,
+			                                                 MF_SOURCE_READER_MEDIASOURCE_CHARACTERISTICS, &value)) &&
+			    value.vt == VT_UI4)
+				d.seekable = (value.ulVal & MFMEDIASOURCE_CAN_SEEK) != 0;
+			PropVariantClear(&value);
+			return true;
+		}
+
+		bool NativeDecoder::decode_audio(const AudioFormat& format)
+		{
+			auto& d = *this;
+			if (!d.reader || !d.audioStream || !format.sampleRate || !format.channels) return false;
+			const UINT32 bits = format.format == SampleFormat::int16 ? 16 : 32;
+			const GUID subtype = format.format == SampleFormat::float32 ? MFAudioFormat_Float : MFAudioFormat_PCM;
+			ComPtr<IMFMediaType> type;
+			HRESULT result = d.runtime.api()->createMediaType(&type);
+			if (SUCCEEDED(result)) result = type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
+			if (SUCCEEDED(result)) result = type->SetGUID(MF_MT_SUBTYPE, subtype);
+			if (SUCCEEDED(result)) result = type->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, format.channels);
+			if (SUCCEEDED(result)) result = type->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, format.sampleRate);
+			if (SUCCEEDED(result)) result = type->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, bits);
+			if (SUCCEEDED(result)) result = type->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, format.frame_bytes());
+			if (SUCCEEDED(result))
+				result = type->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, format.sampleRate * format.frame_bytes());
+			if (SUCCEEDED(result)) result = type->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
+			if (SUCCEEDED(result) && format.channelMask)
+				result = type->SetUINT32(MF_MT_AUDIO_CHANNEL_MASK, static_cast<UINT32>(format.channelMask));
+			if (SUCCEEDED(result)) result = d.reader->SetCurrentMediaType(firstAudioStream, nullptr, type.Get());
+			// A reader that settled on a format near the one asked for would play at the wrong speed.
+			ComPtr<IMFMediaType> actual;
+			if (SUCCEEDED(result)) result = d.reader->GetCurrentMediaType(firstAudioStream, &actual);
+			GUID actualSubtype{};
+			if (SUCCEEDED(result) &&
+			    (FAILED(actual->GetGUID(MF_MT_SUBTYPE, &actualSubtype)) || actualSubtype != subtype ||
+			     MFGetAttributeUINT32(actual.Get(), MF_MT_AUDIO_SAMPLES_PER_SECOND, 0) != format.sampleRate ||
+			     MFGetAttributeUINT32(actual.Get(), MF_MT_AUDIO_NUM_CHANNELS, 0) != format.channels ||
+			     MFGetAttributeUINT32(actual.Get(), MF_MT_AUDIO_BITS_PER_SAMPLE, 0) != bits))
+				result = MF_E_INVALIDMEDIATYPE;
+			if (SUCCEEDED(result)) result = d.reader->SetStreamSelection(firstAudioStream, TRUE);
+			d.audio = SUCCEEDED(result);
+			if (!d.audio)
+				platform::write_diagnostic(std::format(L"Sound cannot be converted to the output's {} Hz, {} channels "
+				                                       L"(0x{:08X}).\n",
+				                                       format.sampleRate, format.channels,
+				                                       static_cast<unsigned long>(result)));
+			return d.audio;
+		}
+
+		ReadResult NativeDecoder::read_video(VideoFrame& frame)
+		{
+			auto& d = *this;
+			if (!d.reader || !d.video) return ReadResult::end;
+			ComPtr<IMFSample> sample;
+			LONGLONG time{};
+			const auto read = d.read(firstVideoStream, sample, time);
+			if (read != ReadResult::sample) return read;
+			const LockedPicture pixels(*sample.Get(), d.width, d.height, d.stride);
+			if (!pixels)
+			{
+				d.fail(MF_E_INVALIDMEDIATYPE);
+				return ReadResult::failed;
+			}
+			if (!frame.picture) frame.picture = std::make_shared<::core::surface>();
+			if (!frame.picture->alloc({static_cast<int>(d.width), static_cast<int>(d.height)},
+			                          ::core::texture_format::RGB))
+			{
+				d.fail(E_OUTOFMEMORY);
+				return ReadResult::failed;
+			}
+			const auto rowBytes = static_cast<size_t>(d.width) * 4;
+			for (UINT32 y = 0; y < d.height; ++y)
+				std::memcpy(frame.picture->pixels_line(static_cast<int>(y)), pixels.row(y), rowBytes);
+			LONGLONG sampleDuration{};
+			frame.time = time;
+			frame.duration = SUCCEEDED(sample->GetSampleDuration(&sampleDuration)) ? sampleDuration : 0;
+			return ReadResult::sample;
+		}
+
+		ReadResult NativeDecoder::read_audio(AudioBlock& block)
+		{
+			auto& d = *this;
+			if (!d.reader || !d.audio) return ReadResult::end;
+			ComPtr<IMFSample> sample;
+			LONGLONG time{};
+			const auto read = d.read(firstAudioStream, sample, time);
+			if (read != ReadResult::sample) return read;
+			ComPtr<IMFMediaBuffer> buffer;
+			BYTE* data{};
+			DWORD length{};
+			HRESULT result = sample->ConvertToContiguousBuffer(&buffer);
+			if (SUCCEEDED(result)) result = buffer->Lock(&data, nullptr, &length);
+			if (FAILED(result))
+			{
+				d.fail(result);
+				return ReadResult::failed;
+			}
+			block.samples.assign(data, data + length);
+			buffer->Unlock();
+			block.time = time;
+			return ReadResult::sample;
+		}
+
+		bool NativeDecoder::seek(const std::int64_t time)
+		{
+			auto& d = *this;
+			if (!d.reader || !d.seekable) return false;
+			PROPVARIANT position{};
+			position.vt = VT_I8;
+			position.hVal.QuadPart = (std::max)(std::int64_t{0}, time);
+			return SUCCEEDED(d.reader->SetCurrentPosition(GUID_NULL, position));
+		}
+	}
+
 	Info probe(const std::filesystem::path& path, const std::stop_token& stop)
 	{
-		Info info;
-		if (stop.stop_requested()) return info;
-		Runtime runtime;
-		if (!runtime.api())
-		{
-			info.error = native::unavailable_message();
-			return info;
-		}
-		ComPtr<IMFSourceReader> reader;
-		HRESULT result = runtime.result();
-		if (SUCCEEDED(result)) result = open_reader(*runtime.api(), path, VideoConversion::none, reader);
-		if (FAILED(result))
-		{
-			info.error = failure(result);
-			return info;
-		}
-		PROPVARIANT duration{};
-		if (SUCCEEDED(reader->GetPresentationAttribute(mediaSourceIndex, MF_PD_DURATION, &duration)) &&
-		    duration.vt == VT_UI8 &&
-		    duration.uhVal.QuadPart <= static_cast<ULONGLONG>((std::numeric_limits<std::int64_t>::max)()))
-		{
-			info.hasDuration = true;
-			info.duration = static_cast<std::int64_t>(duration.uhVal.QuadPart);
-		}
-		PropVariantClear(&duration);
-		for (DWORD stream = 0; stream < 64 && !stop.stop_requested(); ++stream)
-		{
-			ComPtr<IMFMediaType> type;
-			result = reader->GetNativeMediaType(stream, 0, &type);
-			if (result == MF_E_INVALIDSTREAMNUMBER) break;
-			if (FAILED(result)) continue;
-			GUID major{}, subtype{};
-			if (FAILED(type->GetGUID(MF_MT_MAJOR_TYPE, &major))) continue;
-			const bool video = major == MFMediaType_Video;
-			const bool audio = major == MFMediaType_Audio;
-			if ((!video && !audio) || (video && info.hasVideo) || (audio && info.hasAudio)) continue;
-			if (video)
-			{
-				info.hasVideo = true;
-				UINT32 width{}, height{}, numerator{}, denominator{};
-				if (SUCCEEDED(MFGetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, &width, &height)) &&
-				    valid_size(width, height))
-				{
-					info.width = static_cast<int>(width);
-					info.height = static_cast<int>(height);
-				}
-				if (SUCCEEDED(MFGetAttributeRatio(type.Get(), MF_MT_FRAME_RATE, &numerator, &denominator)))
-					info.frameRate = frame_rate(numerator, denominator);
-			}
-			if (audio) info.hasAudio = true;
-			if (SUCCEEDED(type->GetGUID(MF_MT_SUBTYPE, &subtype)))
-			{
-				if (!info.codec.empty()) info.codec += L"; ";
-				info.codec += (video ? L"Video: " : L"Audio: ") + codec_name(subtype);
-			}
-		}
 		if (stop.stop_requested()) return {};
-		if (!info.hasVideo && !info.hasAudio) info.error = failure(MF_E_INVALIDMEDIATYPE);
-		return info;
+		auto bundled = probe_software(path, stop);
+		if (stop.stop_requested()) return {};
+		if (bundled.hasAudio || bundled.hasVideo) return bundled;
+		auto fallback = probe_native(path, stop);
+		if (stop.stop_requested()) return {};
+		if (fallback.hasAudio || fallback.hasVideo) return fallback;
+		return bundled;
 	}
 
 	files::DecodedImage poster(const std::filesystem::path& path, const int maximumWidth, const int maximumHeight,
 	                           const std::stop_token& stop)
 	{
-		files::DecodedImage image;
-		if (maximumWidth <= 0 || maximumHeight <= 0 || stop.stop_requested()) return image;
-		Runtime runtime;
-		ComPtr<IMFSourceReader> reader;
-		if (FAILED(runtime.result()) || FAILED(open_reader(*runtime.api(), path, VideoConversion::rgb, reader)))
-			return image;
-		if (FAILED(reader->SetStreamSelection(allStreams, FALSE)) ||
-		    FAILED(reader->SetStreamSelection(firstVideoStream, TRUE)))
-			return image;
-		ComPtr<IMFMediaType> output;
-		if (FAILED(runtime.api()->createMediaType(&output)) ||
-		    FAILED(output->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video)) ||
-		    FAILED(output->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32)) ||
-		    FAILED(reader->SetCurrentMediaType(firstVideoStream, nullptr, output.Get())))
-			return image;
-
-		for (int attempt = 0; attempt < 128 && !stop.stop_requested(); ++attempt)
+		if (stop.stop_requested() || maximumWidth <= 0 || maximumHeight <= 0) return {};
+		SoftwareDecoder decoder;
+		if (decoder.open(path, stop, true))
 		{
-			DWORD flags{};
-			LONGLONG timestamp{};
-			ComPtr<IMFSample> sample;
-			if (FAILED(reader->ReadSample(firstVideoStream, 0, nullptr, &flags, &timestamp, &sample)) ||
-			    (flags & MF_SOURCE_READERF_ERROR))
-				return {};
-			if (!sample)
+			VideoFrame frame;
+			if (decoder.read_video(frame, {maximumWidth, maximumHeight}) == ReadResult::sample && frame.picture &&
+			    !stop.stop_requested())
 			{
-				if (flags & MF_SOURCE_READERF_ENDOFSTREAM) return {};
-				continue;
-			}
-			ComPtr<IMFMediaType> actual;
-			UINT32 width{}, height{}, strideBits{};
-			if (FAILED(reader->GetCurrentMediaType(firstVideoStream, &actual)) ||
-			    FAILED(MFGetAttributeSize(actual.Get(), MF_MT_FRAME_SIZE, &width, &height)) ||
-			    !valid_size(width, height))
-				return {};
-			LONG stride{};
-			if (SUCCEEDED(actual->GetUINT32(MF_MT_DEFAULT_STRIDE, &strideBits))) stride = static_cast<LONG>(strideBits);
-			else if (FAILED(runtime.api()->getStride(MFVideoFormat_RGB32.Data1, width, &stride))) return {};
-			const LockedPicture pixels(*sample.Get(), width, height, stride);
-			if (!pixels) return {};
-			const double scale = (std::min)({1.0, static_cast<double>(maximumWidth) / width,
-			                                 static_cast<double>(maximumHeight) / height});
-			image.width = (std::max)(1, static_cast<int>(width * scale));
-			image.height = (std::max)(1, static_cast<int>(height * scale));
-			image.originalWidth = static_cast<int>(width);
-			image.originalHeight = static_cast<int>(height);
-			image.pixels.resize(static_cast<size_t>(image.width) * image.height);
-			for (int y = 0; y < image.height; ++y)
-			{
-				if (stop.stop_requested()) return {};
-				const auto sourceY = static_cast<std::int64_t>(y) * height / image.height;
-				const BYTE* row = pixels.row(sourceY);
-				for (int x = 0; x < image.width; ++x)
+				const auto size = frame.picture->dimensions();
+				const auto& info = decoder.info();
+				files::DecodedImage image;
+				image.width = size.cx;
+				image.height = size.cy;
+				image.originalWidth = info.width > 0 ? info.width : size.cx;
+				image.originalHeight = info.height > 0 ? info.height : size.cy;
+				image.pixels.resize(static_cast<size_t>(size.cx) * size.cy);
+				for (int y = 0; y < size.cy; ++y)
 				{
-					const auto sourceX = static_cast<std::int64_t>(x) * width / image.width;
-					std::uint32_t pixel{};
-					std::memcpy(&pixel, row + sourceX * 4, sizeof(pixel));
-					image.pixels[static_cast<size_t>(y) * image.width + x] = pixel | 0xff000000;
+					auto* out = image.pixels.data() + static_cast<size_t>(y) * size.cx;
+					std::memcpy(out, frame.picture->pixels_line(y), static_cast<size_t>(size.cx) * 4);
+					for (int x = 0; x < size.cx; ++x) out[x] |= 0xff000000;
 				}
+				return image;
 			}
-			return image;
 		}
-		return {};
+		return stop.stop_requested() ? files::DecodedImage{} : poster_native(path, maximumWidth, maximumHeight, stop);
 	}
 
 	struct Decoder::Impl
 	{
-		// Declared first, so the reader is released before Media Foundation shuts down.
-		Runtime runtime;
-		ComPtr<IMFSourceReader> reader;
-		std::wstring error;
-		std::optional<std::int64_t> duration;
-		UINT32 width{};
-		UINT32 height{};
-		LONG stride{};
-		bool video{};
-		bool audioStream{};
-		bool audio{};
-		bool seekable{};
-
-		bool fail(const HRESULT result)
-		{
-			error = native::playback_failure(result);
-			return false;
-		}
-
-		HRESULT rgb32_type(ComPtr<IMFMediaType>& type) const
-		{
-			HRESULT result = runtime.api()->createMediaType(&type);
-			if (SUCCEEDED(result)) result = type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
-			if (SUCCEEDED(result)) result = type->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
-			return result;
-		}
-
-		// RGB32, at a width that makes the pixels square when the file's are not.
-		HRESULT configure_video()
-		{
-			ComPtr<IMFMediaType> native;
-			HRESULT result = reader->GetNativeMediaType(firstVideoStream, 0, &native);
-			if (FAILED(result)) return result;
-			UINT32 nativeWidth{}, nativeHeight{}, numerator{}, denominator{};
-			if (SUCCEEDED(MFGetAttributeSize(native.Get(), MF_MT_FRAME_SIZE, &nativeWidth, &nativeHeight)) &&
-			    valid_size(nativeWidth, nativeHeight) &&
-			    SUCCEEDED(MFGetAttributeRatio(native.Get(), MF_MT_PIXEL_ASPECT_RATIO, &numerator, &denominator)) &&
-			    numerator && denominator && numerator != denominator)
-			{
-				const auto square = static_cast<UINT32>(
-										std::llround(static_cast<double>(nativeWidth) * numerator / denominator)) &
-				                    ~1u;
-				ComPtr<IMFMediaType> scaled;
-				if (valid_size(square, nativeHeight) && SUCCEEDED(rgb32_type(scaled)) &&
-				    SUCCEEDED(MFSetAttributeSize(scaled.Get(), MF_MT_FRAME_SIZE, square, nativeHeight)) &&
-				    SUCCEEDED(MFSetAttributeRatio(scaled.Get(), MF_MT_PIXEL_ASPECT_RATIO, 1, 1)) &&
-				    SUCCEEDED(reader->SetCurrentMediaType(firstVideoStream, nullptr, scaled.Get())) &&
-				    read_video_format())
-					return S_OK;
-			}
-			ComPtr<IMFMediaType> output;
-			result = rgb32_type(output);
-			if (SUCCEEDED(result)) result = reader->SetCurrentMediaType(firstVideoStream, nullptr, output.Get());
-			if (SUCCEEDED(result) && !read_video_format()) result = MF_E_INVALIDMEDIATYPE;
-			return result;
-		}
-
-		bool read_video_format()
-		{
-			ComPtr<IMFMediaType> current;
-			UINT32 currentWidth{}, currentHeight{}, strideBits{};
-			if (FAILED(reader->GetCurrentMediaType(firstVideoStream, &current)) ||
-			    FAILED(MFGetAttributeSize(current.Get(), MF_MT_FRAME_SIZE, &currentWidth, &currentHeight)) ||
-			    !valid_size(currentWidth, currentHeight))
-				return false;
-			LONG currentStride{};
-			if (SUCCEEDED(current->GetUINT32(MF_MT_DEFAULT_STRIDE, &strideBits)))
-				currentStride = static_cast<LONG>(strideBits);
-			else if (FAILED(runtime.api()->getStride(MFVideoFormat_RGB32.Data1, currentWidth, &currentStride)))
-				return false;
-			width = currentWidth;
-			height = currentHeight;
-			stride = currentStride;
-			return true;
-		}
-
-		// The next sample of a stream: none at its end, and none with an error once it fails.
-		ReadResult read(const DWORD stream, ComPtr<IMFSample>& sample, LONGLONG& time)
-		{
-			// Stream ticks and gaps arrive without a sample; a stream that sends nothing else is broken.
-			for (int attempt = 0; attempt < 1024; ++attempt)
-			{
-				DWORD flags{};
-				sample.Reset();
-				const HRESULT result = reader->ReadSample(stream, 0, nullptr, &flags, &time, &sample);
-				if (FAILED(result) || (flags & MF_SOURCE_READERF_ERROR))
-				{
-					fail(FAILED(result) ? result : E_FAIL);
-					return ReadResult::failed;
-				}
-				if ((flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) && stream == firstVideoStream &&
-				    !read_video_format())
-				{
-					fail(MF_E_INVALIDMEDIATYPE);
-					return ReadResult::failed;
-				}
-				if (flags & MF_SOURCE_READERF_ENDOFSTREAM) return ReadResult::end;
-				if (sample) return ReadResult::sample;
-			}
-			fail(MF_E_INVALID_STREAM_DATA);
-			return ReadResult::failed;
-		}
+		SoftwareDecoder bundled;
+		std::unique_ptr<NativeDecoder> fallback;
+		std::wstring notice;
+		bool usingBundled{};
 	};
 
 	Decoder::Decoder() : impl_(std::make_unique<Impl>())
 	{
 	}
-
 	Decoder::~Decoder() = default;
 
-	bool Decoder::open(const std::filesystem::path& path)
+	bool Decoder::open(const std::filesystem::path& path, const std::stop_token& stop)
 	{
 		auto& d = *impl_;
-		d.reader.Reset();
-		d.error.clear();
-		d.video = d.audioStream = d.audio = d.seekable = false;
-		d.duration.reset();
-		if (!d.runtime.api())
+		d.fallback.reset();
+		d.notice.clear();
+		d.usingBundled = d.bundled.open(path, stop);
+		const auto& info = d.bundled.info();
+		const bool missingVideo = info.hasVideo && !d.bundled.has_video();
+		if (!stop.stop_requested() && (!d.usingBundled || missingVideo) && native::acquire())
 		{
-			d.error = native::unavailable_message();
-			return false;
-		}
-		HRESULT result = d.runtime.result();
-		if (SUCCEEDED(result)) result = open_reader(*d.runtime.api(), path, VideoConversion::scaledRgb, d.reader);
-		if (FAILED(result)) return d.fail(result);
-		ComPtr<IMFMediaType> native;
-		d.video = SUCCEEDED(d.reader->GetNativeMediaType(firstVideoStream, 0, &native));
-		native.Reset();
-		d.audioStream = SUCCEEDED(d.reader->GetNativeMediaType(firstAudioStream, 0, &native));
-		result = d.reader->SetStreamSelection(allStreams, FALSE);
-		if (FAILED(result)) return d.fail(result);
-		if (d.video)
-		{
-			result = d.configure_video();
-			if (SUCCEEDED(result)) result = d.reader->SetStreamSelection(firstVideoStream, TRUE);
-			if (FAILED(result))
+			auto fallback = std::make_unique<NativeDecoder>();
+			if (fallback->open(path) && (!missingVideo || fallback->video))
 			{
-				if (!d.audioStream) return d.fail(result);
-				platform::write_diagnostic(std::format(L"The video in {} cannot be decoded (0x{:08X}); only its "
-				                                       L"sound plays.\n",
-				                                       path.filename().wstring(), static_cast<unsigned long>(result)));
-				d.video = false;
+				d.fallback = std::move(fallback);
+				d.usingBundled = false;
+				d.bundled = SoftwareDecoder{};
+				return true;
 			}
 		}
-		if (!d.video && !d.audioStream) return d.fail(MF_E_INVALIDMEDIATYPE);
-		PROPVARIANT value{};
-		if (SUCCEEDED(d.reader->GetPresentationAttribute(mediaSourceIndex, MF_PD_DURATION, &value)) &&
-		    value.vt == VT_UI8 &&
-		    value.uhVal.QuadPart <= static_cast<ULONGLONG>((std::numeric_limits<std::int64_t>::max)()))
-			d.duration = static_cast<std::int64_t>(value.uhVal.QuadPart);
-		PropVariantClear(&value);
-		if (SUCCEEDED(d.reader->GetPresentationAttribute(mediaSourceIndex, MF_SOURCE_READER_MEDIASOURCE_CHARACTERISTICS,
-		                                                 &value)) &&
-		    value.vt == VT_UI4)
-			d.seekable = (value.ulVal & MFMEDIASOURCE_CAN_SEEK) != 0;
-		PropVariantClear(&value);
-		return true;
+		if (d.usingBundled && missingVideo) d.notice = L"The video codec is unavailable; playing sound only.";
+		else if (d.usingBundled && info.hasAudio && !d.bundled.has_audio())
+			d.notice = L"The audio codec is unavailable; playing video without sound.";
+		return !stop.stop_requested() && d.usingBundled;
 	}
 
 	bool Decoder::decode_audio(const AudioFormat& format)
 	{
-		auto& d = *impl_;
-		if (!d.reader || !d.audioStream || !format.sampleRate || !format.channels) return false;
-		const UINT32 bits = format.format == SampleFormat::int16 ? 16 : 32;
-		const GUID subtype = format.format == SampleFormat::float32 ? MFAudioFormat_Float : MFAudioFormat_PCM;
-		ComPtr<IMFMediaType> type;
-		HRESULT result = d.runtime.api()->createMediaType(&type);
-		if (SUCCEEDED(result)) result = type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Audio);
-		if (SUCCEEDED(result)) result = type->SetGUID(MF_MT_SUBTYPE, subtype);
-		if (SUCCEEDED(result)) result = type->SetUINT32(MF_MT_AUDIO_NUM_CHANNELS, format.channels);
-		if (SUCCEEDED(result)) result = type->SetUINT32(MF_MT_AUDIO_SAMPLES_PER_SECOND, format.sampleRate);
-		if (SUCCEEDED(result)) result = type->SetUINT32(MF_MT_AUDIO_BITS_PER_SAMPLE, bits);
-		if (SUCCEEDED(result)) result = type->SetUINT32(MF_MT_AUDIO_BLOCK_ALIGNMENT, format.frame_bytes());
-		if (SUCCEEDED(result))
-			result = type->SetUINT32(MF_MT_AUDIO_AVG_BYTES_PER_SECOND, format.sampleRate * format.frame_bytes());
-		if (SUCCEEDED(result)) result = type->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
-		if (SUCCEEDED(result) && format.channelMask)
-			result = type->SetUINT32(MF_MT_AUDIO_CHANNEL_MASK, static_cast<UINT32>(format.channelMask));
-		if (SUCCEEDED(result)) result = d.reader->SetCurrentMediaType(firstAudioStream, nullptr, type.Get());
-		// A reader that settled on a format near the one asked for would play at the wrong speed.
-		ComPtr<IMFMediaType> actual;
-		if (SUCCEEDED(result)) result = d.reader->GetCurrentMediaType(firstAudioStream, &actual);
-		GUID actualSubtype{};
-		if (SUCCEEDED(result) &&
-		    (FAILED(actual->GetGUID(MF_MT_SUBTYPE, &actualSubtype)) || actualSubtype != subtype ||
-		     MFGetAttributeUINT32(actual.Get(), MF_MT_AUDIO_SAMPLES_PER_SECOND, 0) != format.sampleRate ||
-		     MFGetAttributeUINT32(actual.Get(), MF_MT_AUDIO_NUM_CHANNELS, 0) != format.channels ||
-		     MFGetAttributeUINT32(actual.Get(), MF_MT_AUDIO_BITS_PER_SAMPLE, 0) != bits))
-			result = MF_E_INVALIDMEDIATYPE;
-		if (SUCCEEDED(result)) result = d.reader->SetStreamSelection(firstAudioStream, TRUE);
-		d.audio = SUCCEEDED(result);
-		if (!d.audio)
-			platform::write_diagnostic(std::format(L"Sound cannot be converted to the output's {} Hz, {} channels "
-			                                       L"(0x{:08X}).\n",
-			                                       format.sampleRate, format.channels,
-			                                       static_cast<unsigned long>(result)));
-		return d.audio;
+		return impl_->usingBundled ? impl_->bundled.decode_audio(format)
+		                           : impl_->fallback && impl_->fallback->decode_audio(format);
 	}
-
 	const std::wstring& Decoder::error() const
 	{
-		return impl_->error;
+		return impl_->fallback ? impl_->fallback->error : impl_->bundled.error();
 	}
-
+	const std::wstring& Decoder::notice() const
+	{
+		return impl_->notice;
+	}
 	bool Decoder::has_video() const
 	{
-		return impl_->video;
+		return impl_->usingBundled ? impl_->bundled.has_video() : impl_->fallback && impl_->fallback->video;
 	}
-
 	bool Decoder::has_audio() const
 	{
-		return impl_->audioStream;
+		return impl_->usingBundled ? impl_->bundled.has_audio() : impl_->fallback && impl_->fallback->audioStream;
 	}
-
 	bool Decoder::can_seek() const
 	{
-		return impl_->seekable;
+		return impl_->usingBundled ? impl_->bundled.info().hasDuration : impl_->fallback && impl_->fallback->seekable;
 	}
-
 	std::optional<std::int64_t> Decoder::duration() const
 	{
-		return impl_->duration;
+		if (impl_->usingBundled && impl_->bundled.info().hasDuration) return impl_->bundled.info().duration;
+		return impl_->fallback ? impl_->fallback->duration : std::nullopt;
 	}
-
 	ReadResult Decoder::read_video(VideoFrame& frame)
 	{
-		auto& d = *impl_;
-		if (!d.reader || !d.video) return ReadResult::end;
-		ComPtr<IMFSample> sample;
-		LONGLONG time{};
-		const auto read = d.read(firstVideoStream, sample, time);
-		if (read != ReadResult::sample) return read;
-		const LockedPicture pixels(*sample.Get(), d.width, d.height, d.stride);
-		if (!pixels)
-		{
-			d.fail(MF_E_INVALIDMEDIATYPE);
-			return ReadResult::failed;
-		}
-		if (!frame.picture) frame.picture = std::make_shared<::core::surface>();
-		frame.picture->alloc({static_cast<int>(d.width), static_cast<int>(d.height)}, ::core::texture_format::RGB);
-		const auto rowBytes = static_cast<size_t>(d.width) * 4;
-		for (UINT32 y = 0; y < d.height; ++y)
-			std::memcpy(frame.picture->pixels_line(static_cast<int>(y)), pixels.row(y), rowBytes);
-		LONGLONG duration{};
-		frame.time = time;
-		frame.duration = SUCCEEDED(sample->GetSampleDuration(&duration)) ? duration : 0;
-		return ReadResult::sample;
+		return impl_->usingBundled ? impl_->bundled.read_video(frame)
+		       : impl_->fallback   ? impl_->fallback->read_video(frame)
+		                           : ReadResult::end;
 	}
-
 	ReadResult Decoder::read_audio(AudioBlock& block)
 	{
-		auto& d = *impl_;
-		if (!d.reader || !d.audio) return ReadResult::end;
-		ComPtr<IMFSample> sample;
-		LONGLONG time{};
-		const auto read = d.read(firstAudioStream, sample, time);
-		if (read != ReadResult::sample) return read;
-		ComPtr<IMFMediaBuffer> buffer;
-		BYTE* data{};
-		DWORD length{};
-		HRESULT result = sample->ConvertToContiguousBuffer(&buffer);
-		if (SUCCEEDED(result)) result = buffer->Lock(&data, nullptr, &length);
-		if (FAILED(result))
-		{
-			d.fail(result);
-			return ReadResult::failed;
-		}
-		block.samples.assign(data, data + length);
-		buffer->Unlock();
-		block.time = time;
-		return ReadResult::sample;
+		return impl_->usingBundled ? impl_->bundled.read_audio(block)
+		       : impl_->fallback   ? impl_->fallback->read_audio(block)
+		                           : ReadResult::end;
 	}
-
 	bool Decoder::seek(const std::int64_t time)
 	{
-		auto& d = *impl_;
-		if (!d.reader || !d.seekable) return false;
-		PROPVARIANT position{};
-		position.vt = VT_I8;
-		position.hVal.QuadPart = (std::max)(std::int64_t{0}, time);
-		return SUCCEEDED(d.reader->SetCurrentPosition(GUID_NULL, position));
+		return impl_->usingBundled ? impl_->bundled.seek(time) : impl_->fallback && impl_->fallback->seek(time);
 	}
 }

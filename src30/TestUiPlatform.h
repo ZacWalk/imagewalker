@@ -87,6 +87,11 @@ namespace iw::tests
 	class ImageCanvasAccess
 	{
 	public:
+		static media::Player* player(const ImageCanvas& canvas) { return canvas.player_.get(); }
+		static void key(ImageCanvas& canvas, const platform::WindowFramePtr& frame, const platform::KeyInput& input)
+		{
+			canvas.key(frame, platform::KeyMessage::down, input);
+		}
 		static void gesture(ImageCanvas& canvas, const platform::WindowFramePtr& frame,
 		                    const platform::GestureInput& input)
 		{
@@ -154,12 +159,9 @@ namespace iw::tests
 			window->frame_ = root;
 			window->chrome_ = chrome;
 			window->shellTree_ = tree;
-			window->contentFrame_ = root->create_child({}, {});
-			window->treeSplitterFrame_ = window->contentFrame_->create_child({}, {});
-			window->centerFrame_ = window->contentFrame_->create_child({}, {});
-			if (!window->canvas_.create(window->centerFrame_)) return false;
+			if (!window->canvas_.create(root)) return false;
 			window->modeBar_ = std::make_shared<ModeBar>();
-			if (!window->modeBar_->create(window->contentFrame_)) return false;
+			if (!window->modeBar_->create(root)) return false;
 			window->configure_mode_bar();
 			window->update_visibility();
 			return true;
@@ -171,9 +173,9 @@ namespace iw::tests
 			return std::static_pointer_cast<RecordingFrame>(frame);
 		}
 		std::shared_ptr<RecordingFrame> canvas() const { return record(window->canvas_.frame()); }
-		std::shared_ptr<RecordingFrame> center() const { return record(window->centerFrame_); }
+		app::recti center_bounds() const { return window->centerBounds_; }
 		std::shared_ptr<RecordingFrame> modes() const { return record(window->modeBar_->frame()); }
-		std::shared_ptr<RecordingFrame> splitter() const { return record(window->treeSplitterFrame_); }
+		bool splitter_visible() const { return window->treeSplitterBounds_.width > 0; }
 		bool set_task(TaskViewPtr task) { return window->set_task(std::move(task)); }
 		TaskViewPtr task() const { return window->task_; }
 		ImageCanvas& image_canvas() { return window->canvas_; }
@@ -201,11 +203,14 @@ namespace iw::tests
 			window->scanning_ = true;
 		}
 		void finish_folder_scan(const std::uint64_t generation, const std::filesystem::path& folder,
-		                        std::vector<files::FolderItem> items, const std::error_code error = {})
+		                        std::vector<files::FolderItem> items, const std::error_code error = {},
+		                        const std::filesystem::path& initialItem = {})
 		{
-			window->finish_folder_scan(generation, folder, std::move(items), error);
+			window->finish_folder_scan(generation, folder, std::move(items), error, initialItem);
 		}
+		void set_photos_only(const bool filtered) { window->collection_.set_photos_only(filtered); }
 		LoadState collection_load_state() const { return window->collection_.load_state(); }
+		const std::filesystem::path& remembered_folder() const { return window->lastFolder_; }
 		size_t collection_size() const { return window->collection_.items().size(); }
 	};
 

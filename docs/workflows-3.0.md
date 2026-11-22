@@ -1,7 +1,7 @@
 # ImageWalker 3.0 file workflows
 
 Six workflows act on files: Open with, Copy to and Move to folder, Convert or
-Resize, Batch Rename, Photo Edit, and Synchronize. Convert, Rename, Edit and
+Resize, Batch Rename, Photo and Media Edit, and Synchronize. Convert, Rename, Edit and
 Sync are task views sharing the model below, and Convert, Rename and Sync also
 share its planning and safety rules. Copy and Move use a dialog, and Open with
 acts directly. [features.md](features.md) describes the rest of the
@@ -23,11 +23,12 @@ not an editable photo — and states the refusal rather than doing nothing.
 ### Task views
 
 Convert, Rename, Edit and Sync replace the Items surface with a task view whose
-toolbar ends in Maximize/Restore and Close. Close returns to Items; it does not
-exit the application. Convert and Rename put a controls panel beside a review
-list, Sync beside a four-column comparison, and Edit beside the photo and a
-selector strip of the folder's other photos. A folder in a controls panel is
-chosen with Browse...; its field shows the choice read-only.
+toolbar ends in Maximize/Restore and Close. While a task is open, the browsing
+sidebars are hidden. Close or Escape returns to Items, after resolving any
+active work or unsaved draft. Browse and tasks use the same libdesktop content
+frame. The review list, comparison, or photo is on the
+left; its tools are on the right. A folder in a controls panel is chosen with
+Browse...; its field shows the choice read-only.
 
 ### Analyze, review, run
 
@@ -55,8 +56,8 @@ trees may be substantial work.
 While analysing or running, the status reads Analyzing or Processing, Run and
 Analyze cannot be reinvoked, the current row is scrolled into view, and progress
 carries a position and total once the total is known. Convert, Rename and Sync
-put a Cancel command on the task toolbar; Edit has no Cancel, and its save runs
-to completion.
+put a Cancel command on the task toolbar. Photo Save runs to completion.
+Media Save can be cancelled until the staged file is published.
 
 Cancel stops future work. It is not a rollback: rows that already succeeded stay
 done. Closing a task while work is active asks whether to cancel the operation
@@ -68,14 +69,13 @@ does not prevent later independent items from being attempted.
 
 ### Collisions
 
-Convert and Rename offer four explicit policies in their review view:
+Convert and Batch Rename offer three policies in their review view:
 
 - **Block run** — do not allow Run while any reviewed destination is occupied.
 - **Skip** — leave the existing destination alone and do not write that row.
 - **Auto-rename** — choose a free name and show it in Review.
-- **Replace** — overwrite, and identify that effect in Review.
 
-Sync has no policy selector; replacement follows from the reviewed action.
+Sync has no policy selector; it only copies missing files.
 
 A destination claimed by two rows of the same plan is also a collision, and no
 plan silently merges two sources into one destination. A destination that
@@ -132,15 +132,14 @@ application then does is outside ImageWalker's control and outside its results.
 ## 3. Copy to and Move to folder
 
 Copy and Move are not task views. `Ctrl+Shift+C` and `Ctrl+Shift+X` open a
-dialog that previews the selection with its count and total size, and takes a
-destination folder with completion. Sidecar companions — `.xmp`, `.thm`, `.aae`
+dialog that shows the selection and its total size. Type a full path to get
+subfolder suggestions, or use Browse. Sidecar companions — `.xmp`, `.thm`, `.aae`
 — travel with their file and are surveyed for collisions together with it, so a
 decision is never made for half a set.
 
-Where a collision is found, the choice is Auto-rename or Replace, defaulting to
-Auto-rename; Replace secures a recovery copy before overwriting. The
-destination folder is created after that decision, so cancelling leaves
-nothing behind.
+Where a collision is found, choose Auto-rename or Cancel. Auto-rename
+keeps existing items and chooses unused names for incoming files. The
+destination folder is created only after this decision.
 
 The run itself is not cancellable: a status window pumps messages so the
 application stays responsive, but there is no Cancel. Per-item results are
@@ -167,26 +166,33 @@ copies can be shared without them.
 
 ## 5. Batch Rename
 
-`F7`. In the template, a run of `#` is the zero-padded sequence number and
+`Ctrl+Shift+R`. In the template, a run of `#` is the zero-padded sequence number and
 `{token}` is a metadata substitution. The camera, date and exposure tokens read
 the photo's metadata in every format ImageWalker reads it from; a photo without
 a capture date takes its modified date. Templates, sequences and the resulting
 names are validated before Run is enabled.
 
-The snapshot covers each file and its sidecars. Renames that form a cycle are
-staged through temporary names, and the snapshot is revalidated immediately
-before the first rename. A failed row is restored within bounds, without ever
-clobbering a file that already exists, and earlier successful rows stay renamed
-and are reported as such.
+The snapshot covers each file and its sidecars. Run copies them under the
+reviewed new names without moving the originals. If stopped, completed copies
+remain. To rename one file or folder in place, use Rename (`F2`) instead.
 
 ## 6. Photo Edit
 
-`F12`. Rotation, straightening and nine colour adjustments are applied as a live
+`E`. Rotation, straightening and nine colour adjustments are applied as a live
 draft over a scaled preview, with auto straighten and auto colour, and a
 selector strip of the folder's photos.
 
 Auto straighten levels a tilted photo. Auto colour adjusts its brightness range
 and white balance.
+
+Drag the blue comparison handle to see the original on the left and the
+finished result on the right. Compare keeps the divider visible; Preview shows
+the result side by side with the original. Neither writes to disk.
+
+The right panel groups geometry, colour and save settings. The live RGB
+histogram has draggable Darks, Midtones and Lights handles. Double-click a
+handle to reset it, or click a numerical readout and type an adjustment.
+The rows fit the available panel width and stack their labels on narrow panes.
 
 Straightening turns the picture inside the frame it was given, and the save
 crops away the emptied corners. Nothing is written until Save, which re-renders
@@ -202,15 +208,19 @@ camera, date and GPS fields among them - and an RGB colour profile wherever the
 destination format can hold them. A BMP holds none, and a WebP save writes
 none; see [known-issues.md](known-issues.md).
 
-An in-place Save writes an original backup copy first by default. A format that
+An in-place Save always keeps the original at an unused `-original` name. A format that
 cannot hold the result asks for an explicit save as JPEG rather than silently
-changing the extension. Save as proposes `-edit`, then `-edit 2`, and never an
+changing the extension. In-place Save refuses multi-page TIFFs, animations,
+HDR and higher bit depth images, and files whose content does not match their
+extension. Save as writes the edited visible frame to a separate file.
+Save as proposes `-edit`, then `-edit 2`, and never an
 existing name. Leaving or changing photo with a changed draft always offers
 Save, Don't Save or Cancel, and the target changes only after a successful
 write. A failed save keeps the draft. Saved pixels are refreshed in the item
 and image caches on return to Items.
 
-Perspective editing places four normalized corners on the original photo and
+Horizontal and Vertical correct perspective with sliders. Corners places four
+normalized points on the original photo and
 rectifies their quadrilateral before rotation, straightening, crop and colour
 adjustments. Crop edges and corners can be dragged; the interior moves the
 crop. Escape cancels an active drag rather than closing the task.
@@ -223,6 +233,27 @@ the source area; rejected geometry and allocation failures keep the draft.
 
 Draft Undo/Redo restores geometry and colour adjustments without writing files.
 A successful save or a new photo establishes a new draft baseline.
+
+### Media Edit
+
+Press `E` on the focused audio or video file. Drag the trim handles under the
+preview or press `I` and `O` to mark the playhead; Space plays or pauses. Clear
+trim restores the whole recording. Remove Sound omits audio tracks from a
+video; Left and Right set a quarter turn on supported MP4 and QuickTime
+outputs. **Put the MP4/QuickTime index first** enables progressive playback.
+
+FFmpeg copies compressed packets rather than re-encoding. The export can
+start at an earlier keyframe and the end uses packet boundaries. Edit saves
+in the source container where it can or offers an MP4 copy when compatible.
+Save As can rebuild a readable file without edits. If the staged result does
+not retain the expected tracks, the save fails. Track count and codec checks
+do not guarantee preservation of all private container metadata.
+
+Before publication, Cancel save leaves the source and destination unchanged.
+Save As requires an unused name and in-place Save verifies and retains the
+original under `-original`. The preview uses the same bundled decoding as
+ordinary playback, with Windows codecs as a compatibility fallback. Packet
+copy and playback support are distinct.
 
 ## 7. Synchronize
 
@@ -237,24 +268,23 @@ visible in the saved configuration and blocks analysis rather than silently
 reducing its scope. Unreadable, overlapping, ambiguous and reparse-point trees
 are refused.
 
-Analyze is explicit and walks both trees completely. The reviewed plan lists
-copies and deletions with their direction. Deletion is permanent, and running a
-plan that contains deletions requires a confirmation that states how many files
-will be deleted. The plan is revalidated per row as it runs, and each row keeps
-its own result.
+Analyze is explicit and walks both trees completely. The plan lists missing
+files and their proposed copy directions. If both sides have a file at the
+same path, both are kept; different sizes or modified times are flagged. The
+plan is revalidated per row as it runs, and each row keeps its own result.
 
 ## 8. Recovery
 
 | Workflow | Source retained | Existing-destination risk | After a partial run |
 |---|---|---|---|
 | Open with | Yes | Controlled by the external application | No write, and no rollback for external edits |
-| Copy | Yes | Replace overwrites; Auto-rename is the default | Not cancellable; per-item results retained |
-| Move | No, once a row succeeds | Replace overwrites; Auto-rename is the default | Not cancellable; moved items stay moved |
-| Convert | Yes | Explicit Block, Skip, Auto-rename or Replace | Completed outputs remain |
-| Rename | Names change in place | Explicit Block, Skip, Auto-rename or Replace | Bounded restoration for a failed row; earlier rows stay renamed |
-| Edit Save | Secured in Undo history; an additional visible backup is optional | In-place Save replaces the photo | Unsaved drafts are protected |
-| Edit Save as | Yes | The user confirms the destination | A failed save leaves the draft |
-| Sync | Depends on the reviewed action | Reviewed copy may replace; deletion is permanent | Row results retained; nothing is rolled back |
+| Copy | Yes | Uses new names only | Not cancellable; per-item results retained |
+| Move | No, once a transfer succeeds | Uses new names only | Not cancellable; moved items stay moved |
+| Convert | Yes | Block, Skip or Auto-rename | Completed outputs remain |
+| Batch Rename | Yes | Block, Skip or Auto-rename | Completed copies remain |
+| Edit Save | Kept beside the edited photo and in session Undo | Acts only on the verified original | A failed save leaves the draft |
+| Edit Save as | Yes | Uses a new name only | A failed save leaves the draft |
+| Sync | Yes | Copies only missing files in the chosen direction | Completed copies remain |
 
 ### Session Undo
 

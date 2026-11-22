@@ -7,6 +7,10 @@
 #include "DiagnosticLog.h"
 #include <iw/imaging/Diagnostics.h>
 #include "Undo.h"
+#include "PlatformWin32.h"
+#include "window_screenshot.h"
+#include "Appearance.h"
+#include "AgentSession.h"
 
 #include <filesystem>
 #include <cctype>
@@ -58,8 +62,17 @@ namespace iw
 	class ImageWalkerApp final : public ::ui::app, public std::enable_shared_from_this<ImageWalkerApp>
 	{
 	public:
+		explicit ImageWalkerApp(const screenshot::Request& screenshot, std::unique_ptr<AgentSession> agent = {}) :
+			initialPath_(screenshot.input), capture_(screenshot), agent_(std::move(agent)),
+			screenshotMode_(screenshot.enabled)
+		{
+		}
+
+		int result(int code) const { return agent_ && !agentStarted_ && code == 0 ? 1 : capture_.result(code); }
+
 		bool pre_init() override
 		{
+			if (agent_) return true;
 			diagnostic_session_ = std::make_unique<diagnostics::Session>();
 			imaging::set_diagnostic_sink([](std::wstring_view message) { iw::platform::write_diagnostic(message); });
 			return true;
@@ -67,11 +80,10 @@ namespace iw
 
 		bool parse_command_line(std::string_view commandLine) override
 		{
+			if (screenshotMode_ || agent_) return false;
 			const auto arguments = split_command_line(commandLine);
-			size_t start = !arguments.empty() && arguments.front().find(".exe") != std::string::npos ? 1 : 0;
-			for (size_t i = start; i < arguments.size(); ++i)
+			for (const auto& argument : arguments)
 			{
-				const auto& argument = arguments[i];
 				if (switch_is(argument, "test"))
 				{
 					runTests_ = true;
@@ -107,34 +119,55 @@ namespace iw
 		}
 
 		bool load_settings(const ::platform::setting_file_ptr&) override { return true; }
+		::core::mcp::server_ptr agent_server() override { return agent_ ? agent_->server() : nullptr; }
 
-		bool can_exit() override { return !main_window_ || main_window_->can_exit(); }
+		bool can_exit() override { return agent_ || !main_window_ || main_window_->can_exit(); }
 
 		bool init(std::string_view) override
 		{
-			iw::undo::initialize_live_history();
-			main_window_ = std::make_shared<MainWindow>(&iw::undo::history());
-			auto host = iw::platform::create_frame_host(main_window_);
-			auto folder = ::platform::running_app_path().folder();
-			if (folder.is_empty()) folder = ::platform::current_directory();
-			auto store = ::platform::create_ini_file_settings(folder);
+			platform::win32::refresh_appearance();
+			::platform::setting_file_ptr store;
+			if (agent_) main_window_ = std::make_shared<MainWindow>();
+			else
+			{
+				iw::undo::initialize_live_history();
+				main_window_ = std::make_shared<MainWindow>(&iw::undo::history());
+				auto folder = ::platform::running_app_path().folder();
+				if (folder.is_empty()) folder = ::platform::current_directory();
+				store = ::platform::create_ini_file_settings(folder);
+			}
+			auto host = iw::platform::create_frame_host(agent_ ? nullptr : main_window_);
 			::ui::frame_style style;
 			style.drawn_caption = false;
 			style.client_size = {1280, 800};
 			style.minimum_client = {640, 480};
 			style.resizable = true;
-			style.can_drop = true;
-			style.hardware_accelerated = true;
+			style.can_drop = !agent_;
+			style.hardware_accelerated = !agent_;
+			style.offscreen = agent_ != nullptr;
+			style.no_focus = agent_ != nullptr;
 			style.timer_milliseconds = 50;
-			style.colors = {::ui::style::colors.view_background, ::ui::style::colors.view_text,
-			                ::ui::style::colors.view_selected_background};
+			style.colors = platform::frame_colors();
 			const auto frame = ::ui::create_app_frame(shared_from_this(), store, host, style);
 			if (!frame)
 			{
+				if (agent_) platform::agent::report_error("Could not create the fixture frame.");
 				iw::platform::write_diagnostic(L"ImageWalker 3.0 could not create its main frame.\n");
 				return false;
 			}
+			if (agent_ && !platform::agent::secure_window(frame->handle()))
+			{
+				frame->destroy();
+				platform::agent::report_error("A cloaked, non-interactive window is not available on this desktop.");
+				return false;
+			}
 			iw::platform::bind_main_frame(frame, host);
+			if (agent_)
+			{
+				agentStarted_ = agent_->start(main_window_);
+				if (!agentStarted_) platform::agent::report_error("Could not initialize the isolated fixture window.");
+				return agentStarted_;
+			}
 			if (diagnostic_session_ && diagnostic_session_->error())
 			{
 				iw::platform::write_diagnostic(L"Unable to create the ImageWalker diagnostic log.\n");
@@ -142,23 +175,36 @@ namespace iw
 				                         L"the application folder is writable.",
 				                         L"ImageWalker 3.0 logging");
 			}
-			if (!main_window_->create(1, initialPath_))
+			if (!main_window_->create(screenshotMode_ ? SW_SHOWNOACTIVATE : SW_SHOWNORMAL, initialPath_))
 			{
 				iw::platform::show_error(L"ImageWalker 3.0 could not create its main window.", L"ImageWalker 3.0");
+				return false;
+			}
+			platform::win32::refresh_appearance(platform::win32::owner_window(main_window_->frame()));
+			if (!capture_.start(platform::win32::owner_window(main_window_->frame())))
+			{
+				screenshot::report(L"could not start the capture timer.");
 				return false;
 			}
 			return true;
 		}
 
-		bool wants_gpu() const override { return true; }
+		bool wants_gpu() const override { return !agent_; }
 
 		void system_event(const ::platform::os_event_type event) override
 		{
 			if (event == ::platform::os_event_type::graphics_device_lost) iw::platform::release_graphics();
+			if (event == ::platform::os_event_type::options_changed && main_window_)
+				platform::win32::refresh_appearance(platform::win32::owner_window(main_window_->frame()));
 		}
 
 		bool key_down(char32_t key, ::platform::key_state keys) override
 		{
+			if (agent_) return false;
+			if (key == ::platform::keys::ESCAPE && !keys.control && !keys.alt && !keys.shift && main_window_ &&
+			    main_window_->escape_active_view())
+				return true;
+			if (main_window_ && main_window_->view_shortcut(key, keys.control, keys.shift, keys.alt)) return true;
 			return iw::platform::dispatch_menu_accelerator(key, keys);
 		}
 
@@ -169,12 +215,13 @@ namespace iw
 		void track_menu(const ::ui::frame_ptr& parent, core::recti bounds,
 		                const std::vector<::ui::command_ptr>& commands) override
 		{
-			if (parent) parent->track_menu(bounds, commands);
+			if (parent && !agent_) parent->track_menu(bounds, commands);
 		}
 
 		void final_exit() override
 		{
 			iw::platform::shutdown_runtime();
+			if (agent_) agent_->stop();
 			if (main_window_ && main_window_->frame()) main_window_->frame()->set_reactor({});
 			main_window_.reset();
 			diagnostic_session_.reset();
@@ -184,6 +231,10 @@ namespace iw
 		std::shared_ptr<MainWindow> main_window_;
 		std::unique_ptr<diagnostics::Session> diagnostic_session_;
 		std::filesystem::path initialPath_;
+		screenshot::Timer capture_;
+		std::unique_ptr<AgentSession> agent_;
+		bool agentStarted_{};
+		bool screenshotMode_{};
 		bool runTests_{};
 		bool skipClipboardTests_{};
 	};
@@ -191,7 +242,36 @@ namespace iw
 
 int main(int argc, char* argv[])
 {
+	const auto request = iw::platform::agent::command_line();
+	if (request.enabled)
+	{
+		if (!request.error.empty())
+		{
+			iw::platform::agent::report_error(request.error);
+			return 2;
+		}
+		std::string error;
+		auto fixture = iw::platform::agent::Fixture::open(request.root, error);
+		if (!fixture)
+		{
+			iw::platform::agent::report_error(error);
+			return 2;
+		}
+		// libdesktop::run opens its default INI and log before any app hook can bypass them.
+		// Give even those runtime files a different identity from the interactive application.
+		::core::set_app_name("imagewalker30-mcp");
+		const iw::screenshot::Request noTimedCapture;
+		auto agent = std::make_unique<iw::AgentSession>(std::move(fixture), request.capture);
+		const auto app = std::make_shared<iw::ImageWalkerApp>(noTimedCapture, std::move(agent));
+		return app->result(::platform::run(app, argc, argv));
+	}
 	::core::set_app_name("imagewalker30");
-	auto app = std::make_shared<iw::ImageWalkerApp>();
-	return ::platform::run(app, argc, argv);
+	const auto screenshot = iw::screenshot::command_line();
+	if (screenshot.enabled && screenshot.output.empty())
+	{
+		iw::screenshot::report_usage();
+		return 2;
+	}
+	auto app = std::make_shared<iw::ImageWalkerApp>(screenshot);
+	return app->result(::platform::run(app, argc, argv));
 }

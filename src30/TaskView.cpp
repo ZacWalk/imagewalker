@@ -11,7 +11,6 @@ namespace iw
 {
 	namespace
 	{
-		constexpr int panelWidth = 300;
 		constexpr int thumbnailEdge = 56;
 		constexpr size_t maximumThumbnails = 12;
 
@@ -44,7 +43,7 @@ namespace iw
 		runner_.invalidate();
 	}
 
-	bool TaskView::create(const platform::WindowFramePtr& parent, Host host)
+	bool TaskView::create(const platform::WindowFramePtr& parent, Host host, const bool reuseFrame)
 	{
 		if (!parent) return false;
 		host_ = std::move(host);
@@ -54,8 +53,10 @@ namespace iw
 		options.visible = false;
 		options.clipChildren = true;
 		options.eraseBackground = false;
-		frame_ = parent->create_child(shared_from_this(), options);
+		ownsFrame_ = !reuseFrame;
+		frame_ = reuseFrame ? parent : parent->create_child(shared_from_this(), options);
 		if (!frame_) return false;
+		if (reuseFrame) frame_->set_reactor(shared_from_this());
 		dpi_ = frame_->dpi();
 		panel_.set_dpi(dpi_);
 		panel_.set_invalidate_handler([this] { invalidate(); });
@@ -161,11 +162,13 @@ namespace iw
 		const auto keepAlive = weak_from_this().lock();
 		runner_.invalidate();
 		++thumbnailGeneration_;
+		if (panelCapture_ && frame_) frame_->release_capture();
+		release_hosted_controls();
 		const auto frame = std::exchange(frame_, {});
 		if (frame)
 		{
 			frame->set_reactor({});
-			frame->close();
+			if (ownsFrame_) frame->close();
 		}
 		return true;
 	}
@@ -174,7 +177,7 @@ namespace iw
 	{
 		if (targets_ == targets) return;
 		targets_ = std::move(targets);
-		request_thumbnails();
+		if (panel_shows_targets()) request_thumbnails();
 		if (frame_ && uses_plan()) controls_changed();
 		else
 		{
@@ -607,24 +610,26 @@ namespace iw
 
 	int TaskView::row_height() const
 	{
-		return metric(20);
+		return rowHeight_ ? rowHeight_ : metric(26);
 	}
 
 	void TaskView::layout(const ui::CanvasRenderer& renderer)
 	{
 		if (!frame_) return;
 		const app::recti client = frame_->client_rect();
-		const int panel = (std::min)(metric(panelWidth), (std::max)(metric(160), client.width / 2));
+		const int panel = (std::min)(metric(tool_panel_width()), (std::max)(metric(160), client.width / 2));
+		const int panelLeft = (std::max)(0, client.width - panel);
 		const int gap = metric(8);
-		const int statusHeight = metric(24);
-		const app::recti panelArea{gap, gap, panel - gap * 2, client.height - gap * 2};
+		const int line = (std::max)(metric(16), renderer.measure_text(L"Wg").height);
+		rowHeight_ = line + metric(7);
+		const int statusHeight = uses_plan() || !host_.status ? line + metric(8) : 0;
+		const app::recti panelArea{panelLeft + gap, gap, panel - gap * 2, (std::max)(0, client.height - gap * 2)};
 		// The panel is laid out at its scrolled position, so hit testing and drawing agree.
 		panelBounds_ = {panelArea.x, panelArea.y - panelScroll_.offset, (std::max)(0, panelArea.width - metric(12)),
 		                panelArea.height};
 		panel_.layout(panelBounds_, renderer);
 
-		const int thumbnailRows = targets_.empty() ? 0
-		                                           : metric(thumbnailEdge) + renderer.measure_text(L"Wg").height + gap;
+		const int thumbnailRows = !panel_shows_targets() || targets_.empty() ? 0 : metric(thumbnailEdge) + line + gap;
 		const auto previousOffset = panelScroll_.offset;
 		panelScroll_.layout(panelArea, panel_.content_height() + thumbnailRows + gap, panelScroll_.offset, metric(12),
 		                    metric(28));
@@ -636,12 +641,12 @@ namespace iw
 		const int thumbnailTop = panelBounds_.y + panel_.content_height() + gap;
 		thumbnailBounds_ = {panelBounds_.x, thumbnailTop, panelBounds_.width, thumbnailRows};
 
-		const app::recti right{panel, gap, (std::max)(0, client.width - panel - gap), client.height - gap * 2};
-		reviewHeaderBounds_ = {right.x, right.y, right.width, metric(22)};
-		statusBounds_ = {right.x, right.bottom() - statusHeight, right.width, statusHeight};
-		reviewBounds_ = {right.x, reviewHeaderBounds_.bottom(), right.width,
+		const app::recti content{gap, gap, (std::max)(0, panelLeft - gap), panelArea.height};
+		reviewHeaderBounds_ = {content.x, content.y, content.width, row_height()};
+		statusBounds_ = {content.x, content.bottom() - statusHeight, content.width, statusHeight};
+		reviewBounds_ = {content.x, reviewHeaderBounds_.bottom(), content.width,
 		                 (std::max)(0, statusBounds_.y - reviewHeaderBounds_.bottom() - metric(4))};
-		contentBounds_ = {right.x, right.y, right.width, (std::max)(0, statusBounds_.y - right.y - metric(4))};
+		contentBounds_ = {content.x, content.y, content.width, (std::max)(0, statusBounds_.y - content.y - metric(4))};
 		reviewScroll_.layout(reviewBounds_, static_cast<int>(plan_.rows.size()) * row_height(), reviewScroll_.offset,
 		                     metric(12), metric(28));
 		layout_hosted_controls();
@@ -751,7 +756,7 @@ namespace iw
 			const bool selectedRow = running_ && index == runningRow_;
 			const color foreground = selectedRow ? platform::system_color(platform::SystemColor::highlightText)
 			                         : row.state == tasks::RowState::blocked || row.state == tasks::RowState::failed
-			                             ? color{0xb0, 0x30, 0x20, 0xff}
+			                             ? platform::system_color(platform::SystemColor::warningText)
 			                         : row.state == tasks::RowState::skipped || row.state == tasks::RowState::notRun
 			                             ? gray
 			                             : text;
@@ -768,13 +773,14 @@ namespace iw
 
 	void TaskView::draw_status(const ui::CanvasRenderer& renderer) const
 	{
+		if (statusBounds_.height <= 0) return;
 		auto settingsReason = !busy() && !finished_ ? analysis_block_reason() : std::wstring{};
 		if (settingsReason.empty() && !busy() && !finished_) settingsReason = run_block_reason();
 		const auto& text = settingsReason.empty() ? statusText_ : settingsReason;
 		renderer.text(text, statusBounds_,
-		              settingsReason.empty() && (plan_.can_run() || finished_ || text.empty())
+		              settingsReason.empty() && (!uses_plan() || plan_.can_run() || finished_ || text.empty())
 		                  ? platform::system_color(platform::SystemColor::windowText)
-		                  : color{0xb0, 0x30, 0x20, 0xff},
+		                  : platform::system_color(platform::SystemColor::warningText),
 		              platform::TextFormat::left | platform::TextFormat::verticalCenter |
 		                  platform::TextFormat::singleLine | platform::TextFormat::endEllipsis);
 	}
@@ -814,8 +820,8 @@ namespace iw
 		const app::recti client = frame_->client_rect();
 		renderer.fill(client, platform::system_color(platform::SystemColor::window));
 		layout(renderer);
-		draw_panel(renderer);
 		draw_content(renderer, contentBounds_);
+		draw_panel(renderer);
 		draw_status(renderer);
 	}
 
@@ -839,6 +845,7 @@ namespace iw
 		}
 		if (frame == frame_ && message == platform::WindowMessage::captureLost)
 		{
+			panel_.cancel_drag();
 			panel_.mouse_up({});
 			panelCapture_ = false;
 			draggedScroll_ = nullptr;
@@ -923,10 +930,13 @@ namespace iw
 			if (!handled) content_mouse(message, input);
 			break;
 		}
+		case platform::MouseMessage::leftButtonDoubleClick:
+			if (!insidePanel || !panel_.double_click(input.point)) content_mouse(message, input);
+			break;
 
 		case platform::MouseMessage::wheel:
 			// The pointer decides which of the two scrolling regions moves.
-			if (input.point.x < contentBounds_.x)
+			if (input.point.x >= contentBounds_.right())
 			{
 				if (panelScroll_.scroll_by(-input.wheelDelta / 2)) invalidate();
 				break;
@@ -944,7 +954,7 @@ namespace iw
 		const auto weak = weak_from_this();
 		options.escaped = [weak]
 		{
-			if (const auto self = weak.lock()) self->ask_host_to_close();
+			if (const auto self = weak.lock()) self->escape();
 		};
 		options.tabbed = [weak, controlId](const bool backwards)
 		{
@@ -986,13 +996,30 @@ namespace iw
 		const auto keepAlive = shared_from_this();
 		if (message == platform::KeyMessage::character) return input.character == L'\t' && control_key(input) ? 1 : 0;
 		if (message != platform::KeyMessage::down) return 0;
-		if (input.key == platform::KeyCode::escape)
+		if (input.key == platform::KeyCode::escape && !input.control && !input.alt && !input.shift)
 		{
-			if (content_dragging()) return content_key(input) ? 1 : 0;
-			if (host_.closed) host_.closed();
+			escape();
 			return 1;
 		}
+		if (content_key_first(input)) return content_key(input) || control_key(input) ? 1 : 0;
 		return control_key(input) || content_key(input) ? 1 : 0;
+	}
+
+	void TaskView::escape()
+	{
+		if (panel_.cancel_drag())
+		{
+			panelCapture_ = false;
+			if (frame_) frame_->release_capture();
+			return;
+		}
+		if (content_dragging())
+		{
+			platform::KeyInput input;
+			input.key = platform::KeyCode::escape;
+			content_key(input);
+		}
+		else ask_host_to_close();
 	}
 
 	void TaskView::request_thumbnails()

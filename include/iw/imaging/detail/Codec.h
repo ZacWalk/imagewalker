@@ -298,13 +298,6 @@ namespace iw::imaging
 			return result;
 		}
 
-		inline bool write_bytes(const std::filesystem::path& path, const std::span<const std::uint8_t> bytes)
-		{
-			auto file = ::platform::open_file(desktop_path(path), ::platform::file_open_mode::create);
-			if (!file || file->write(bytes.data(), bytes.size()) != bytes.size()) return false;
-			return file->flush();
-		}
-
 		inline std::uint32_t average_2x2(const std::uint32_t top_left, const std::uint32_t top_right,
 		                                 const std::uint32_t bottom_left, const std::uint32_t bottom_right)
 		{
@@ -342,24 +335,21 @@ namespace iw::imaging
 
 	inline PixelDecoder pixel_decoder(const std::wstring_view extension, const std::span<const std::uint8_t> header)
 	{
-		using namespace codec_detail;
-		if (header.empty() ? lower_extension(extension) == L".webp" : has_webp_signature(header))
-			return PixelDecoder::webp;
-		const auto wic_extensions = windows_image_extensions();
-		const auto lower = lower_extension(extension);
-		if (lower == L".webp" || lower == L".png" || lower == L".tif" || lower == L".tiff" ||
-		    std::ranges::find(wic_extensions, lower) != wic_extensions.end() ||
-		    !detail::modern_native_supports_extension(extension))
-			return PixelDecoder::wic;
-		return PixelDecoder::native;
+		using libfiles::image_format;
+		const auto detected = libfiles::detect_image_format(header);
+		auto format = detected;
+		if (format == image_format::unknown)
+			format = detail::native_codec_detail::format_from_extension(extension).value_or(image_format::unknown);
+		if (format == image_format::webp)
+			return detected == image_format::webp || header.empty() ? PixelDecoder::webp : PixelDecoder::wic;
+		return libfiles::can_decode(format) || libfiles::can_decode_document(format) ? PixelDecoder::native
+		                                                                           : PixelDecoder::wic;
 	}
 
 	inline bool read_dimensions(const std::filesystem::path& path, int& width, int& height)
 	{
 		using namespace codec_detail;
-		const auto backend = pixel_decoder(lower_extension(path));
-		if (backend == PixelDecoder::webp) return webp::probe(path, width, height);
-		if (backend == PixelDecoder::native) return detail::modern_native_dimensions(path, width, height);
+		if (detail::modern_native_dimensions(path, width, height)) return true;
 		const auto probe = ::platform::probe_image_file(core_path(path));
 		if (!probe || probe->width > INT_MAX || probe->height > INT_MAX) return false;
 		width = static_cast<int>(probe->width);
@@ -470,12 +460,9 @@ namespace iw::imaging
 		    (options.thumbnail && (options.maximumWidth == 0 || options.maximumHeight == 0)))
 			return failed_decode(ImageError::invalid_input, L"Invalid image decode request.");
 
-		const auto backend = pixel_decoder(lower_extension(path));
-		if (backend == PixelDecoder::native || backend == PixelDecoder::webp)
-			return detail::modern_decode_native(path, options);
-
-		auto loaded = ::platform::load_image_file(core_path(path), bitmap_options(options));
-		return map_bitmap_result(std::move(loaded), options);
+		auto native = detail::modern_decode_native(path, options);
+		if (native.error != ImageError::unsupported) return native;
+		return map_bitmap_result(::platform::load_image_file(core_path(path), bitmap_options(options)), options);
 	}
 
 	inline DecodeResult decode(const std::span<const std::uint8_t> bytes, const std::wstring_view extension,
@@ -489,7 +476,10 @@ namespace iw::imaging
 
 		const auto backend = pixel_decoder(extension, bytes);
 		if (backend == PixelDecoder::native || backend == PixelDecoder::webp)
-			return detail::modern_decode_native(bytes, extension, options);
+		{
+			auto native = detail::modern_decode_native(bytes, extension, options);
+			if (native.error != ImageError::unsupported) return native;
+		}
 
 		return map_bitmap_result(::platform::load_image_memory(bytes, bitmap_options(options)), options);
 	}
@@ -570,18 +560,19 @@ namespace iw::imaging
 		}
 	}
 
-	inline OperationResult encode_to_file(const PixelImage& image, const std::filesystem::path& temporary,
-	                                      const ImageSaveFormat format, const SaveOptions& options)
+	inline OperationResult encode(const PixelImage& image, const ImageSaveFormat format, const SaveOptions& options,
+	                              const std::function<bool(std::span<const std::uint8_t>)>& write)
 	{
 		using namespace codec_detail;
 		OperationResult result;
 		const auto native = image_format(format);
-		if (temporary.empty() || !native)
+		if (!write || !native)
 		{
 			result.error = ImageError::invalid_input;
 			result.message = L"Invalid or unsupported image encode request.";
 			return result;
 		}
+
 		try
 		{
 			if (format == ImageSaveFormat::webp)
@@ -592,7 +583,7 @@ namespace iw::imaging
 					result.error = ImageError::encode_failed;
 					result.message = L"The WebP encoder returned no data.";
 				}
-				else if (!write_bytes(temporary, encoded))
+				else if (!write(encoded))
 				{
 					result.error = ImageError::encode_failed;
 					result.message = L"The WebP temporary output could not be written.";
@@ -639,7 +630,7 @@ namespace iw::imaging
 						L"The photo's marker metadata could not be carried into the saved JPEG.");
 				else encoded.data = std::move(carried);
 			}
-			if (!write_bytes(temporary, encoded.data))
+			if (!write(encoded.data))
 			{
 				result.error = ImageError::encode_failed;
 				result.message = L"The encoded image could not be written.";
@@ -657,6 +648,7 @@ namespace iw::imaging
 		}
 		return result;
 	}
+
 }
 
 #pragma pop_macro("max")

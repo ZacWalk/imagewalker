@@ -9,7 +9,7 @@ commands and indexes every document.
 | Document | Read before |
 |---|---|
 | [docs/app-rules.md](docs/app-rules.md) | Any change to settings, logging, workers, resources or the 3.0 file tasks |
-| [docs/porting.md](docs/porting.md) | Any change to the WTL releases, 1.0 to 2.3 |
+| [docs/porting.md](docs/porting.md) | Any change to the 1.0 SDK or 2.x WTL releases |
 | [docs/architecture-2x.md](docs/architecture-2x.md) | Any change to ImageWalker 2.0, 2.2 or 2.3 |
 | [docs/reliability.md](docs/reliability.md) | Any change to file writes, pixels, metadata or threading |
 | [docs/imaging.md](docs/imaging.md) | Any change to shared image loading, codecs or manipulation |

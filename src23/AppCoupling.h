@@ -48,9 +48,9 @@ public:
 	virtual void ShowSearchPane() = 0;
 	virtual void StartSearch(Search::Type type) = 0;
 	virtual void SignalImageLoadComplete(CImageLoad *pInfo) = 0;
-	virtual void SignalSearching() = 0;
-	virtual void SignalSearchingComplete() = 0;
-	virtual void SignalSearchingFolder(const CString &strPath) = 0;
+	virtual void SignalSearching(UINT_PTR generation) = 0;
+	virtual void SignalSearchingComplete(UINT_PTR generation) = 0;
+	virtual void SignalSearchingFolder(const CString &strPath, UINT_PTR generation) = 0;
 	virtual void SignalThumbnailing() = 0;
 	virtual void SignalThumbnailingComplete() = 0;
 	virtual void SortOrderChanged(int order) = 0;

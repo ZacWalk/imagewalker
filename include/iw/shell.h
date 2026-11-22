@@ -597,6 +597,19 @@ namespace IW
 		}
 	};
 
+	template<class Open>
+	bool OpenStartupFolder(HWND owner, const CShellItem& remembered, Open open)
+	{
+		if (!remembered.IsNull() && open(remembered))
+			return true;
+
+		CShellItem item;
+		if (item.Open(owner, CSIDL_MYPICTURES) && open(item))
+			return true;
+		if (item.Open(owner, CSIDL_PERSONAL) && open(item))
+			return true;
+		return open(CShellDesktopItem());
+	}
 
 	class CShellFolder : public CComPtr<IShellFolder>
 	{

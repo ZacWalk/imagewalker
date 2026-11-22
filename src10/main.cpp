@@ -8,11 +8,10 @@
 
 #include "iw/crashreport.h"
 #include "iw/logfile.h"
-#include "iw/imagingdiagnostics.h"
 #include "iw/testrunner.h"
 #include "iw/workqueue.h"
+#include "window_screenshot.h"
 
-CAppModule _Module;
 extern const std::string_view s_app_name = "ImageWalker10";
 
 // The folder named on the command line, if any.
@@ -58,33 +57,39 @@ static int RunMessageLoop(CMainFrame& frame)
 	return static_cast<int>(msg.wParam);
 }
 
-int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR lpstrCmdLine, int nCmdShow)
+int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR lpstrCmdLine, int nCmdShow)
 {
 	// Before anything else: the reporter ends in a modal MessageBox, and a
 	// faulting case must reach the harness's SEH filter instead.
 	if (IW::Test::IsRequested(lpstrCmdLine))
 		return IW::Test::RunAll("ImageWalker 1.0");
 
+	const auto screenshot = iw::screenshot::command_line();
+	if (screenshot.enabled && screenshot.output.empty())
+	{
+		iw::screenshot::report_usage();
+		return 2;
+	}
+	iw::screenshot::Timer capture(screenshot);
+
 	IW::Crash::Install(L"imagewalker10");
 	IW::Logging::Open(_T("ImageWalker 1.0"));
-	IW::ConfigureImagingDiagnostics();
-
-	// Drag and drop needs full OLE, not just COM.
-	if (FAILED(::OleInitialize(nullptr)))
+	if (FAILED(::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)))
 	{
-		IW::Logging::Error(_T("OleInitialize failed"));
+		IW::Logging::Error("Shell COM initialization failed");
 		return 1;
 	}
 
-	_Module.Init(nullptr, hInstance);
-
 	// The toolbar, status bar and COMBOBOXEX classes.
-	INITCOMMONCONTROLSEX icc = {sizeof(icc), ICC_WIN95_CLASSES | ICC_USEREX_CLASSES};
+	INITCOMMONCONTROLSEX icc = {sizeof(icc), ICC_WIN95_CLASSES | ICC_USEREX_CLASSES | ICC_LINK_CLASS};
 
 	if (!InitCommonControlsEx(&icc))
 		IW::Logging::LastError(_T("InitCommonControlsEx"));
 
-	g_strCmdLine = lpstrCmdLine;
+	if (screenshot.enabled)
+		g_strCmdLine = NarrowText(screenshot.input.c_str());
+	else
+		g_strCmdLine = lpstrCmdLine;
 	g_strCmdLine.Remove(_T('\"'));
 	g_strCmdLine.Trim();
 
@@ -94,23 +99,33 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR lpstrCmdLine, int nC
 		CSplashWnd splash;
 		CMainFrame frame;
 
-		if (frame.CreateEx() == nullptr)
+		if (frame.Create() == nullptr)
 		{
 			IW::Logging::Error(_T("Failed to create the main frame"));
 		}
 		else
 		{
-#ifndef _DEBUG
-			splash.Show(frame);
-#endif
-
-			if (!Settings::RestoreWindowPlacement(frame))
+			if (screenshot.enabled)
+				frame.ShowWindow(SW_SHOWNOACTIVATE);
+			else if (!Settings::RestoreWindowPlacement(frame))
 				frame.ShowWindow(nCmdShow);
+
+#ifndef _DEBUG
+			if (!screenshot.enabled && !frame.IsIconic())
+				splash.Show(frame);
+#endif
 
 			frame.UpdateWindow();
 
 			IW::Logging::Write(_T("entering message loop"));
-			nRet = RunMessageLoop(frame);
+			if (capture.start(frame))
+				nRet = capture.result(RunMessageLoop(frame));
+			else
+			{
+				iw::screenshot::report(L"could not start the capture timer.");
+				frame.DestroyWindow();
+			}
+			if (frame.IsWindow()) frame.DestroyWindow();
 		}
 
 		// Close before the panes go, not after: nothing drains this queue once
@@ -122,8 +137,7 @@ int WINAPI _tWinMain(HINSTANCE hInstance, HINSTANCE, LPTSTR lpstrCmdLine, int nC
 		// what stops the workers and writes the current folder back to the ini.
 	}
 
-	::OleUninitialize();
-	_Module.Term();
+	::CoUninitialize();
 
 	IW::Logging::Write(_T("exit code %d"), nRet);
 	IW::ShutdownWorkQueues();

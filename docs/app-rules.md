@@ -2,12 +2,13 @@
 
 Rules for all five applications.
 
-- Each is a standalone x64 executable with its own entry point and an
+- Each is a standalone x86 or x64 executable with its own entry point and an
   application test suite covering its identity, layout, settings and command
   availability.
-- Load and manipulate images through the shared imaging headers and the
-  libraries they wrap; keep UI, resources, settings, worker scheduling and
-  final file publication in the application. See [imaging.md](imaging.md).
+- Keep UI, resources, settings, worker scheduling and final file publication
+  in the application. Use the shared imaging headers in 2.x and 3.0.
+  ImageWalker 1.0 uses libfiles and the Windows SDK directly.
+  See [imaging.md](imaging.md).
 - Debug executables end in `d`; binaries, settings and logs all live in `exe\`.
 - Version identity lives in each application's directory: `ImageWalker.rc` for
   1.0, `Ver.h` and `ImageWalker.rc` for 2.x, and the `libdesktop_add_app` call
@@ -32,14 +33,14 @@ Rules for all five applications.
 - A worker-completion payload posted to the UI thread carries ownership, and
   the poster reclaims it when the post fails, as the 2.x
   `CMainFrame::SignalImageLoadComplete` and `SignalSearchingFolder` do.
-- The WTL applications' resource scripts embed their own `app.manifest`;
+- The 1.0 and 2.x resource scripts embed their own `app.manifest`;
   `libdesktop_add_app` generates 3.0's manifest and version resource. Each
   application's icon is its lowest-numbered icon resource.
 - All five embed the compiled help and open it from the copy described in
   [build.md](build.md#help). ImageWalker 3.0 has its own topics and opens them
   through the HTML Help API, not the WTL helper.
-- Preserve ImageWalker 1.0's read-only scope and its smaller frame and views,
-  and give it the common codec registry rather than a loader set of its own.
+- Preserve ImageWalker 1.0's read-only scope and its smaller frame and views.
+  Read through libfiles' public codec registry rather than implementing codecs.
 - Keep ImageWalker 3.0 changes in its own platform, canvas, collection and task
   interfaces, with no dependency on a WTL application.
 

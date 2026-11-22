@@ -17,7 +17,7 @@
 #include "ViewFolderDrop.h"
 #include "ViewFolderLayout.h"
 #include "AppThreadFolder.h"
-#include "ViewRenameDlg.h"
+#include "iw/legacy/ViewRenameDlg.h"
 #include "ViewBackBuffer.h"
 #include "ViewToolTip.h"
 
@@ -354,7 +354,9 @@ public:
 			return false;
 		}
 
-		_strNewCreation = strNewImageName;
+		// Pasting writes a copy; it need not move away from a dirty image.
+		if (!_state.Image.IsDirty())
+			_strNewCreation = strNewImageName;
 		return true;
 	}
 
@@ -1152,8 +1154,12 @@ private:
 		switch(nChar)
 		{
 		case VK_RETURN:
-			// Enter is "show it": a picture goes full screen, a folder opens.
-			pT->OpenFocusItem(GetAsyncKeyState(VK_CONTROL) >= 0, true);
+			if (GetKeyState(VK_CONTROL) >= 0 && GetKeyState(VK_SHIFT) >= 0) pT->OpenFocusItem(true, true);
+			return;
+		case VK_SPACE:
+			if (GetKeyState(VK_CONTROL) < 0 && GetKeyState(VK_SHIFT) >= 0)
+				if (const auto focus = GetFolder()->GetFocusItem(); focus >= 0)
+					_state.Folder.Select(focus, MK_CONTROL, true);
 			return;
 		case VK_PRIOR:
 			pT->PageUp();

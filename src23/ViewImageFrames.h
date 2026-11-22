@@ -485,7 +485,7 @@ public:
 
 			wnd.SetWindowRgn(NULL);
 			wnd.SetWindowPos(NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
-			wnd.RedrawWindow(NULL, NULL, RDW_ALLCHILDREN | RDW_INVALIDATE | RDW_FRAME);
+			wnd.RedrawWindow(NULL, NULL, RDW_ALLCHILDREN | RDW_INVALIDATE | RDW_FRAME | RDW_ERASE);
 		}
 	};
 
@@ -535,7 +535,7 @@ public:
 	void InvalidateApplication()
 	{
 		CWindow wnd(_parent.GetHWnd());
-		wnd.GetTopLevelWindow().RedrawWindow(NULL, NULL, RDW_ALLCHILDREN | RDW_INVALIDATE);
+		wnd.GetTopLevelWindow().RedrawWindow(NULL, NULL, RDW_ALLCHILDREN | RDW_INVALIDATE | RDW_ERASE);
 	}
 
 	CRect GetRenderRect() const

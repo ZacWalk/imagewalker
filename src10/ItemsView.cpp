@@ -8,19 +8,19 @@
 #include "iw/logfile.h"
 
 #include <algorithm>
+#include <libfiles/decode.h>
+#include <libfiles/document.h>
 
 static constexpr TCHAR szSection[] = _T("Default");
 static constexpr TCHAR szFolderKey[] = _T("Folder");
 static constexpr TCHAR szSortKey[] = _T("Sort By");
 static constexpr TCHAR szDetailKey[] = _T("Detail View");
+static constexpr TCHAR szThumbnailSizeKey[] = _T("Thumbnail Size");
 
 namespace
 {
 	// Toolbar glyph indices into IDB_VIEWS, as 2.0 used them.
 	enum { kGlyphThumbnails = 0, kGlyphDetails = 1, kGlyphOptions = 4 };
-
-	const CSize sizePadding(THUMB_PADDING, THUMB_PADDING);
-	const CSize sizeThumb(THUMB_X, THUMB_Y);
 
 	CString FormatDate(const FILETIME& time)
 	{
@@ -46,6 +46,8 @@ CItemsView::CItemsView()
 {
 	m_alive = std::make_shared<int>(0);
 	m_bDetail = Settings::GetInt(szSection, szDetailKey, 0) != 0;
+	m_nThumbnailSize = std::clamp(Settings::GetInt(szSection, szThumbnailSizeKey, IMAGE_X),
+	                             static_cast<int>(CThumbnailGrid::minEdge), static_cast<int>(CThumbnailGrid::maxEdge));
 
 	SetSortCommand(Settings::GetInt(szSection, szSortKey, ID_VIEW_SORT_NAME));
 }
@@ -58,6 +60,7 @@ CItemsView::~CItemsView()
 
 	m_threadDirectory.Stop();
 	m_threadLoader.Stop();
+	if (m_font) ::DeleteObject(m_font);
 
 	// Any job that came back after this point has nothing to complete into.
 	m_alive.reset();
@@ -67,11 +70,64 @@ CItemsView::~CItemsView()
 
 	Settings::SetInt(szSection, szSortKey, m_nSortCommand);
 	Settings::SetInt(szSection, szDetailKey, m_bDetail ? 1 : 0);
+	Settings::SetInt(szSection, szThumbnailSizeKey, m_nThumbnailSize);
+}
+
+LRESULT CItemsView::WindowMessage(UINT message, WPARAM wParam, LPARAM lParam)
+{
+	switch (message)
+	{
+	case WM_CREATE: return OnCreate(reinterpret_cast<LPCREATESTRUCT>(lParam));
+	case WM_DESTROY: OnDestroy(); break;
+	case WM_SIZE: OnSize(static_cast<UINT>(wParam), CSize(LOWORD(lParam), HIWORD(lParam))); return 0;
+	case WM_LBUTTONDOWN:
+		OnLButtonDown(static_cast<UINT>(wParam), MessagePoint(lParam));
+		return 0;
+	case WM_LBUTTONDBLCLK: OnLButtonDblClk(0, MessagePoint(lParam)); return 0;
+	case WM_MOUSEMOVE: OnMouseMove(0, MessagePoint(lParam)); break;
+	case WM_KEYDOWN: if (OnKeyDown(static_cast<UINT>(wParam))) return 0; break;
+	case WM_COMMAND: if (Command(LOWORD(wParam))) return 0; break;
+	case WM_NOTIFY:
+		if (auto* header = reinterpret_cast<NMHDR*>(lParam); header && header->code == TTN_GETDISPINFOA)
+			return OnToolTipText(header);
+		break;
+	}
+	return CViewBase<CItemsView>::WindowMessage(message, wParam, lParam);
+}
+
+bool CItemsView::Command(int id)
+{
+	switch (id)
+	{
+	case ID_ITEMS_OPTIONS: OnItemsOptions(0, id, {}); return true;
+	case ID_BROWSE_PARENT: OnBrowseParent(0, id, {}); return true;
+	case ID_BROWSE_BACK: OnBrowseBack(0, id, {}); return true;
+	case ID_BROWSE_FORWARD: OnBrowseForward(0, id, {}); return true;
+	case ID_EDIT_COPY: OnEditCopy(0, id, {}); return true;
+	case ID_EDIT_SELECT_ALL: OnEditSelectAll(0, id, {}); return true;
+	case ID_EDIT_INVERTSELECTION: OnEditInvertSelection(0, id, {}); return true;
+	case ID_EDIT_TOGGLE_FOCUS:
+		Select(m_selection.Focus(), true, false);
+		return true;
+	case ID_VIEW_REFRESH: OnViewRefresh(0, id, {}); return true;
+	case ID_VIEW_SORT_NAME:
+	case ID_VIEW_SORT_TYPE:
+	case ID_VIEW_SORT_SIZE:
+	case ID_VIEW_SORT_DATE: OnViewSort(0, id, {}); return true;
+	case ID_ITEMS_THUMBNAILS:
+	case ID_ITEMS_DETAILS:
+		OnViewMode(0, id, {});
+		::SendMessage(GetTopLevelParent(), WM_IW_SELECTIONCHANGED, 0, 0);
+		return true;
+	case ID_VIEW_NEXTIMAGE: OnNextImage(0, id, {}); return true;
+	case ID_VIEW_PREVIOUSIMAGE: OnPreviousImage(0, id, {}); return true;
+	}
+	return false;
 }
 
 LRESULT CItemsView::OnCreate(LPCREATESTRUCT)
 {
-	InitViewBase();
+	if (!InitViewBase()) return -1;
 
 	// The strip lives in the right scroll bar gutter, which is therefore always
 	// present whether or not the bar itself is needed.
@@ -82,11 +138,11 @@ LRESULT CItemsView::OnCreate(LPCREATESTRUCT)
 	if (!::SystemParametersInfo(SPI_GETICONTITLELOGFONT, sizeof(LOGFONT), &logfont, 0))
 		::GetObject(::GetStockObject(DEFAULT_GUI_FONT), sizeof(logfont), &logfont);
 
-	m_font.CreateFontIndirect(&logfont);
+	m_font = ::CreateFontIndirect(&logfont);
 
 	{
 		CClientDC dc(m_hWnd);
-		HFONT hOld = dc.SelectFont(m_font);
+		HFONT hOld = dc.SelectFont(m_font ? m_font : DefaultGuiFont());
 		TEXTMETRIC tm = {0};
 		dc.GetTextMetrics(&tm);
 		dc.SelectFont(hOld);
@@ -94,10 +150,11 @@ LRESULT CItemsView::OnCreate(LPCREATESTRUCT)
 		m_nRowHeight = max(tm.tmHeight + 6, 20);
 	}
 
-	m_toolBar.Create(m_hWnd, CRect(0, 0, 0, 0), nullptr,
+	if (!m_toolBar.Create(m_hWnd, CRect(0, 0, 0, 0), nullptr,
 	                 WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | CCS_VERT | CCS_NORESIZE |
 	                 CCS_NOPARENTALIGN | CCS_NODIVIDER | TBSTYLE_TOOLTIPS | TBSTYLE_WRAPABLE,
-	                 0, kToolBarId);
+	                 0, kToolBarId))
+		return -1;
 
 	m_toolBar.SetButtonStructSize(sizeof(TBBUTTON));
 
@@ -105,10 +162,7 @@ LRESULT CItemsView::OnCreate(LPCREATESTRUCT)
 	// makes the options button wider than the scroll bar gutter, and a wrapable
 	// bar then wraps it out of sight. The menu comes off its command instead.
 
-	CImageList images;
-	images.CreateFromImage(IDB_VIEWS, 8, 1, RGB(0xff, 0x00, 0xff),
-	                       IMAGE_BITMAP, LR_CREATEDIBSECTION);
-	m_toolBar.SetImageList(images.Detach());
+	m_toolBar.SetImageList(LoadToolbarImages(IDB_VIEWS, 8));
 
 	TBBUTTON buttons[] =
 	{
@@ -121,7 +175,7 @@ LRESULT CItemsView::OnCreate(LPCREATESTRUCT)
 	m_toolBar.SetBitmapSize(CSize(8, 8));
 	m_toolBar.SetButtonSize(CSize(m_cxBar, m_cxBar));
 
-	if (m_toolTip.Create(m_hWnd, nullptr, nullptr, TTS_ALWAYSTIP) && m_toolTip.AddTool(m_hWnd))
+	if (m_toolTip.Create(m_hWnd, TTS_ALWAYSTIP) && m_toolTip.AddTool(m_hWnd))
 	{
 		m_toolTip.SetMaxTipWidth(SHRT_MAX);
 		m_toolTip.SetDelayTime(TTDT_AUTOPOP, SHRT_MAX);
@@ -137,45 +191,50 @@ LRESULT CItemsView::OnCreate(LPCREATESTRUCT)
 		return -1;
 	}
 
-	CShellItem item;
-	bool bHaveItem = false;
+	const auto open = [this](const CShellItem& item)
+	{
+		try
+		{
+			Navigate(item);
+			return true;
+		}
+		catch (const std::exception&)
+		{
+			return false;
+		}
+	};
 
 	// A folder on the command line wins over the one we were last in.
+	bool opened = false;
 	if (!g_strCmdLine.IsEmpty())
 	{
+		CShellItem item;
 		CShellDesktop desktop;
 
 		if (SUCCEEDED(ShellParseDisplayName(desktop, m_hWnd, g_strCmdLine, item)))
 		{
+			CString selectedPath;
 			if (ShellItemAttributes(item, SFGAO_LINK) & SFGAO_LINK)
 				desktop.ResolveLink(item);
 
 			if (!(ShellItemAttributes(item, SFGAO_FOLDER) & SFGAO_FOLDER))
+			{
+				item.GetPath(selectedPath);
 				item.StripToParent();
+			}
 
-			bHaveItem = true;
+			opened = open(item);
+			if (opened && !selectedPath.IsEmpty())
+				Reselect(selectedPath, true);
 		}
 	}
 
-	if (!bHaveItem && !ShellItemProfileRead(item, szSection, szFolderKey))
-		item = CShellItem(m_hWnd, CSIDL_DRIVES);
-
-	try
+	if (!opened)
 	{
-		Navigate(item);
-	}
-	catch (const std::exception&)
-	{
-		try
-		{
-			Navigate(CShellDesktopItem());
-		}
-		catch (const std::exception&)
-		{
-			// Nothing left to fall back to, and an exception must not leave
-			// OnCreate: it would unwind through the window procedure.
-			IW::Logging::Error(_T("Failed to open a folder"));
-		}
+		CShellItem remembered;
+		ShellItemProfileRead(remembered, szSection, szFolderKey);
+		if (!IW::OpenStartupFolder(m_hWnd, remembered, open))
+			IW::Logging::Error(_T("Failed to open a startup folder"));
 	}
 
 	UpdateBars();
@@ -184,20 +243,17 @@ LRESULT CItemsView::OnCreate(LPCREATESTRUCT)
 
 void CItemsView::OnDestroy()
 {
+	m_alive.reset();
+	m_dirChange.reset();
+	::InterlockedIncrement(&m_nThumbOrder);
 	m_items.clear();
-	SetMsgHandled(FALSE);
+	m_selection.Reset(0);
 }
 
 void CItemsView::OnSize(UINT, CSize)
 {
 	LayoutItems(false);
-	Invalidate();
-	SetMsgHandled(FALSE);
-}
-
-void CItemsView::OnSetFocus(CWindow)
-{
-	SetMsgHandled(FALSE);
+	Invalidate(FALSE);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -230,7 +286,7 @@ void CItemsView::Navigate(const CShellItem& item)
 void CItemsView::OpenFolder(std::unique_ptr<CFolder> pFolder)
 {
 	m_pFolder = std::move(pFolder);
-	Populate();
+	Populate({}, true);
 }
 
 void CItemsView::OnBrowseParent(UINT, int, CWindow)
@@ -303,11 +359,12 @@ void CItemsView::RebuildItems()
 		m_items.reserve(m_pFolder->m_mapThumbs.size());
 
 		for (const auto& entry : m_pFolder->m_mapThumbs)
-			m_items.push_back({entry.second.get(), entry.first, false});
+			m_items.push_back({entry.second.get(), entry.first, 0});
 	}
 
 	Sort();
 	CountLoaded();
+	UpdateThumbnailDecodeSize();
 }
 
 // Puts the focus back on strFocus after a reorder, and falls back to the first
@@ -341,6 +398,7 @@ void CItemsView::Reselect(const CString& strFocus, bool bTop)
 	}
 
 	LayoutItems(bTop);
+	EnsureVisible(m_selection.Focus());
 	Invalidate();
 
 	// Tells the frame the folder, the title, the address and the picture, all of
@@ -350,13 +408,13 @@ void CItemsView::Reselect(const CString& strFocus, bool bTop)
 	PrimeThumbChain();
 }
 
-void CItemsView::Populate()
+void CItemsView::Populate(const CString& strFocus, bool bTop)
 {
-	// Every queued thumbnail job names an item in the folder we are leaving.
+	// Every queued thumbnail job refers to the previous folder snapshot.
 	::InterlockedIncrement(&m_nThumbOrder);
 
 	RebuildItems();
-	Reselect(CString(), true);
+	Reselect(strFocus, bTop);
 
 	// Posted even when the folder has no path. The previous folder's watcher
 	// only stops when something is queued behind it, so skipping this left it
@@ -366,7 +424,9 @@ void CItemsView::Populate()
 	if (!m_pFolder || !m_pFolder->GetPath(strDirName))
 		strDirName.Empty();
 
-	auto watch = std::make_shared<CJobWatch>(this, strDirName, m_threadDirectory.WakeHandle(), m_alive);
+	m_dirChange = std::make_shared<CJobDirChanged>(this);
+	m_dirChange->SetOwner(m_alive);
+	auto watch = std::make_shared<CJobWatch>(strDirName, m_threadDirectory.WakeHandle(), m_dirChange);
 	watch->SetOwner(m_alive);
 	m_threadDirectory.Post(watch);
 }
@@ -392,7 +452,7 @@ void CItemsView::CountLoaded()
 	m_nLoaded = 0;
 
 	for (const CItem& item : m_items)
-		if (item.pThumb->m_bOpen && item.pThumb->m_Dib.IsOpen())
+		if (item.pThumb->m_Dib.IsOpen())
 			m_nLoaded++;
 }
 
@@ -422,7 +482,7 @@ void CItemsView::OnViewSort(UINT, int nID, CWindow)
 {
 	CWaitCursor wait;
 
-	const CString strFocus = FocusFileName();
+	const CString strFocus = FocusItemName();
 
 	SetSortCommand(nID);
 	Sort();
@@ -434,21 +494,37 @@ void CItemsView::OnViewRefresh(UINT, int, CWindow)
 	if (!m_pFolder)
 		return;
 
-	m_pFolder->Refresh();
-	Populate();
+	CWaitCursor wait;
+	const CString strFocus = FocusItemName();
+	try
+	{
+		// F5 must reload cached thumbnails even if the shell returns the same PIDLs.
+		m_pFolder = std::make_unique<CFolder>(m_hWnd, m_pFolder->m_Item);
+	}
+	catch (const std::exception& error)
+	{
+		IW::Logging::Warn("Refresh folder: %hs", error.what());
+		::MessageBeep(MB_OK);
+		return;
+	}
+	Populate(strFocus, false);
 }
 
-void CItemsView::OnDirChanged()
+void CItemsView::OnDirChanged(const CJobDirChanged& change)
 {
-	if (!m_pFolder)
+	if (&change != m_dirChange.get() || !m_pFolder)
 		return;
 
 	CWaitCursor wait;
 
-	const CString strFocus = FocusFileName();
+	const CString strFocus = FocusItemName();
 
+	if (!m_pFolder->Refresh())
+	{
+		IW::Logging::Warn("Could not read the changed folder");
+		return;
+	}
 	::InterlockedIncrement(&m_nThumbOrder);
-	m_pFolder->Refresh();
 
 	RebuildItems();
 	Reselect(strFocus, false);
@@ -462,11 +538,11 @@ CString CItemsView::DisplayName(int n, DWORD dwFlags) const
 	return m_pFolder->GetDisplayNameOf(*m_items[n].pThumb, dwFlags);
 }
 
-CString CItemsView::FocusFileName() const
+CString CItemsView::FocusItemName() const
 {
 	const int n = m_selection.Focus();
 
-	if (n < 0 || n >= static_cast<int>(m_items.size()) || !m_items[n].pThumb->IsLoadable())
+	if (n < 0 || n >= static_cast<int>(m_items.size()))
 		return CString();
 
 	return DisplayName(n, SHGDN_FORPARSING | SHGDN_INCLUDE_NONFILESYS);
@@ -528,29 +604,58 @@ CString CItemsView::StatusText() const
 //////////////////////////////////////////////////////////////////////////////
 // Geometry
 
+void CItemsView::SetThumbnailSize(int size, bool tracking)
+{
+	const int value = std::clamp(size, static_cast<int>(CThumbnailGrid::minEdge),
+	                             static_cast<int>(CThumbnailGrid::maxEdge));
+	if (value != m_nThumbnailSize)
+	{
+		m_nThumbnailSize = value;
+		if (!m_bDetail)
+		{
+			const int first = (m_pointScroll.y / m_grid.rowHeight) * m_grid.columns;
+			LayoutItems(false);
+			ScrollTo(0, m_grid.Cell(first).top);
+			Invalidate(FALSE);
+		}
+	}
+	if (!tracking)
+	{
+		UpdateThumbnailDecodeSize();
+		PrimeThumbChain();
+	}
+}
+
+void CItemsView::UpdateThumbnailDecodeSize()
+{
+	// Keep the original cache size in large folders; only enlarge decodes when they fit the budget.
+	constexpr size_t budget = 32 * 1024 * 1024;
+	const size_t budgetPerItem = budget / max(size_t{1}, m_items.size());
+	int edge = (m_nThumbnailSize + 31) / 32 * 32;
+	while (edge > IMAGE_X && static_cast<size_t>(edge) * edge * 4 > budgetPerItem)
+		edge -= 32;
+	m_nDecodeSize = max(IMAGE_X, edge);
+}
+
 void CItemsView::LayoutItems(bool bTop)
 {
 	const int nCount = static_cast<int>(m_items.size());
 
 	if (m_bDetail)
 	{
-		m_nThumbsX = 1;
 		m_nScrollLineY = m_nRowHeight;
 
 		SetScrollSize(0, nCount * m_nRowHeight, bTop ? j_top : j_none);
 	}
 	else
 	{
-		const CRect r = ViewRect();
+		CRect r;
+		GetClientRect(&r);
 
-		// Floor, not round: rounding up gives a grid wider than the view, which
-		// puts a horizontal bar under a grid that fits and clips the last column.
-		m_nThumbsX = max(r.Width() / THUMB_X, 1);
-		m_nScrollLineY = THUMB_Y;
-
-		const int cy = nCount > 0 ? (((nCount - 1) / m_nThumbsX) + 1) * THUMB_Y : 0;
-
-		SetScrollSize(m_nThumbsX * THUMB_X, cy, bTop ? j_top : j_centerx);
+		m_grid.Layout(max(0, r.Width() - m_sizeGutterMin.cx), nCount, m_nThumbnailSize, m_nRowHeight);
+		m_nScrollLineY = m_grid.rowHeight;
+		const int cy = nCount > 0 ? m_grid.Cell(nCount - 1).bottom : 0;
+		SetScrollSize(0, cy, bTop ? j_top : j_none);
 	}
 }
 
@@ -562,8 +667,7 @@ CRect CItemsView::ItemRect(int n) const
 		return CRect(0, n * m_nRowHeight, max(r.Width(), m_sizeScroll.cx), (n + 1) * m_nRowHeight);
 	}
 
-	const CPoint point((n % m_nThumbsX) * THUMB_X, (n / m_nThumbsX) * THUMB_Y);
-	return CRect(point, sizeThumb);
+	return m_grid.Cell(n);
 }
 
 int CItemsView::ItemFromPoint(CPoint point) const
@@ -573,21 +677,11 @@ int CItemsView::ItemFromPoint(CPoint point) const
 	if (point.x < 0 || point.y < 0)
 		return -1;
 
-	int n;
+	if (!m_bDetail)
+		return m_grid.Hit(point, nCount);
 
-	if (m_bDetail)
-	{
-		n = point.y / m_nRowHeight;
-	}
-	else
-	{
-		if (point.x >= m_nThumbsX * THUMB_X)
-			return -1;
-
-		n = (point.x / THUMB_X) + ((point.y / THUMB_Y) * m_nThumbsX);
-	}
-
-	return (n < 0 || n >= nCount) ? -1 : n;
+	const int n = point.y / m_nRowHeight;
+	return n < nCount ? n : -1;
 }
 
 void CItemsView::InvalidateItem(int n)
@@ -598,12 +692,7 @@ void CItemsView::InvalidateItem(int n)
 	CRect r = ItemRect(n);
 	r.OffsetRect(-m_pointScroll);
 
-	// The caption is drawn DT_NOCLIP over a wash inflated by THUMB_PADDING, and
-	// the focused item's wraps upwards out of the cell.
-	if (!m_bDetail)
-		r.InflateRect(THUMB_PADDING, THUMB_Y, THUMB_PADDING, THUMB_PADDING);
-
-	InvalidateRect(r);
+	InvalidateRect(r, FALSE);
 }
 
 void CItemsView::EnsureVisible(int n)
@@ -660,14 +749,50 @@ void CItemsView::OnEditInvertSelection(UINT, int, CWindow)
 
 void CItemsView::OnNextImage(UINT, int, CWindow)
 {
-	const int n = m_selection.Focus();
-	Select(n < 0 ? 0 : n + 1, false, false);
+	StepPhoto(1);
 }
 
 void CItemsView::OnPreviousImage(UINT, int, CWindow)
 {
-	const int n = m_selection.Focus();
-	Select(n <= 0 ? 0 : n - 1, false, false);
+	StepPhoto(-1);
+}
+
+bool CItemsView::CanPreview(int index) const
+{
+	const auto& thumb = *m_items[index].pThumb;
+	if (!thumb.IsLoadable()) return false;
+	if (thumb.m_Dib.IsOpen()) return true;
+	const auto name = DisplayName(index, SHGDN_FORPARSING | SHGDN_INCLUDE_NONFILESYS);
+	const auto format = libfiles::info(libfiles::file_type_from_extension(::PathFindExtensionA(name))).image;
+	return libfiles::can_decode(format) || libfiles::can_decode_document(format);
+}
+
+void CItemsView::StepPhoto(int direction)
+{
+	const int count = static_cast<int>(m_items.size());
+	const int focus = m_selection.Focus();
+	const int start = focus >= 0 ? focus + direction : direction > 0 ? 0 : count - 1;
+	for (int i = start; i >= 0 && i < count; i += direction)
+	{
+		if (!CanPreview(i)) continue;
+		Select(i, false, false);
+		return;
+	}
+}
+
+bool CItemsView::FocusPhoto()
+{
+	const int focus = m_selection.Focus();
+	if (focus < 0 || !CanPreview(focus)) return false;
+	if (m_selection.Count() != 1 || !m_selection.Contains(focus)) Select(focus, false, false);
+	return true;
+}
+
+void CItemsView::ActivateFocus()
+{
+	const int focus = m_selection.Focus();
+	if (focus >= 0 && !OpenFolderItem(focus) && CanPreview(focus))
+		::SendMessage(GetTopLevelParent(), WM_COMMAND, ID_MODE_FULLSCREEN, 0);
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -706,11 +831,10 @@ void CItemsView::OnLButtonDblClk(UINT, CPoint point)
 		return;
 
 	Select(n, false, false);
-	OpenItem(n);
+	ActivateFocus();
 }
 
-// Double click. A folder is walked into; a file is already on screen.
-void CItemsView::OpenItem(int n)
+bool CItemsView::OpenFolderItem(int n)
 {
 	CThumb* pThumb = m_items[n].pThumb;
 
@@ -727,15 +851,18 @@ void CItemsView::OpenItem(int n)
 	}
 
 	if (!bFolder)
-		return;
+		return false;
 
 	try
 	{
 		Navigate(item);
 	}
-	catch (const std::exception&)
+	catch (const std::exception& error)
 	{
+		IW::Logging::Warn("Open focused folder: %hs", error.what());
+		::MessageBeep(MB_OK);
 	}
+	return true;
 }
 
 void CItemsView::OnMouseMove(UINT, CPoint point)
@@ -754,15 +881,14 @@ void CItemsView::OnMouseMove(UINT, CPoint point)
 		}
 	}
 
-	SetMsgHandled(FALSE);
 }
 
-void CItemsView::OnKeyDown(UINT nChar, UINT, UINT)
+bool CItemsView::OnKeyDown(UINT nChar)
 {
 	const int nCount = static_cast<int>(m_items.size());
 
 	if (nCount == 0)
-		return;
+		return false;
 
 	const bool bControl = (::GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
 	const bool bShift = (::GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -780,21 +906,22 @@ void CItemsView::OnKeyDown(UINT nChar, UINT, UINT)
 		case VK_PRIOR:
 		case VK_NEXT:
 			Select(0, bControl, bShift);
-			return;
+			return true;
 		default:
 			break;
 		}
 	}
 
 	const CRect r = ViewRect();
-	const int nRow = m_bDetail ? m_nRowHeight : THUMB_Y;
-	const int nPage = max(r.Height() / nRow, 1) * m_nThumbsX;
+	const int nRow = m_bDetail ? m_nRowHeight : m_grid.rowHeight;
+	const int columns = m_bDetail ? 1 : m_grid.columns;
+	const int nPage = max(r.Height() / nRow, 1) * columns;
 
 	switch (nChar)
 	{
 	case VK_RETURN:
-		if (nFocus >= 0)
-			OpenItem(nFocus);
+		if (!bControl && !bShift)
+			ActivateFocus();
 		break;
 	case VK_END:
 		Select(nCount - 1, bControl, bShift);
@@ -806,14 +933,14 @@ void CItemsView::OnKeyDown(UINT nChar, UINT, UINT)
 		Select(nFocus - 1, bControl, bShift);
 		break;
 	case VK_UP:
-		Select(nFocus - m_nThumbsX, bControl, bShift);
+		Select(nFocus - columns, bControl, bShift);
 		break;
 	case VK_RIGHT:
 		Select(nFocus + 1, bControl, bShift);
 		break;
 	case VK_DOWN:
 		// Reach a short final row from a column past its end.
-		Select(min(nFocus + m_nThumbsX, nCount - 1), bControl, bShift);
+		Select(min(nFocus + columns, nCount - 1), bControl, bShift);
 		break;
 	case VK_PRIOR:
 		Select(max(nFocus - nPage, 0), bControl, bShift);
@@ -822,9 +949,9 @@ void CItemsView::OnKeyDown(UINT nChar, UINT, UINT)
 		Select(min(nFocus + nPage, nCount - 1), bControl, bShift);
 		break;
 	default:
-		SetMsgHandled(FALSE);
-		break;
+		return false;
 	}
+	return true;
 }
 
 //////////////////////////////////////////////////////////////////////////////
@@ -835,25 +962,24 @@ void CItemsView::OnKeyDown(UINT nChar, UINT, UINT)
 // registered for the file type, which is third-party code in this process.
 void CItemsView::OnEditCopy(UINT, int, CWindow)
 {
-	std::vector<TCHAR> names;
+	std::vector<wchar_t> names;
 
 	for (const int n : m_selection.Selected())
 	{
-		const CString str = DisplayName(n, SHGDN_FORPARSING | SHGDN_INCLUDE_NONFILESYS);
+		const auto path = WideText(DisplayName(n, SHGDN_FORPARSING | SHGDN_INCLUDE_NONFILESYS));
 
-		if (str.IsEmpty() || !::PathFileExists(str))
+		if (path.empty() || !::PathFileExistsW(path.c_str()))
 			continue;
 
-		names.insert(names.end(), static_cast<LPCTSTR>(str),
-		             static_cast<LPCTSTR>(str) + str.GetLength() + 1);
+		names.insert(names.end(), path.c_str(), path.c_str() + path.size() + 1);
 	}
 
 	if (names.empty())
 		return;
 
-	names.push_back(_T('\0')); // the second null that ends the list
+	names.push_back(L'\0'); // the second null that ends the list
 
-	const size_t nBytes = sizeof(DROPFILES) + names.size() * sizeof(TCHAR);
+	const size_t nBytes = sizeof(DROPFILES) + names.size() * sizeof(wchar_t);
 	const HGLOBAL hMem = ::GlobalAlloc(GMEM_MOVEABLE, nBytes);
 
 	if (hMem == nullptr)
@@ -872,9 +998,9 @@ void CItemsView::OnEditCopy(UINT, int, CWindow)
 
 	ZeroMemory(pDrop, nBytes);
 	pDrop->pFiles = sizeof(DROPFILES);
-	pDrop->fWide = (sizeof(TCHAR) == sizeof(WCHAR));
+	pDrop->fWide = TRUE;
 	CopyMemory(reinterpret_cast<BYTE*>(pDrop) + sizeof(DROPFILES),
-	           names.data(), names.size() * sizeof(TCHAR));
+	           names.data(), names.size() * sizeof(wchar_t));
 	::GlobalUnlock(hMem);
 
 	if (!::OpenClipboard(m_hWnd))
@@ -962,20 +1088,13 @@ void CItemsView::OnViewMode(UINT, int nID, CWindow)
 // WM_INITMENUPOPUP.
 void CItemsView::OnItemsOptions(UINT, int, CWindow)
 {
-	CMenu menu;
-
-	if (!menu.LoadMenu(IDR_MAINFRAME))
-		return;
-
-	CMenuHandle popup = menu.GetSubMenu(kMenuView);
-
 	CRect r;
 	m_toolBar.GetRect(ID_ITEMS_OPTIONS, &r);
 	m_toolBar.ClientToScreen(&r);
 
 	// The strip sits in the bottom right corner, so the menu grows up and left.
-	popup.TrackPopupMenu(TPM_RIGHTALIGN | TPM_BOTTOMALIGN | TPM_LEFTBUTTON,
-	                     r.left, r.top, GetTopLevelParent());
+	TrackResourceMenu(IDR_MAINFRAME, kMenuView, TPM_RIGHTALIGN | TPM_BOTTOMALIGN | TPM_LEFTBUTTON,
+	                  r.TopLeft(), GetTopLevelParent());
 }
 
 LRESULT CItemsView::OnToolTipText(LPNMHDR pnmh)
@@ -1036,12 +1155,12 @@ LRESULT CItemsView::OnToolTipText(LPNMHDR pnmh)
 //////////////////////////////////////////////////////////////////////////////
 // Thumbnail loading
 
-void CItemsView::OnThumbJobComplete(CDib* pDib, UINT uKey)
+void CItemsView::OnThumbJobComplete(CDib* pDib, UINT uKey, int edge)
 {
 	if (m_nThumbJobsInFlight > 0)
 		m_nThumbJobsInFlight -= 1;
 
-	OnThumbLoaded(pDib, uKey);
+	OnThumbLoaded(pDib, uKey, edge);
 }
 
 // Starts a run only when one is not already going. The chain carries exactly
@@ -1050,10 +1169,10 @@ void CItemsView::OnThumbJobComplete(CDib* pDib, UINT uKey)
 void CItemsView::PrimeThumbChain()
 {
 	if (m_nThumbJobsInFlight == 0)
-		OnThumbLoaded(nullptr, 0);
+		OnThumbLoaded(nullptr, 0, 0);
 }
 
-void CItemsView::OnThumbLoaded(CDib* pDib, UINT uKey)
+void CItemsView::OnThumbLoaded(CDib* pDib, UINT uKey, int edge)
 {
 	const int nCount = static_cast<int>(m_items.size());
 
@@ -1071,9 +1190,10 @@ void CItemsView::OnThumbLoaded(CDib* pDib, UINT uKey)
 			// folder still owns rather than the address the job was posted with.
 			CThumb* pThumb = m_items[i].pThumb;
 
-			pThumb->m_Dib.Set(pDib);
-			pThumb->m_bOpen = TRUE;
-			m_nLoaded++;
+			if (!pThumb->m_Dib.IsOpen())
+				m_nLoaded++;
+			pThumb->m_Dib.Attach(*pDib);
+			pThumb->m_nDecodedEdge = edge;
 
 			InvalidateItem(i);
 			break;
@@ -1083,22 +1203,23 @@ void CItemsView::OnThumbLoaded(CDib* pDib, UINT uKey)
 	// Find the next item to load, starting from the top of the view.
 	const int nFirstOnScreen = m_bDetail
 		                           ? (m_pointScroll.y / m_nRowHeight)
-		                           : (m_pointScroll.y / THUMB_Y) * m_nThumbsX;
+		                           : (m_pointScroll.y / m_grid.rowHeight) * m_grid.columns;
 
 	for (int i = 0; i < nCount; i++)
 	{
 		const int j = (i + nFirstOnScreen) % nCount;
 
-		if (m_items[j].bScanned)
+		if (m_items[j].nAttemptedEdge >= m_nDecodeSize)
 			continue;
 
 		CThumb* pThumb = m_items[j].pThumb;
 		CString strName;
 
-		if (pThumb != nullptr && !pThumb->m_bOpen && pThumb->IsLoadable() &&
+		if (pThumb != nullptr && pThumb->m_nDecodedEdge < m_nDecodeSize && pThumb->IsLoadable() &&
+			(!pThumb->m_Dib.IsOpen() || pThumb->m_Dib.OriginalSize() != pThumb->m_Dib.Size()) &&
 			!(strName = DisplayName(j, SHGDN_FORPARSING | SHGDN_INCLUDE_NONFILESYS)).IsEmpty())
 		{
-			auto job = std::make_shared<CJobThumb>(this, strName, m_items[j].uKey, &m_nThumbOrder);
+			auto job = std::make_shared<CJobThumb>(this, strName, m_items[j].uKey, &m_nThumbOrder, m_nDecodeSize);
 			job->SetOwner(m_alive);
 
 			// Only mark the slot scanned if the job is actually queued. On a
@@ -1107,14 +1228,14 @@ void CItemsView::OnThumbLoaded(CDib* pDib, UINT uKey)
 			if (m_threadLoader.Post(job))
 			{
 				m_nThumbJobsInFlight += 1;
-				m_items[j].bScanned = true;
+				m_items[j].nAttemptedEdge = m_nDecodeSize;
 				break;
 			}
 
 			return;
 		}
 
-		m_items[j].bScanned = true;
+		m_items[j].nAttemptedEdge = m_nDecodeSize;
 	}
 }
 
@@ -1124,7 +1245,7 @@ void CItemsView::OnThumbLoaded(CDib* pDib, UINT uKey)
 void CItemsView::OnDraw(CDibDC& ddc)
 {
 	CRect rectClient = ViewRect();
-	CFontHandle* pOldFont = ddc.SelectObject(m_font);
+	const auto oldFont = ddc.SelectFont(m_font ? m_font : DefaultGuiFont());
 
 	const int nCount = static_cast<int>(m_items.size());
 
@@ -1141,11 +1262,11 @@ void CItemsView::OnDraw(CDibDC& ddc)
 
 		ddc.SetTextColor(RGB(255, 255, 255));
 
-		const int nRow = m_bDetail ? m_nRowHeight : THUMB_Y;
-		const int nPerRow = m_bDetail ? 1 : m_nThumbsX;
+		const int nRow = m_bDetail ? m_nRowHeight : m_grid.rowHeight;
+		const int nPerRow = m_bDetail ? 1 : m_grid.columns;
 
 		int nFirst = (rectClip.top / nRow) * nPerRow;
-		int nLast = (rectClip.bottom / nRow + 1) * nPerRow + (nPerRow - 1);
+		int nLast = ((rectClip.bottom - 1) / nRow + 1) * nPerRow - 1;
 
 		nFirst = max(nFirst, 0);
 		nLast = min(nLast, nCount - 1);
@@ -1159,8 +1280,7 @@ void CItemsView::OnDraw(CDibDC& ddc)
 		}
 	}
 
-	if (pOldFont != nullptr)
-		ddc.SelectObject(*pOldFont);
+	if (oldFont) ddc.SelectFont(oldFont);
 }
 
 void CItemsView::DrawThumbnail(CDibDC& ddc, int i)
@@ -1169,55 +1289,45 @@ void CItemsView::DrawThumbnail(CDibDC& ddc, int i)
 	CRect rectThumb = ItemRect(i);
 	const bool bFocus = (i == m_selection.Focus());
 
-	const UINT uTextStyle = DT_NOCLIP | DT_CENTER |
-		(bFocus ? DT_WORDBREAK : (DT_SINGLELINE | DT_END_ELLIPSIS));
-
-	const CString strName = DisplayName(i);
-
-	CRect rectText(0, 0, IMAGE_X, 0);
-	ddc.DrawText(strName, -1, rectText, DT_CALCRECT | uTextStyle);
-
-	// DT_CALCRECT widens a single line to the whole string, leaving
-	// DT_END_ELLIPSIS nothing to trim.
-	if (rectText.Width() > IMAGE_X)
-		rectText.right = rectText.left + IMAGE_X;
-
-	rectText.OffsetRect(rectThumb.left + (THUMB_X - rectText.Width()) / 2,
-	                    rectThumb.bottom - (rectText.Height() + THUMB_PADDING));
-
-	CRect rectTextBack(rectText.TopLeft() - sizePadding,
-	                   rectText.Size() + sizePadding + sizePadding);
-
-	if (pThumb->m_bOpen && pThumb->m_Dib.IsOpen())
+	if (pThumb->m_Dib.IsOpen())
 	{
-		ddc.Draw(pThumb->m_Dib, rectThumb.CenterPoint() - pThumb->m_Dib.HalfSize());
+		CDib& image = pThumb->m_Dib;
+		const CRect bounds = ThumbnailImageRect(rectThumb, image.OriginalSize(), m_grid.edge);
+		if (bounds.Size() == image.Size())
+			ddc.Draw(image, bounds.TopLeft());
+		else
+			ddc.Draw(image, bounds);
 	}
 	else
 	{
-		DrawItemIcon(ddc, i, rectThumb.CenterPoint() - CSize(16, 16), false);
+		const CRect icon = ThumbnailImageRect(rectThumb, CSize(32, 32), m_grid.edge);
+		// A shell icon cannot shrink with the cell.
+		if (icon.Width() == 32)
+			DrawItemIcon(ddc, i, icon.TopLeft(), false);
 	}
 
 	if (pThumb->m_ulAttribs & SFGAO_GHOSTED)
 	{
 		CRect r(0, 0, 1, 1);
-		ddc.DrawText(_T("Hidden"), -1, r, DT_CALCRECT | DT_NOCLIP | DT_SINGLELINE);
-		r += rectThumb.CenterPoint() - CSize(r.Width() / 2, r.Height() / 2);
+		ddc.DrawText(_T("Hidden"), -1, r, DT_CALCRECT | DT_SINGLELINE);
+		r = ThumbnailImageRect(rectThumb, r.Size(), m_grid.edge);
 
 		ddc.Draw(r, 0x60000000);
-		ddc.DrawText(_T("Hidden"), -1, r, DT_NOCLIP | DT_SINGLELINE);
+		ddc.DrawText(_T("Hidden"), -1, r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
 	}
 
-	ddc.Draw(rectTextBack, 0x40000000);
-	ddc.DrawText(strName, -1, rectText, uTextStyle);
+	CRect caption(rectThumb.left + THUMB_PADDING, rectThumb.top + m_grid.CellWidth(),
+	              rectThumb.right - THUMB_PADDING, rectThumb.bottom - THUMB_PADDING);
+	ddc.Draw(caption, 0x40000000);
+	ddc.DrawText(DisplayName(i), -1, caption, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
 
 	if (m_selection.Contains(i))
 		ddc.Draw(rectThumb, 0x40008080);
 
 	if (bFocus)
 	{
-		CBrush brush;
-		brush.CreateSolidBrush(RGB(0, 255, 0));
-		ddc.FrameRect(rectThumb, brush);
+		::SetDCBrushColor(ddc, RGB(0, 255, 0));
+		ddc.FrameRect(rectThumb, static_cast<HBRUSH>(::GetStockObject(DC_BRUSH)));
 	}
 }
 
@@ -1233,9 +1343,8 @@ void CItemsView::DrawDetailRow(CDibDC& ddc, int i)
 
 	if (i == m_selection.Focus())
 	{
-		CBrush brush;
-		brush.CreateSolidBrush(RGB(0, 255, 0));
-		ddc.FrameRect(rectRow, brush);
+		::SetDCBrushColor(ddc, RGB(0, 255, 0));
+		ddc.FrameRect(rectRow, static_cast<HBRUSH>(::GetStockObject(DC_BRUSH)));
 	}
 
 	DrawItemIcon(ddc, i, CPoint(rectRow.left + 3, rectRow.top + (rectRow.Height() - 16) / 2), true);
@@ -1248,26 +1357,27 @@ void CItemsView::DrawDetailRow(CDibDC& ddc, int i)
 	CRect r(rectRow);
 	r.left += 24;
 	r.right = r.left + cxName;
-	ddc.DrawText(DisplayName(i), -1, r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOCLIP);
+	ddc.DrawText(DisplayName(i), -1, r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
 
 	CShellItem item;
 	item.Cat(m_pFolder->m_Item, *pThumb);
 
 	r.left = r.right + 8;
 	r.right = r.left + cxType;
-	ddc.DrawText(ShellItemType(item), -1, r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOCLIP);
+	ddc.DrawText(ShellItemType(item), -1, r, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
 
 	r.left = r.right + 8;
 	r.right = r.left + cxSize;
 
 	if (!pThumb->IsFolder())
 		ddc.DrawText(FormatFileSize(pThumb->m_sizeFile), -1, r,
-		             DT_SINGLELINE | DT_VCENTER | DT_RIGHT | DT_NOCLIP);
+		             DT_SINGLELINE | DT_VCENTER | DT_RIGHT);
 
 	r.left = r.right + 8;
 	r.right = rectRow.right;
-	ddc.DrawText(FormatDate(pThumb->m_timeFile), -1, r,
-	             DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOCLIP);
+	if (r.right > r.left)
+		ddc.DrawText(FormatDate(pThumb->m_timeFile), -1, r,
+		             DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
 }
 
 void CItemsView::DrawItemIcon(CDibDC& ddc, int i, CPoint point, bool bSmall)

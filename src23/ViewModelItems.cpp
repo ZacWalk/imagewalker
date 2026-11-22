@@ -1015,7 +1015,7 @@ bool IW::Folder::Init(const CShellItem& itemFull, CShellFolder& pNewFolder)
 
 		HRESULT hr = enumitem.Create(GetMainWindow(), pNewFolder, dwFlags);
 
-		if (FAILED(hr) || enumitem == nullptr)
+		if (FAILED(hr))
 		{
 			return false;
 		}
@@ -1026,7 +1026,7 @@ bool IW::Folder::Init(const CShellItem& itemFull, CShellFolder& pNewFolder)
 		LPITEMIDLIST pItem = nullptr;
 		ULONG ulFetched = 0;
 
-		while (enumitem->Next(1, &pItem, &ulFetched) == S_OK)
+		while (enumitem && (hr = enumitem->Next(1, &pItem, &ulFetched)) == S_OK)
 		{
 			FolderItemPtr pThumb = new RefObj<FolderItem>;
 
@@ -1037,6 +1037,8 @@ bool IW::Folder::Init(const CShellItem& itemFull, CShellFolder& pNewFolder)
 			if (nIcon != -1) pThumb->_nImage = nIcon;
 			thumbsNew.push_back(pThumb);
 		}
+
+		if (FAILED(hr)) return false;
 
 		// Swap over
 		_bHasSelection = false;

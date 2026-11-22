@@ -64,6 +64,22 @@ namespace iw::ui
 		     platform::system_color(platform::SystemColor::shadow));
 	}
 
+	void CanvasRenderer::scrollbar_mark(const ScrollBar& scroll, const int contentPosition) const
+	{
+		if (!scroll.visible()) return;
+		const auto& track = scroll.track;
+		const auto extent = scroll.vertical() ? track.height : track.width;
+		const auto thickness = (std::min)(3, extent);
+		const auto position = std::clamp(static_cast<int>(static_cast<std::int64_t>(
+															  std::clamp(contentPosition, 0, scroll.contentExtent)) *
+		                                                  extent / scroll.contentExtent) -
+		                                     thickness / 2,
+		                                 0, extent - thickness);
+		fill(scroll.vertical() ? app::recti{track.x, track.y + position, track.width, thickness}
+		                       : app::recti{track.x + position, track.y, thickness, track.height},
+		     platform::system_color(platform::SystemColor::highlight));
+	}
+
 	void CanvasRenderer::clip(const app::recti rect) const
 	{
 		draw_.clip(rect);

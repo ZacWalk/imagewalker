@@ -57,6 +57,16 @@ jobs:
       - name: Validate help links and strict CHM build
         run: .\dd.ps1 check-help --yes
 
+      - name: Build and test the x86 release
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -products '*' -version '[18.0,19.0)' -requires Microsoft.VisualStudio.Component.VC.ATL -property installationPath
+          if (-not $vs) { throw 'Visual Studio 2026 with ATL is required.' }
+          $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvarsall.bat'
+          & $env:ComSpec /d /c "call `"$vcvars`" x64_x86 >nul && cmake --preset x86-release && cmake --build --preset x86-release --parallel"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ctest --preset x86-release -L headless --no-tests=error
+
       - name: Preserve validation diagnostics
         if: always()
         uses: actions/upload-artifact@v4
